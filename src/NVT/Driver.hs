@@ -1,6 +1,8 @@
 {-# LANGUAGE CPP #-}
 module NVT.Driver where
 
+import NVT.FilterAssembly
+
 import Control.Monad
 import System.FilePath
 import System.Directory
@@ -24,7 +26,10 @@ data Opts =
   , oOutputFile :: !FilePath
   , oSaveCuBin :: !FilePath -- if input is .cu, this is the .cubin
   , oSavePtx :: !FilePath
+--  , oUseCuobjdump :: !Bool -- versus nvdisasm
   , oInputFile :: !FilePath
+  , oSourceMapping :: !Bool
+  , oFilterAssembly :: !Bool
   , oExtraArgs :: [String]
   } deriving Show
 dft_opts :: Opts
@@ -36,11 +41,16 @@ dft_opts =
   , oSaveCuBin = ""
   , oSavePtx = ""
   , oInputFile = ""
+--  , oUseCuobjdump = False
+  , oSourceMapping = False
+  , oFilterAssembly = True
   , oExtraArgs = []
   }
 
 -------------------------------------------------------------------------------
---    .cu -> .cubin -> .ptx -> .sass
+--    .cu -> .cubin -> .ptx -> .sass     nvcc -cubin =>
+--                     .ptx -> .sass
+--           .cubin ->      -> .sass
 spec :: PA.Spec Opts
 spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             [ -- options
@@ -50,12 +60,23 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.optF spec "v2" "debug"
                 "the verbosity level" ""
                 (\o -> (o {oVerbosity = 2})) # PA.OptAttrAllowUnset
+            , PA.optF spec "" "line-mappings"
+                "enables line mappings" ""
+                (\o -> (o {oSourceMapping = True})) # PA.OptAttrAllowUnset
+            , PA.optF spec "" "no-filter-asm"
+                "does not filter assembly code" ""
+                (\o -> (o {oFilterAssembly = False})) # PA.OptAttrAllowUnset
             , PA.opt spec "o" "output" "PATH"
                 "sets the output file" "(defaults to stdout)"
                 (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
             , PA.opt spec "a" "arch" "ARCH"
                 "sets the device architecture (e.g. -a=sm_72)" ""
                 (\a o -> (o {oArch = a}))
+
+            , PA.opt spec "" "save-cubin" "PATH"
+                "saves the intermediate .cubin file to this path" ""
+                (\f o -> (o {oSaveCuBin = f})) # PA.OptAttrAllowUnset
+
             , PA.opt spec "X" "" "ANYTHING"
                 "sets an extra argument for the tool (e.g. -X-Ic:\\foo\\bar)" ""
                 (\a o -> (o {oExtraArgs = oExtraArgs o ++ [a]})) # PA.OptAttrAllowUnset
@@ -133,6 +154,7 @@ runWithOpts os = processFile (oInputFile os)
           let mkArgs targ =
                 ["-arch",oArch os,targ] ++
                 cl_bin_dir ++
+                (if oSourceMapping os then ["-lineinfo"] else[]) ++
                 oExtraArgs os ++
                 -- cuda_sample_incs_dir ++
                 [oInputFile os]
@@ -159,14 +181,29 @@ runWithOpts os = processFile (oInputFile os)
             S.writeFile (oSavePtx os) bs
             removeFile ptx_file
 
-          let nv_cuod_args = ["--dump-sass", cubin_file]
-          cuod_out <- runCudaTool "cuobjdump" nv_cuod_args
-          emitOutput cuod_out
+          -- let nv_cuod_args = ["--dump-sass", cubin_file]
+          -- cuod_out <- runCudaTool "cuobjdump" nv_cuod_args
+          let nvdis_args =
+                [
+                  "--print-code" -- print text sections only
+                , "--print-instruction-encoding"
+                , "--print-line-info"
+                , "--no-vliw" -- disables the {...}
+                , cubin_file
+                ]
+          nvdis_out <- runCudaTool "nvdisasm" nvdis_args
+
+          cuod_res <- runCudaTool "cuobjdump" ["--dump-resource-usage", cubin_file]
+
+          let filterAsm
+                | oFilterAssembly os = filterAssembly (oArch os)
+                | otherwise = id
+          emitOutput (filterAsm nvdis_out ++ cuod_res)
           removeFile cubin_file
 
 
         processSassFile :: FilePath -> IO ()
-        processSassFile fp = error "processSassFile: not for a bit"
+        processSassFile fp = error "processSassFile: todo"
 
         emitOutput :: String -> IO ()
         emitOutput
