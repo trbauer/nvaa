@@ -45,8 +45,8 @@ filterAssembly arch = processLns . zip [1..] . lines
             case mw64 of
               Just w64 -> parseInstGroup deps lns
                 where deps = [
-                          w64 .&. 0x000000000001FFFF
-                        , (w64`shiftR`21) .&. 0x000000000001FFFF
+                           w64                .&. 0x000000000001FFFF
+                        , (w64`shiftR`21)     .&. 0x000000000001FFFF
                         , (w64`shiftR`(2*21)) .&. 0x000000000001FFFF
                         ]
           where s = dropWhile isSpace lnstr

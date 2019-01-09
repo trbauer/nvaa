@@ -14,11 +14,12 @@ collectSampleIsa os = body
   where body = do
           when (null (oArch os)) $
             die "options need arch set"
-
-          -- let dir = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\v9.0\\0_Simple"
+          --
           createDirectoryIfMissing True $ "samples/" ++ oArch os
-
-          let dir = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\v10.0"
+          --
+          -- let dir = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\v10.0"
+          dir <- findCudaSamplesDir
+          --
           ss <- getSubPaths dir -- e.g. 0_Simple, 1_Utilities, ...
           mapM_ walkSampleSet ss
 
@@ -47,9 +48,9 @@ collectSampleIsa os = body
               handler e = do
                 print e
                 return ()
-
-          samples_inc_dir <- findCudaSamplesDir
-
+          --
+          samples_inc_dir <- (++"\\common\\inc") <$> findCudaSamplesDir
+          --
           runWithOpts
             (os{ oOutputFile = sass_output
                , oSaveCuBin = cubin_output
@@ -58,9 +59,6 @@ collectSampleIsa os = body
                , oInputFile = f}) `catch` handler
           copyFile f $ "samples/" ++ oArch os ++ "/" ++ takeFileName f
           walkCuFiles fs
-
-
---        /*0008*/     MOV R1, c[0x0][0x20];      /* 0x4c98078000870001 */
 
 
 findCudaSamplesDir :: IO FilePath
@@ -73,5 +71,39 @@ findCudaSamplesDir = tryPathVers ["v10.0","v9.1","v9.0","v8.0"]
 
         mkCudaSampleDir :: String -> FilePath
         mkCudaSampleDir ver =
-          "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\" ++ ver ++ "\\common\\inc"
+          "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\" ++ ver
+
+-- "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.0\bin\"
+
+collectLibrarySampleIsa :: Opts -> IO ()
+collectLibrarySampleIsa os = body
+  where body = do
+          when (null (oArch os)) $
+            die "options need arch set"
+
+          cuod_exe <- findCudaTool "cuobjdump"
+          let dll_dir = takeDirectory cuod_exe
+          dumpLibs cuod_exe dll_dir
+
+        dumpLibs :: IO ()
+        dumpLibs cuod_exe dll_dir = body
+          where body = do
+                  putStrLn $ "EMITTING LIBS FROM: " ++ dll_dir
+                  -- dumpLib "cublas64_100.dll" -- 65 MB
+                  -- dumpLib "cufft64_100.dll" -- 99 MB
+                  dumpLib "curand64_100.dll" -- 48 MB
+                  -- dumpLib "cusolver64_100.dll" -- 125 MB
+                  -- dumpLib "cusparse64_100.dll" -- 55 MB
+                  -- dumpLib "nvgraph64_100.dll" -- 68 MB
+
+                dumpLib lib = do
+                  let full_path = dll_dir ++ "/" ++ lib
+                  z <- doesFileExist full_path
+                  if not z then putStrLn (lib ++ ": file not found in dir: SKIPPING")
+                    else do
+                      out <- readProcess cuod_exe ["--list-elf",full_path] ""
+                      putStr out
+                      filter (("." ++ osArch os ++ ".")`isInfixOf`) (lines out)
+
+
 

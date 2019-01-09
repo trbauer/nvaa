@@ -133,13 +133,17 @@ runWithOpts os = processFile (oInputFile os)
           case takeExtension fp of
             ".cu" -> processCuFile fp
             ".cubin" -> processCubinFile fp
-            -- ".ptx" -> processPtxFile fp  (use NVCC)
+            ".ptx" -> processPtxFile fp  -- (use NVCC)
           -- TODO: support .ptx (ptx -> .cubin -> .nva)
             ".sass" -> processSassFile fp
           -- TODO: support .nva (ELF -> .cubin)
           -- TODO: figure out how to turn a .cubin into a .obj or .exe and run it
           --       is there an API to load a .cubin with?
             _ -> fatal (takeFileName fp ++ ": unable to handle file by extension")
+
+        processPtxFile :: FilePath -> IO ()
+        processPtxFile = processCuFile
+
 
         -- foo.cu --> $temp.cubin and disassembles it that file
         processCuFile :: FilePath -> IO ()
