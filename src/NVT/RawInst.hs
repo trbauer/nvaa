@@ -171,7 +171,7 @@ tryParseInstructionLines ln0 ln1 =
 
         parseSyntax :: Int -> String -> Maybe RawInst
         parseSyntax off sfx0 = do
-          (ri0,sfx) <- parseRawInstBody sfx0
+          (ri0,sfx) <- parseRawInstNoSuffix sfx0
           let ri =
                 RawInst {
                   riOffset = off
@@ -198,14 +198,38 @@ parseSlashStarHexWord ('/':'*':ds) =
       _ -> Nothing
   _ -> Nothing
 
+skipWs :: String -> String
+skipWs [] = []
+skipWs ('/':'*':sfx) = skipComment sfx
+  where skipComment [] = []
+        skipComment ('*':'/':sfx) = skipWs sfx
+        skipComment (_:cs) = skipComment cs
+skipWs (c:cs)
+  | isSpace c = skipWs cs
+  | otherwise = c:cs
 
-parseRawInstBody :: String -> Maybe (RawInst,String)
-parseRawInstBody = parseSyntax
-  where parseSyntax :: String -> Maybe (RawInst,String)
-        parseSyntax =
+parseRawInst :: String -> Maybe (RawInst,String)
+parseRawInst =  fmap f . parseRawInstNoSuffix
+  where f (ri,sfx) = (ri,skipWs sfx)
+
+-- parses a raw instruction, but doesn't skip whitespace at the end
+parseRawInstNoSuffix :: String -> Maybe (RawInst,String)
+parseRawInstNoSuffix = parseOffsetOpt . dropWhile isSpace
+  where parseOffsetOpt :: String -> Maybe (RawInst,String)
+        parseOffsetOpt s =
+          case s of
+            '/':'*':sfx ->
+              case span isHexDigit sfx of
+                (digs,'*':'/':sfx)
+                  | null digs -> parseSyntax 0 (skipWs sfx)
+                  | otherwise -> parseSyntax (read ("0x"++digs)) (skipWs sfx)
+            _ -> parseSyntax 0 s
+
+        parseSyntax :: Int -> String -> Maybe (RawInst,String)
+        parseSyntax off =
             parsePredication $
               RawInst {
-                riOffset = 0
+                riOffset = off
               , riPredication = ""
               , riMnemonic = ""
               , riOperands = []
@@ -213,36 +237,39 @@ parseRawInstBody = parseSyntax
               }
           where parsePredication :: RawInst -> String -> Maybe (RawInst,String)
                 parsePredication ri sfx =
-                  case dropWhile isSpace sfx of
+                  case skipWs sfx of
                     '@':sfx ->
                       case span (\c -> c == '!' || isAlphaNum c) sfx of
-                        (pred,sfx) -> parseMnemonic (ri{riPredication = "@" ++ pred}) sfx
-                    s -> parseMnemonic ri s
+                        (pred,sfx) -> parseMnemonic (ri{riPredication = "@" ++ pred}) (skipWs sfx)
+                    s -> parseMnemonic ri (skipWs s)
 
                 parseMnemonic :: RawInst -> String -> Maybe (RawInst,String)
                 parseMnemonic ri sfx =
-                  case span (\c -> isAlphaNum c || c == '.') (dropWhile isSpace sfx) of
-                    (mne,sfx) -> parseOperands (ri{riMnemonic = mne}) (dropWhile isSpace sfx)
+                  case span (\c -> isAlphaNum c || c == '.') (skipWs sfx) of
+                    (mne,sfx) -> parseOperands (ri{riMnemonic = mne}) (skipWs sfx)
 
                 parseOperands :: RawInst -> String -> Maybe (RawInst,String)
                 parseOperands ri sfx =
                   case sfx of
                     -- nullary instruction
-                    ';':sfx -> return (ri,dropWhile isSpace sfx)
+                    ';':sfx -> return (ri,skipWs sfx)
                     s ->
                       case span (not . (`elem`",;{")) s of
                         (op,sfx) ->
-                            case dropWhile isSpace sfx of
-                              ',':sfx -> parseOperands ri1 (dropWhile isSpace sfx)
-                              ';':sfx -> return (ri1,dropWhile isSpace sfx)
-                              '{':sfx -> return (ri1,dropWhile isSpace (dropWhile (/='}') sfx))
+                            case skipWs sfx of
+                              ',':sfx -> parseOperands ri1 sfx
+                              ';':sfx -> return (ri1,sfx)
+                              '{':sfx ->
+                                case dropWhile (/=';') (drop 1 sfx) of
+                                  "" -> return (ri1,"")
+                                  ';':sfx -> return (ri1,sfx)
                               "" -> Nothing
                           where ri1 = ri{riOperands = riOperands ri ++ [trimWs op]}
 
 trimWs :: String -> String
 trimWs = reverse .  dropWhile isSpace . reverse .  dropWhile isSpace
 
---   /*0c50*/ P0    FFMA R5, R0, 1.84467440737095516160e+19, RZ  {@6,Y} ;   /* 000fcc00000000ff`5f80000000050823 */
+--   /*0c50*/ @P0    FFMA R5, R0, 1.84467440737095516160e+19, RZ  {@6,Y} ;   /* 000fcc00000000ff`5f80000000050823 */
 -- tryParseFilteredRawInst :: String -> Maybe RawInst
 -- tryParseFilteredRawInst s =
 --     case (dropToSyntax s) of

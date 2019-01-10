@@ -135,7 +135,9 @@ collectLibrarySampleIsa os_raw = body
                   dumpLib "cufft64_100.dll"      --  99 MB
                   dumpLib "cusolver64_100.dll"   -- 125 MB
 
+                dumpLib :: String -> IO ()
                 dumpLib lib = do
+                  putStrLn $ "*** DUMPING " ++ lib
                   let full_lib_path = dll_dir ++ "/" ++ lib
                   z <- doesFileExist full_lib_path
                   if not z then putStrLn (lib ++ ": file not found in dir: SKIPPING")
@@ -146,27 +148,33 @@ collectLibrarySampleIsa os_raw = body
                       createDirectoryIfMissing True output_dir
                       let output_prefix = output_dir ++ "/" ++ dropExtension (takeFileName lib)
                       mapM_ (processElf full_lib_path output_prefix) (map (last . words) elfs_lines)
-                      oup <- readProcess cuod_exe ["--dump-ptx", full_lib_path] ""
-                      writeFile (output_prefix ++ ".ptx") oup
+                      putStrLn "  === DUMPING PTX"
+                      z <- doesFileExist (output_prefix ++ ".ptx")
+                      unless z $ do
+                        oup <- readProcess cuod_exe ["--dump-ptx", full_lib_path] ""
+                        writeFile (output_prefix ++ ".ptx") oup
 
                 processElf :: FilePath -> FilePath -> String -> IO ()
                 processElf full_lib_path output_prefix elf_cubin = do
-                  putStrLn $ "dumping " ++ elf_cubin
-                  readProcess cuod_exe ["--extract-elf", elf_cubin, full_lib_path] ""
-                  -- oup <- readProcess nvdis_exe [
-                  --           "--no-vliw"
-                  --         , "--no-dataflow"
-                  --         , "--print-line-info"
-                  --         , "--print-instruction-encoding"
-                  --         , elf
-                  --         ] ""
-                  --  appendFile (output_prefix ++ ".sass") oup
-                  D.runWithOpts os{
-                      D.oOutputFile = output_prefix ++ "-" ++ dropExtension elf_cubin ++ ".sass"
-                    , D.oInputFile = elf_cubin
-                    }
-                  -- removeFile elf
-                  renameFile elf_cubin (output_prefix ++ "-" ++ elf_cubin)
-                  return ()
+                  putStrLn $ "  dumping " ++ elf_cubin
+                  let dst_elf_cubin = output_prefix ++ "-" ++ elf_cubin
+                  z <- doesFileExist dst_elf_cubin
+                  unless z $ do
+                    readProcess cuod_exe ["--extract-elf", elf_cubin, full_lib_path] ""
+                    -- oup <- readProcess nvdis_exe [
+                    --           "--no-vliw"
+                    --         , "--no-dataflow"
+                    --         , "--print-line-info"
+                    --         , "--print-instruction-encoding"
+                    --         , elf
+                    --         ] ""
+                    --  appendFile (output_prefix ++ ".sass") oup
+                    D.runWithOpts os {
+                        D.oOutputFile = output_prefix ++ "-" ++ dropExtension elf_cubin ++ ".sass"
+                      , D.oInputFile = elf_cubin
+                      }
+                    -- removeFile elf
+                    renameFile elf_cubin dst_elf_cubin
+                    return ()
 
 
