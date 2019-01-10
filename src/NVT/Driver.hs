@@ -3,7 +3,9 @@ module NVT.Driver where
 
 import NVT.FilterAssembly
 
+import Control.Exception
 import Control.Monad
+import Data.List
 import System.FilePath
 import System.Directory
 import System.Process
@@ -30,6 +32,7 @@ data Opts =
   , oInputFile :: !FilePath
   , oSourceMapping :: !Bool
   , oFilterAssembly :: !Bool
+  , oRDC :: !Bool
   , oExtraArgs :: [String]
   } deriving Show
 dft_opts :: Opts
@@ -44,8 +47,11 @@ dft_opts =
 --  , oUseCuobjdump = False
   , oSourceMapping = False
   , oFilterAssembly = True
+  , oRDC = False
   , oExtraArgs = []
   }
+dft_opts_75 :: Opts
+dft_opts_75 = dft_opts{oArch = "sm_75"}
 
 -------------------------------------------------------------------------------
 --    .cu -> .cubin -> .ptx -> .sass     nvcc -cubin =>
@@ -66,6 +72,9 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.optF spec "" "no-filter-asm"
                 "does not filter assembly code" ""
                 (\o -> (o {oFilterAssembly = False})) # PA.OptAttrAllowUnset
+            , PA.optF spec "rdc" "--relocatable-device-code"
+                "pass -rdc=true to nvcc" ""
+                (\o -> (o {oRDC = True})) # PA.OptAttrAllowUnset
             , PA.opt spec "o" "output" "PATH"
                 "sets the output file" "(defaults to stdout)"
                 (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
@@ -78,7 +87,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
                 (\f o -> (o {oSaveCuBin = f})) # PA.OptAttrAllowUnset
 
             , PA.opt spec "X" "" "ANYTHING"
-                "sets an extra argument for the tool (e.g. -X-Ic:\\foo\\bar)" ""
+                "sets an extra argument for the nvcc tool (e.g. -X-Ic:\\foo\\bar)" ""
                 (\a o -> (o {oExtraArgs = oExtraArgs o ++ [a]})) # PA.OptAttrAllowUnset
             ]
             [ -- arguments
@@ -134,8 +143,8 @@ runWithOpts os = processFile (oInputFile os)
             ".cu" -> processCuFile fp
             ".cubin" -> processCubinFile fp
             ".ptx" -> processPtxFile fp  -- (use NVCC)
-          -- TODO: support .ptx (ptx -> .cubin -> .nva)
             ".sass" -> processSassFile fp
+          -- TODO: support .ptx (ptx -> .cubin -> .nva)
           -- TODO: support .nva (ELF -> .cubin)
           -- TODO: figure out how to turn a .cubin into a .obj or .exe and run it
           --       is there an API to load a .cubin with?
@@ -144,7 +153,6 @@ runWithOpts os = processFile (oInputFile os)
         processPtxFile :: FilePath -> IO ()
         processPtxFile = processCuFile
 
-
         -- foo.cu --> $temp.cubin and disassembles it that file
         processCuFile :: FilePath -> IO ()
         processCuFile fp = do
@@ -152,13 +160,14 @@ runWithOpts os = processFile (oInputFile os)
           when (not z) $
             fatal $ fp ++ ": file not found"
           cl_bin_dir <- findClBinDir
-
+          --
           -- cs <- findCudaSamplesDir
           -- let cuda_sample_incs_dir = if null cs then [] else  ["-I" ++ cs]
           let mkArgs targ =
                 ["-arch",oArch os,targ] ++
                 cl_bin_dir ++
-                (if oSourceMapping os then ["-lineinfo"] else[]) ++
+                maybeOpt oSourceMapping "-lineinfo" ++
+                maybeOpt oRDC "-rdc=true" ++
                 oExtraArgs os ++
                 -- cuda_sample_incs_dir ++
                 [oInputFile os]
@@ -167,12 +176,12 @@ runWithOpts os = processFile (oInputFile os)
           let output_path_without_ext
                 | null (oOutputFile os) = takeFileName (dropExtension fp)
                 | otherwise = dropExtension (oOutputFile os)
-
+          --
           unless (null (oSaveCuBin os)) $ do
             -- putStrLn "copying cubin"
             bs <- S.readFile cubin_file
             S.writeFile (output_path_without_ext ++ ".cubin") bs
-
+          --
           unless (null (oSavePtx os)) $ do
             runCudaTool "nvcc" (mkArgs "-ptx")
             --
@@ -184,27 +193,10 @@ runWithOpts os = processFile (oInputFile os)
             bs <- S.readFile ptx_file
             S.writeFile (oSavePtx os) bs
             removeFile ptx_file
-
-          -- let nv_cuod_args = ["--dump-sass", cubin_file]
-          -- cuod_out <- runCudaTool "cuobjdump" nv_cuod_args
-          let nvdis_args =
-                [
-                  "--print-code" -- print text sections only
-                , "--print-instruction-encoding"
-                , "--print-line-info"
-                , "--no-vliw" -- disables the {...}
-                , cubin_file
-                ]
-          nvdis_out <- runCudaTool "nvdisasm" nvdis_args
-
-          cuod_res <- runCudaTool "cuobjdump" ["--dump-resource-usage", cubin_file]
-
-          let filterAsm
-                | oFilterAssembly os = filterAssembly (oArch os)
-                | otherwise = id
-          emitOutput (filterAsm nvdis_out ++ cuod_res)
+          --
+          processCubinFile cubin_file
+          --
           removeFile cubin_file
-
 
         processSassFile :: FilePath -> IO ()
         processSassFile fp = error "processSassFile: todo"
@@ -217,7 +209,7 @@ runWithOpts os = processFile (oInputFile os)
         runCudaTool :: String -> [String] -> IO String
         runCudaTool tool args = do
           tool_exe <- findCudaTool os (mkExe tool)
-          debugLn os $ show tool_exe ++ " " ++ show args
+          -- debugLn os $ show tool_exe ++ " " ++ show args
           runProcess tool_exe args
 
         runProcess :: FilePath -> [String] -> IO String
@@ -242,23 +234,60 @@ runWithOpts os = processFile (oInputFile os)
                 tryDir (d:ds) = do
                   z <- doesDirectoryExist (d ++ "\\BIN")
                   if not z then tryDir ds
-                    else return
-                          [
-                            "--compiler-bindir", d
-                          -- TODO: need to look these up
-                          , "-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\include"
-                          , "-IC:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\INCLUDE"
-                          , "-IC:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\ucrt"
-                          ]
+                    else do
+                      nvcc_exe <- findCudaTool os "nvcc"
+                      let cuda_include_dir = takeDirectory (takeDirectory nvcc_exe) ++ "\\include"
+                      z <- doesDirectoryExist cuda_include_dir
+                      unless z $
+                        die "can't find CUDA include directory"
+                      return
+                        [
+                          "--compiler-bindir", d
+                        -- TODO: need to look these up
+                        -- , "-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\include"
+                        , "-I" ++ cuda_include_dir
+                        -- , "-IC:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\INCLUDE"
+                        , "-I" ++ d ++ "\\INCLUDE"
+                        -- TODO: need to lookup
+                        , "-IC:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\ucrt"
+                        ]
 -- pick the newest child of:
 --   C:\Program Files (x86)\Windows Kits\10\include
 #endif
         processCubinFile :: FilePath -> IO ()
-        processCubinFile fp = do
+        processCubinFile cubin_file = do
+          -- let nv_cuod_args = ["--dump-sass", cubin_file]
+          -- cuod_out <- runCudaTool "cuobjdump" nv_cuod_args
+          let nvdis_args_no_lines =
+                [
+                  "--no-vliw" -- disables the {...}
+                -- , "--print-code" -- print program text sections only
+                , "--print-instruction-encoding"
+                , "--no-dataflow"
+                , cubin_file
+                ]
+          let tryNvdisasmWithoutLineNumbers :: SomeException -> IO String
+              tryNvdisasmWithoutLineNumbers e = do
+                warningLn os "nvdisasm: failed trying with*out* --print-line-info"
+                runCudaTool "nvdisasm" nvdis_args_no_lines
+          --
+          nvdis_out <- runCudaTool "nvdisasm" (["--print-line-info"] ++ nvdis_args_no_lines)
+            `catch` tryNvdisasmWithoutLineNumbers
+          cuod_res <- runCudaTool "cuobjdump" ["--dump-resource-usage", cubin_file]
+          let filterAsm
+                | oFilterAssembly os = filterAssembly (oArch os)
+                | otherwise = id
+          emitOutput (filterAsm nvdis_out ++ cuod_res)
+
+        processCubinFile2 :: FilePath -> IO ()
+        processCubinFile2 fp = do
           bs <- S.readFile fp
           decodeElf dft_edo bs
           return ()
 
+        maybeOpt f tk
+          | f os = [tk]
+          | otherwise = []
 
 
 -- setupEnv :: IO [(String,String)]
@@ -278,30 +307,33 @@ labelLines pfx = unlines . map (pfx++) . lines
 
 mkExe :: FilePath -> FilePath
 #ifdef mingw32_HOST_OS
-mkExe fp = fp ++ ".exe"
+mkExe fp
+  | ".exe" `isSuffixOf` fp = fp
+  | otherwise = fp ++ ".exe"
 #else
 mkExe fp = fp
 #endif
 
 ------- finds a CUDA executable
 findCudaTool :: Opts -> String -> IO FilePath
-findCudaTool os exe =
+findCudaTool os exe_raw =
     tryEnvs
       [
-        "CUDA_PATH,"
+        "CUDA_PATH"
       , "CUDA_PATH_V10_0"
       , "CUDA_PATH_V9_0"
       , "CUDA_PATH_V9_1"
       , "CUDA_PATH_V8_0"
       , "CUDA_PATH_V7_5"
       ]
-  where tryEnvs (e:es) = do
+  where exe = mkExe exe_raw
+
+        tryEnvs (e:es) = do
           mv <- lookupEnv e
           case mv of
             Nothing -> tryEnvs es
             Just d -> do
               tryPath (d </> "bin" </> exe) (tryEnvs es)
-
 #ifdef mingw32_HOST_OS
         tryEnvs [] =
           tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) vers)
