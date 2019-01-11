@@ -124,7 +124,7 @@ runWithOpts os = processFile (oInputFile os)
                 oExtraArgs os ++
                 -- cuda_sample_incs_dir ++
                 [oInputFile os]
-          runCudaTool "nvcc" (mkArgs "-cubin")
+          runCudaTool os "nvcc" (mkArgs "-cubin")
           let cubin_file = takeFileName (dropExtension fp) ++ ".cubin"
           let output_path_without_ext
                 | null (oOutputFile os) = takeFileName (dropExtension fp)
@@ -136,7 +136,7 @@ runWithOpts os = processFile (oInputFile os)
             S.writeFile (output_path_without_ext ++ ".cubin") bs
           --
           unless (null (oSavePtx os)) $ do
-            runCudaTool "nvcc" (mkArgs "-ptx")
+            runCudaTool os "nvcc" (mkArgs "-ptx")
             --
             let ptx_file = takeFileName (dropExtension fp) ++ ".ptx"
             -- putStrLn $
@@ -158,31 +158,15 @@ runWithOpts os = processFile (oInputFile os)
         emitOutput
           | null (oOutputFile os) = putStr
           | otherwise = writeFile (oOutputFile os)
-
-        runCudaTool :: String -> [String] -> IO String
-        runCudaTool tool args = do
-          tool_exe <- findCudaTool os (mkExe tool)
-          -- debugLn os $ show tool_exe ++ " " ++ show args
-          runProcess tool_exe args
-
-        runProcess :: FilePath -> [String] -> IO String
-        runProcess exe args = do
-          debugLn os $ "% " ++ exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
-          (ec,out,err) <- readProcessWithExitCode exe args ""
-          debugLn os $ "% " ++ show ec
-          case ec of
-            ExitFailure ex_val -> do
-              let lbl = "[" ++ dropExtension (takeFileName exe) ++ "] "
-              fatal $ labelLines lbl $
-                err ++ out ++ "\n" ++ "[exited " ++ show ex_val ++ "]"
-            ExitSuccess -> return out
-
---        findClBinDir :: IO [String]
+        appendOutput :: String -> IO ()
+        appendOutput
+          | null (oOutputFile os) = putStr
+          | otherwise = appendFile (oOutputFile os)
 
         processCubinFile :: FilePath -> IO ()
         processCubinFile cubin_file = do
           -- let nv_cuod_args = ["--dump-sass", cubin_file]
-          -- cuod_out <- runCudaTool "cuobjdump" nv_cuod_args
+          -- cuod_out <- runCudaTool os "cuobjdump" nv_cuod_args
           let nvdis_args_no_lines =
                 [
                   "--no-vliw" -- disables the {...}
@@ -194,15 +178,17 @@ runWithOpts os = processFile (oInputFile os)
           let tryNvdisasmWithoutLineNumbers :: SomeException -> IO String
               tryNvdisasmWithoutLineNumbers e = do
                 warningLn os "nvdisasm: failed trying with*out* --print-line-info"
-                runCudaTool "nvdisasm" nvdis_args_no_lines
+                runCudaTool os "nvdisasm" nvdis_args_no_lines
           --
-          nvdis_out <- runCudaTool "nvdisasm" (["--print-line-info"] ++ nvdis_args_no_lines)
+          nvdis_out <- runCudaTool os "nvdisasm" (["--print-line-info"] ++ nvdis_args_no_lines)
             `catch` tryNvdisasmWithoutLineNumbers
-          cuod_res <- runCudaTool "cuobjdump" ["--dump-resource-usage", cubin_file]
           let filterAsm
                 | oFilterAssembly os = filterAssembly (oArch os)
                 | otherwise = id
-          emitOutput (filterAsm nvdis_out ++ cuod_res)
+          emitOutput (filterAsm nvdis_out)
+          --
+          cuod_res <- runCudaTool os "cuobjdump" ["--dump-resource-usage", cubin_file]
+          appendOutput cuod_res
 
         -- UNREACHABLE for the moment
         processCubinFileNative :: FilePath -> IO ()

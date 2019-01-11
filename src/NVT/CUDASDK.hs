@@ -9,7 +9,9 @@ import Data.List
 import Data.Ord
 import System.Directory
 import System.Environment(lookupEnv)
+import System.Exit
 import System.FilePath
+import System.Process
 
 
 ------- finds a CUDA executable
@@ -134,8 +136,6 @@ findWindowsKitsInclude = do
           ]
 
 
-labelLines :: String -> String -> String
-labelLines pfx = unlines . map (pfx++) . lines
 
 mkExe :: FilePath -> FilePath
 #ifdef mingw32_HOST_OS
@@ -152,3 +152,24 @@ getSubPaths dir =
     map (dir </>) .
       filter ((/=".") . take 1) <$> getDirectoryContents dir
 
+runCudaTool :: Opts -> String -> [String] -> IO String
+runCudaTool os tool args = do
+  tool_exe <- findCudaTool os (mkExe tool)
+  -- debugLn os $ show tool_exe ++ " " ++ show args
+  execProcess os tool_exe args
+
+
+execProcess :: Opts -> FilePath -> [String] -> IO String
+execProcess os exe args = do
+  debugLn os $ "% " ++ exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
+  (ec,out,err) <- readProcessWithExitCode exe args ""
+  debugLn os $ "% " ++ show ec
+  case ec of
+    ExitFailure ex_val -> do
+      let lbl = "[" ++ dropExtension (takeFileName exe) ++ "] "
+      fatal $ labelLines lbl $
+        err ++ out ++ "\n" ++ "[exited " ++ show ex_val ++ "]"
+    ExitSuccess -> return out
+
+labelLines :: String -> String -> String
+labelLines pfx = unlines . map (pfx++) . lines

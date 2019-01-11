@@ -1,6 +1,8 @@
 module NVT.RawInst where
 
+import NVT.CUDASDK
 import NVT.Lop3
+import NVT.Opts
 import NVT.Word128
 
 import Data.Bits
@@ -8,7 +10,10 @@ import Data.Char
 import Data.List
 import Data.Word
 import Debug.Trace
+import System.Directory
+import System.IO
 import Text.Printf
+import qualified Data.ByteString as BS
 
 data RawInst =
   RawInst {
@@ -339,4 +344,36 @@ trimWs = reverse .  dropWhile isSpace . reverse .  dropWhile isSpace
 --             dropWhile (/='/') . drop 1 . dropWhile (/='/')
 
 
+-- disBits :: Word128 -> IO RawInst
+-- disBits =
+
+
+getTempFile :: IO FilePath
+getTempFile = do
+-- TODO: need a temp file
+  temp_dir <- getTemporaryDirectory
+  (fp,h) <- openTempFile temp_dir "nvaa.bin"
+  hClose h
+  return fp
+
+disBitsRaw :: Opts -> Word128 -> IO String
+disBitsRaw os w128 = head <$> disBitsRawBatch os [w128]
+
+disBitsRawBatch :: Opts -> [Word128] -> IO [String]
+disBitsRawBatch os w128s = do
+  temp_file <- getTempFile
+  BS.writeFile temp_file (BS.concat (map toByteStringW128 w128s))
+  oup <- runCudaTool os "nvdisasm" [
+            "--no-vliw"
+         -- , "--print-instruction-encoding"
+          , "--no-dataflow"
+          , "--binary=" ++ filter (/='_') (map toUpper (oArch os))
+          , temp_file
+          ]
+  removeFile temp_file
+  print oup
+  putStrLn oup
+  -- we get a header line with .headerflags first, drop it and emit
+  let filterOutput = map (trimWs . skipWs) . drop 1 . lines
+  return $ filterOutput oup
 

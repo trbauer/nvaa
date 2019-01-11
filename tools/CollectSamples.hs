@@ -17,8 +17,8 @@ import System.Process
 -- "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.0\bin\"
 main :: IO ()
 main = do
-  collectSampleIsa        "" D.dft_opts_75
-  collectLibrarySampleIsa    D.dft_opts_75
+--  collectSampleIsa        "" D.dft_opts_75
+  collectLibrarySampleIsa "" D.dft_opts_75
 
 
 collectSampleIsa :: String -> D.Opts -> IO ()
@@ -191,11 +191,11 @@ collectLibrarySampleIsa substr os_raw = body
                     --         , elf
                     --         ] ""
                     --  appendFile (output_prefix ++ ".sass") oup
-                    D.runWithOpts os {
-                        D.oOutputFile = output_prefix ++ "-" ++ dropExtension elf_cubin ++ ".sass"
-                      , D.oInputFile = elf_cubin
+                    D.runWithOpts
+                      os {
+                        D.oInputFile = elf_cubin
+                      , D.oOutputFile = output_prefix ++ "-" ++ dropExtension elf_cubin ++ ".sass"
                       }
-                    -- removeFile elf
                     renameFile elf_cubin dst_elf_cubin
                     return ()
 
