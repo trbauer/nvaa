@@ -1,7 +1,13 @@
 {-# LANGUAGE CPP #-}
 module NVT.Driver where
 
+import NVT.CUDASDK
+import NVT.ElfDecode
 import NVT.FilterAssembly
+import NVT.Opts
+
+import           Prog.Args.Args((#))-- progargs
+import qualified Prog.Args.Args as PA -- progargs
 
 import Control.Exception
 import Control.Monad
@@ -11,47 +17,7 @@ import System.Directory
 import System.Process
 import System.Exit
 import System.Environment(lookupEnv)
-
 import qualified Data.ByteString as S
-
--- import Language.NVDA.IR
--- import Language.NVDA.Parser
-
-import NVT.ElfDecode
-import           Prog.Args.Args((#))-- progargs
-import qualified Prog.Args.Args as PA -- progargs
-
-data Opts =
-  Opts {
-    oVerbosity :: !Int
-  , oArch :: !String -- e.g. sm_52, sm_75
-  , oOutputFile :: !FilePath
-  , oSaveCuBin :: !FilePath -- if input is .cu, this is the .cubin
-  , oSavePtx :: !FilePath
---  , oUseCuobjdump :: !Bool -- versus nvdisasm
-  , oInputFile :: !FilePath
-  , oSourceMapping :: !Bool
-  , oFilterAssembly :: !Bool
-  , oRDC :: !Bool
-  , oExtraArgs :: [String]
-  } deriving Show
-dft_opts :: Opts
-dft_opts =
-  Opts {
-    oVerbosity = 0
-  , oArch = "" -- "sm_62" -- "sm_70" -- "sm_52"
-  , oOutputFile = ""
-  , oSaveCuBin = ""
-  , oSavePtx = ""
-  , oInputFile = ""
---  , oUseCuobjdump = False
-  , oSourceMapping = False
-  , oFilterAssembly = True
-  , oRDC = False
-  , oExtraArgs = []
-  }
-dft_opts_75 :: Opts
-dft_opts_75 = dft_opts{oArch = "sm_75"}
 
 -------------------------------------------------------------------------------
 --    .cu -> .cubin -> .ptx -> .sass     nvcc -cubin =>
@@ -72,7 +38,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.optF spec "" "no-filter-asm"
                 "does not filter assembly code" ""
                 (\o -> (o {oFilterAssembly = False})) # PA.OptAttrAllowUnset
-            , PA.optF spec "rdc" "--relocatable-device-code"
+            , PA.optF spec "rdc" "relocatable-device-code"
                 "pass -rdc=true to nvcc" ""
                 (\o -> (o {oRDC = True})) # PA.OptAttrAllowUnset
             , PA.opt spec "o" "output" "PATH"
@@ -107,19 +73,6 @@ run as = PA.parseArgs spec dft_opts as >>= runWithOpts
 -- how to inject SASS?
 -- http://stackoverflow.com/questions/20012318/how-to-compile-ptx-code
 
---------------
-debugLn :: Opts -> String -> IO ()
-debugLn os
-  | oVerbosity os > 1 = putStrLn
-  | otherwise = const (return ())
-printLn :: Opts -> String -> IO ()
-printLn os
-  | oVerbosity os >= 0 = putStrLn
-  | otherwise = const (return ())
-warningLn :: Opts -> String -> IO ()
-warningLn os
-  | oVerbosity os >= -1 = putStrLn
-  | otherwise = const (return ())
 
 -- information on the current machine
 {-
@@ -159,7 +112,7 @@ runWithOpts os = processFile (oInputFile os)
           z <- doesFileExist fp
           when (not z) $
             fatal $ fp ++ ": file not found"
-          cl_bin_dir <- findClBinDir
+          cl_bin_dir <- findExtraNvccOpts os
           --
           -- cs <- findCudaSamplesDir
           -- let cuda_sample_incs_dir = if null cs then [] else  ["-I" ++ cs]
@@ -224,36 +177,8 @@ runWithOpts os = processFile (oInputFile os)
                 err ++ out ++ "\n" ++ "[exited " ++ show ex_val ++ "]"
             ExitSuccess -> return out
 
-        findClBinDir :: IO [String]
-#ifndef mingw32_HOST_OS
-        findClBinDir = return []
-#else
-        -- C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\INCLUDE
-        findClBinDir = tryDir ["C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC"]
-          where tryDir [] = return []
-                tryDir (d:ds) = do
-                  z <- doesDirectoryExist (d ++ "\\BIN")
-                  if not z then tryDir ds
-                    else do
-                      nvcc_exe <- findCudaTool os "nvcc"
-                      let cuda_include_dir = takeDirectory (takeDirectory nvcc_exe) ++ "\\include"
-                      z <- doesDirectoryExist cuda_include_dir
-                      unless z $
-                        die "can't find CUDA include directory"
-                      return
-                        [
-                          "--compiler-bindir", d
-                        -- TODO: need to look these up
-                        -- , "-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\include"
-                        , "-I" ++ cuda_include_dir
-                        -- , "-IC:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\INCLUDE"
-                        , "-I" ++ d ++ "\\INCLUDE"
-                        -- TODO: need to lookup
-                        , "-IC:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\ucrt"
-                        ]
--- pick the newest child of:
---   C:\Program Files (x86)\Windows Kits\10\include
-#endif
+--        findClBinDir :: IO [String]
+
         processCubinFile :: FilePath -> IO ()
         processCubinFile cubin_file = do
           -- let nv_cuod_args = ["--dump-sass", cubin_file]
@@ -279,8 +204,9 @@ runWithOpts os = processFile (oInputFile os)
                 | otherwise = id
           emitOutput (filterAsm nvdis_out ++ cuod_res)
 
-        processCubinFile2 :: FilePath -> IO ()
-        processCubinFile2 fp = do
+        -- UNREACHABLE for the moment
+        processCubinFileNative :: FilePath -> IO ()
+        processCubinFileNative fp = do
           bs <- S.readFile fp
           decodeElf dft_edo bs
           return ()
@@ -288,87 +214,3 @@ runWithOpts os = processFile (oInputFile os)
         maybeOpt f tk
           | f os = [tk]
           | otherwise = []
-
-
--- setupEnv :: IO [(String,String)]
--- setupEnv =
--- DevEnvDir=C:\Program Files (x86)\Microsoft Visual Studio 14.0\Common7\IDE\
--- INCLUDE=
---   C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\INCLUDE;
---   C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\ATLMFC\INCLUDE;
---   C:\Program Files (x86)\Windows Kits\10\include\10.0.14393.0\ucrt;
---   C:\Program Files (x86)\Windows Kits\NETFXSDK\4.6.1\include\um;
---   C:\Program Files (x86)\Windows Kits\10\include\10.0.14393.0\shared;
---   C:\Program Files (x86)\Windows Kits\10\include\10.0.14393.0\um;
---   C:\Program Files (x86)\Windows Kits\10\include\10.0.14393.0\winrt;
-
-labelLines :: String -> String -> String
-labelLines pfx = unlines . map (pfx++) . lines
-
-mkExe :: FilePath -> FilePath
-#ifdef mingw32_HOST_OS
-mkExe fp
-  | ".exe" `isSuffixOf` fp = fp
-  | otherwise = fp ++ ".exe"
-#else
-mkExe fp = fp
-#endif
-
-------- finds a CUDA executable
-findCudaTool :: Opts -> String -> IO FilePath
-findCudaTool os exe_raw =
-    tryEnvs
-      [
-        "CUDA_PATH"
-      , "CUDA_PATH_V10_0"
-      , "CUDA_PATH_V9_0"
-      , "CUDA_PATH_V9_1"
-      , "CUDA_PATH_V8_0"
-      , "CUDA_PATH_V7_5"
-      ]
-  where exe = mkExe exe_raw
-
-        tryEnvs (e:es) = do
-          mv <- lookupEnv e
-          case mv of
-            Nothing -> tryEnvs es
-            Just d -> do
-              tryPath (d </> "bin" </> exe) (tryEnvs es)
-#ifdef mingw32_HOST_OS
-        tryEnvs [] =
-          tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) vers)
-            where vers = ["v10.0","v9.1","v9.0","v8.0","v7.5"]
-#else
-        -- TODO: /opt/nvidia/nvcc ?
-        tryEnvs [] = tryFixedPaths ["/usr/local/cuda/bin"]
-#endif
-        tryFixedPaths (d:ds) = do
-          tryPath (d </> "bin" </> exe) (tryFixedPaths ds)
-        tryFixedPaths [] = giveUp
-
-        tryPath p keep_looking = do
-          z <- doesFileExist p
-          if not z then keep_looking else do
-            debugLn os $ "findCudaToolDir: found " ++ p
-            return p
-
-        giveUp :: IO FilePath
-        giveUp = do
-          warningLn os $ "findCudaToolDir: falling back to $PATH prefix (could not find $CUDA_PATH)"
-          return exe
-
--- find VS
-
-fatal :: String -> IO a
-fatal msg = die msg
-
-
--- "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\v8.0\\0_Simple"
-
-getSubPaths :: FilePath -> IO [FilePath]
-getSubPaths dir =
-  reverse .
-    map (dir </>) .
-      filter ((/=".") . take 1) <$> getDirectoryContents dir
-
-

@@ -29,13 +29,17 @@ filterAssembly arch = processLns . zip [1..] . lines
         -- Volta and Turing
         processLns128B [] = ""
         processLns128B ((lno0,ln0str):(lno1,ln1str):lns) =
-          case tryParseInstructionLines ln0str ln1str of
-            Nothing ->
-              ln0str ++ "\n" ++
-              processLns ((lno1,ln1str):lns)
+          case parseRawInstWithBits (ln0str ++ ln1str) of
             Just ri ->
               fmtRiWithControlInfo ri ++
               processLns lns
+            Nothing ->
+              ln0str ++ "\n" ++
+              processLns ((lno1,ln1str):lns)
+--          case tryParseInstructionLines ln0str ln1str of
+--            Nothing ->
+--              ln0str ++ "\n" ++
+--              processLns ((lno1,ln1str):lns)
         processLns128B ((_,lnstr):lns) = lnstr ++ processLns lns
 
         -- Maxwell and Pascal
@@ -43,14 +47,14 @@ filterAssembly arch = processLns . zip [1..] . lines
         processLnsMaxwell ((_,lnstr):lns)
           | "/* 0x" `isPrefixOf` s && mw64 /= Nothing =
             case mw64 of
-              Just w64 -> parseInstGroup deps lns
+              Just (w64,_) -> parseInstGroup deps lns
                 where deps = [
                            w64                .&. 0x000000000001FFFF
                         , (w64`shiftR`21)     .&. 0x000000000001FFFF
                         , (w64`shiftR`(2*21)) .&. 0x000000000001FFFF
                         ]
           where s = dropWhile isSpace lnstr
-                mw64 = parseSlashStarHexWord s
+                mw64 = parseHexInComment s
 
                 parseInstGroup [] lns = processLnsMaxwell lns -- done with group of 3
                 parseInstGroup _ [] = ""
@@ -58,7 +62,7 @@ filterAssembly arch = processLns . zip [1..] . lines
                     -- since the Maxwell and Volta control fields have the same encoding
                     -- we can cheat and just synthesize the "high 64b" of the Volta word
                     -- and using that in tryParseInstructionLines.
-                    case tryParseInstructionLines lnstr fake_second_line of
+                    case parseRawInstWithBits (lnstr ++ fake_second_line) of
                       Nothing ->
                         -- e.g. parse failure just means the end of the function
                         -- NOTE: we might drop unused control codes here
@@ -66,7 +70,7 @@ filterAssembly arch = processLns . zip [1..] . lines
                       Just ri ->
                         fmtRiWithControlInfo ri ++
                         parseInstGroup deps lns
-                  where fake_second_line = printf "           /* 0x%016X */" shifted_word
+                  where fake_second_line = printf "  /* 0x%016X */" shifted_word
                         -- in Volta it is stored at [125:105]
                         shifted_word = dep `shiftL` (64 - 23)
         processLnsMaxwell ((_,lnstr):lns) =

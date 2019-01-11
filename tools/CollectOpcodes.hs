@@ -1,8 +1,9 @@
 module CollectOpcodes where
 
+import NVT.Driver(getSubPaths)
+import NVT.Opts
 import NVT.RawInst
 import NVT.Word128
-import NVT.Driver(getSubPaths)
 
 import Control.Exception
 import Control.Monad
@@ -27,11 +28,12 @@ collectOps = body
           --
           createDirectoryIfMissing True output_root
           samples_sass_files <- filter (".sass"`isSuffixOf`) <$> getSubPaths "examples/sm_75/samples"
-          libraries_sass_files <- filter (".sass"`isSuffixOf`) <$> getSubPaths "examples/sm_75/libs"
-          mapM_ processFile (samples_sass_files ++ libraries_sass_files)
+--          libraries_sass_files <- filter (".sass"`isSuffixOf`) <$> getSubPaths "examples/sm_75/libs"
+--          mapM_ processFile (samples_sass_files ++ libraries_sass_files)
+          mapM_ processFile (samples_sass_files)
           return ()
 
-        output_root = "examples/ops"
+        output_root = "examples/sm_75/ops"
 
         processFile :: FilePath -> IO ()
         processFile fp = do
@@ -41,12 +43,13 @@ collectOps = body
 
         processLine :: FilePath -> Int -> String -> IO ()
         processLine fp lno lnstr =
-            case parseRawInst lnstr of
+            case parseRawInstWithBits lnstr of
               Nothing -> return ()
-              Just (ri,sfx) -> do
-                let syntax = printf "%016X`%016X:  " (wHi64 (riBits ri)) (wLo64 (riBits ri)) ++ fmtRawInstWithOpts True ri
+              Just ri -> do
+                let syntax =
+                      printf "%016X`%016X:  " (wHi64 (riBits ri)) (wLo64 (riBits ri)) ++
+                      fmtRawInstWithOpts True ri
                     source_info = fp ++ ":" ++ show lno
                 let base_op = takeWhile (/='.') (riMnemonic ri)
                 appendFile (output_root ++ "/" ++ base_op ++ ".sass") $
-                   printf "%-80s" syntax ++ " //" ++ source_info ++ "\n"
-          where
+                   printf "%-80s" syntax ++ " // " ++ source_info ++ "\n"

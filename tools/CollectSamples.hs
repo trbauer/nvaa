@@ -1,6 +1,8 @@
-module NVT.CollectSamples where
+module Main where
 
+import qualified NVT.CUDASDK as D
 import qualified NVT.Driver as D
+import qualified NVT.Opts as D
 
 import Control.Monad
 import Control.Exception
@@ -8,11 +10,19 @@ import Data.List
 import System.Directory
 import System.FilePath
 import System.Exit
+import System.IO
 import System.Process
 
 
-collectSampleIsa :: D.Opts -> IO ()
-collectSampleIsa os_raw = body
+-- "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.0\bin\"
+main :: IO ()
+main = do
+  collectSampleIsa        "" D.dft_opts_75
+  collectLibrarySampleIsa    D.dft_opts_75
+
+
+collectSampleIsa :: String -> D.Opts -> IO ()
+collectSampleIsa filter_str os_raw = body
   where body = do
           when (null (D.oArch os)) $
             die "options need arch set"
@@ -22,7 +32,7 @@ collectSampleIsa os_raw = body
           -- let dir = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\v10.0"
           dir <- findCudaSamplesDir
           --
-          ss <- D.getSubPaths dir -- e.g. 0_Simple, 1_Utilities, ...
+          ss <- D.getSubPaths dir >>= filterM doesDirectoryExist -- e.g. 0_Simple, 1_Utilities, ...
           mapM_ walkSampleSet ss
 
         os = os_raw{D.oSourceMapping = True}
@@ -43,7 +53,9 @@ collectSampleIsa os_raw = body
         walkSamples [] = return ()
         walkSamples (d:ds) = do
           fs <- D.getSubPaths d
-          walkCuFiles (filter ((==".cu") . takeExtension) fs)
+          -- TODO: should also take .cpp and .c files that #include .cuh files
+          let cu_files = filter ((==".cu") . takeExtension) fs
+          walkCuFiles (filter (filter_str`isInfixOf`) cu_files)
           walkSamples ds
 
         walkCuFiles :: [FilePath] -> IO ()
@@ -96,7 +108,6 @@ collectSampleIsa os_raw = body
               copyFile cuh_file (replaceFileName dst_cu_file (takeFileName cuh_file))
           walkCuFiles fs
 
-
 findCudaSamplesDir :: IO FilePath
 findCudaSamplesDir = tryPathVers ["v10.0","v9.1","v9.0","v8.0"]
   where tryPathVers [] = return ""
@@ -109,10 +120,9 @@ findCudaSamplesDir = tryPathVers ["v10.0","v9.1","v9.0","v8.0"]
         mkCudaSampleDir ver =
           "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\" ++ ver
 
--- "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.0\bin\"
 
-collectLibrarySampleIsa :: D.Opts -> IO ()
-collectLibrarySampleIsa os_raw = body
+collectLibrarySampleIsa :: String -> D.Opts -> IO ()
+collectLibrarySampleIsa substr os_raw = body
   where body = do
           when (null (D.oArch os)) $
             die "options need arch set"
@@ -136,23 +146,35 @@ collectLibrarySampleIsa os_raw = body
                   dumpLib "cusolver64_100.dll"   -- 125 MB
 
                 dumpLib :: String -> IO ()
-                dumpLib lib = do
-                  putStrLn $ "*** DUMPING " ++ lib
-                  let full_lib_path = dll_dir ++ "/" ++ lib
-                  z <- doesFileExist full_lib_path
-                  if not z then putStrLn (lib ++ ": file not found in dir: SKIPPING")
-                    else do
-                      out <- readProcess cuod_exe ["--list-elf",full_lib_path] ""
-                      let elfs_lines = filter (("." ++ D.oArch os ++ ".")`isInfixOf`) (lines out)
-                      let output_dir = "examples/" ++ D.oArch os ++ "/libs"
-                      createDirectoryIfMissing True output_dir
-                      let output_prefix = output_dir ++ "/" ++ dropExtension (takeFileName lib)
-                      mapM_ (processElf full_lib_path output_prefix) (map (last . words) elfs_lines)
-                      putStrLn "  === DUMPING PTX"
-                      z <- doesFileExist (output_prefix ++ ".ptx")
-                      unless z $ do
-                        oup <- readProcess cuod_exe ["--dump-ptx", full_lib_path] ""
-                        writeFile (output_prefix ++ ".ptx") oup
+                dumpLib lib
+                  | not (substr `isInfixOf` lib) = return ()
+                  | otherwise = do
+                    putStrLn $ "*** DUMPING " ++ lib
+                    let full_lib_path = dll_dir ++ "/" ++ lib
+                    z <- doesFileExist full_lib_path
+                    if not z then putStrLn (lib ++ ": file not found in dir: SKIPPING")
+                      else do
+                        out <- readProcess cuod_exe ["--list-elf",full_lib_path] ""
+                        let elfs_lines = filter (("." ++ D.oArch os ++ ".")`isInfixOf`) (lines out)
+                        let output_dir = "examples/" ++ D.oArch os ++ "/libs"
+                        createDirectoryIfMissing True output_dir
+                        let output_prefix = output_dir ++ "/" ++ dropExtension (takeFileName lib)
+                        mapM_ (processElf full_lib_path output_prefix) (map (last . words) elfs_lines)
+                        putStrLn "  === DUMPING PTX"
+                        z <- doesFileExist (output_prefix ++ ".ptx")
+                        unless z $ do
+                          -- burns up too much memory
+                          -- oup <- readProcess cuod_exe ["--dump-ptx", full_lib_path] ""
+                          -- writeFile (output_prefix ++ ".ptx") oup
+                          withFile (output_prefix ++ ".ptx") WriteMode $ \h -> do
+                            let cp =
+                                  (proc cuod_exe ["--dump-ptx", full_lib_path]){
+                                    std_out = UseHandle h
+                                  }
+                            (Nothing,Nothing,Nothing,ph) <- createProcess cp
+                            ec <- waitForProcess ph
+                            putStrLn $ "  ptx dumping => " ++ show ec
+
 
                 processElf :: FilePath -> FilePath -> String -> IO ()
                 processElf full_lib_path output_prefix elf_cubin = do

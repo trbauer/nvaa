@@ -42,8 +42,11 @@ data RawInst =
 
 fmtRawInstWithOpts :: Bool -> RawInst -> String
 fmtRawInstWithOpts ctl_info ri =
-      pred ++ " " ++ riMnemonic ri ++ " " ++ intercalate ", " (riOperands ri) ++ control_info ++ " ;"
+      pred ++ " " ++ riMnemonic ri ++ opnds ++ control_info ++ " ;"
   where pred = printf "%-5s" (riPredication ri)
+        opnds
+          | null (riOperands ri) = ""
+          | otherwise  = " " ++ intercalate ", " (riOperands ri)
         control_info
           | ctl_info = " {" ++ intercalate "," tokens ++ "}"
           | otherwise = ""
@@ -71,16 +74,16 @@ fmtRawInstWithOpts ctl_info ri =
 
                 stall_tk
                   | stalls == 0 = ""
-                  | otherwise = "@" ++ show stalls
+                  | otherwise = "!" ++ show stalls
                   where stalls = getField64 0 4 control_bits
                 yield_tk
                   | getField64 4 1 control_bits == 0 = "Y"
                   | otherwise = ""
-                wr_alloc_tk = mkAllocTk "W" 5
-                rd_alloc_tk = mkAllocTk "R" 8
-                mkAllocTk nm off
+                wr_alloc_tk = mkAllocTk ".W" 5
+                rd_alloc_tk = mkAllocTk ".R" 8
+                mkAllocTk sfx off
                   | val == 7 = "" -- I guess 7 is their ignored value
-                  | otherwise = "v" ++ nm ++ show (val + 1)
+                  | otherwise = "+" ++ show (val + 1) ++ sfx
                   where val = getField64 off 3 control_bits
                 wait_mask_tk
                   | null indices = ""
@@ -107,6 +110,7 @@ fmtRiWithControlInfo ri =
         ln_spaces = replicate (90 - length ln_pfx) ' '
         bits = printf "/* %016x`%016x */" (wHi64 (riBits ri)) (wLo64 (riBits ri))
 
+{-
 
 -- 0x001c7c00e22007f6
 debugDepInfoMaxwellTriple :: Word64 -> IO ()
@@ -120,7 +124,6 @@ decodeDepInfoMaxwellTriple w64 =
       , (w64`shiftR`21) .&. 0x000000000001FFFF
       , (w64`shiftR`(2*21)) .&. 0x000000000001FFFF
       ]
-
 
 formatDepInfoMaxwell :: Word64 -> String
 formatDepInfoMaxwell control_info =
@@ -136,53 +139,36 @@ formatDepInfoMaxwell control_info =
           ]
         stall_tk
           | stalls == 0 = ""
-          | otherwise = "@" ++ show stalls
+          | otherwise = "!" ++ show stalls
           where stalls = getField 0 4
         yield_tk
           | getField 4 1 == 0 = "Y"
           | otherwise = ""
-        wr_alloc_tk = mkAllocTk "W" 5
-        rd_alloc_tk = mkAllocTk "R" 8
+        wr_alloc_tk = mkAllocTk ".W" 5
+        rd_alloc_tk = mkAllocTk ".R" 8
         mkAllocTk nm off
           | val == 7 = "" -- I guess 7 is their ignored value
-          | otherwise = "v" ++ nm ++ show (val + 1)
+          | otherwise = "+" ++ show (val + 1) ++ nm
           where val = getField off 3
         wait_mask_tk
           | null indices = ""
           | otherwise = intercalate "," (map (\i -> "^" ++ show (i + 1)) indices)
           where indices = filter (testBit wait_mask) [0..5]
                  where wait_mask = getField 11 6
+-}
+-- s0 = "        /*0000*/                   MOV R1, c[0x0][0x28] ;    /* 0x00000a0000017a02 */"
+-- s1 = "                                                             /* 0x000fd00000000f00 */"
 
--- s0 = "        /*0000*/                   MOV R1, c[0x0][0x28] ;                                    /* 0x00000a0000017a02 */"
--- s1 = "                                                                                             /* 0x000fd00000000f00 */"
+s0 = "        /*2820*/               @P0 EXIT ;    /* 0x000000000000094d */"
+s1 = "                                              /* 0x000fea0003800000 */"
 
+{-
 tryParseInstructionLines :: String -> String -> Maybe RawInst
 tryParseInstructionLines ln0 ln1 =
-    case span isSpace ln0 of
-      (spaces,'/':'*':ds) ->
-          case span isHexDigit ds of
-            (xds,'*':'/':sfx) -> parseSyntax (read ("0x"++xds)) sfx
-            _ -> Nothing
-      _ -> Nothing
-  where isAddrPfx ('/':'*':ds) =
-          case span isDigit (dropWhile isSpace ds) of
-            (ds,'*':'/':sfx) -> True
-            _ -> False
-
-        parseSyntax :: Int -> String -> Maybe RawInst
-        parseSyntax off sfx0 = do
-          (ri0,sfx) <- parseRawInstNoSuffix sfx0
-          let ri =
-                RawInst {
-                  riOffset = off
-                , riPredication = riPredication ri0
-                , riMnemonic = riMnemonic ri0
-                , riOperands = riOperands ri0
-                , riBits = Word128 0 0
-                }
-          parseBits ri sfx
-
-        parseBits :: RawInst -> String -> Maybe RawInst
+    case parseRawInstNoSuffix (dropWhile isSpace ln0) of
+      Just (ri,sfx) -> parseBits ri (dropWhile isSpace sfx)
+      Nothing -> Nothing
+  where parseBits :: RawInst -> String -> Maybe RawInst
         parseBits ri sfx = do
           w_lo <- parseSlashStarHexWord (dropWhile isSpace sfx)
           w_hi <- parseSlashStarHexWord (dropWhile isSpace ln1)
@@ -197,6 +183,8 @@ parseSlashStarHexWord ('/':'*':ds) =
       ('*':'/':_) -> Just x
       _ -> Nothing
   _ -> Nothing
+parseSlashStarHexWord s = error $ "parseSlashStarHexWord: " ++ show s
+-}
 
 skipWs :: String -> String
 skipWs [] = []
@@ -208,13 +196,12 @@ skipWs (c:cs)
   | isSpace c = skipWs cs
   | otherwise = c:cs
 
-parseRawInst :: String -> Maybe (RawInst,String)
-parseRawInst =  fmap f . parseRawInstNoSuffix
-  where f (ri,sfx) = (ri,skipWs sfx)
 
--- parses a raw instruction, but doesn't skip whitespace at the end
-parseRawInstNoSuffix :: String -> Maybe (RawInst,String)
-parseRawInstNoSuffix = parseOffsetOpt . dropWhile isSpace
+-- parses a raw instruction
+parseRawInst :: String -> Maybe RawInst
+parseRawInst = fmap fst . parseRawInst'
+parseRawInst' :: String -> Maybe (RawInst,String)
+parseRawInst' = parseOffsetOpt . dropWhile isSpace
   where parseOffsetOpt :: String -> Maybe (RawInst,String)
         parseOffsetOpt s =
           case s of
@@ -252,19 +239,92 @@ parseRawInstNoSuffix = parseOffsetOpt . dropWhile isSpace
                 parseOperands ri sfx =
                   case sfx of
                     -- nullary instruction
-                    ';':sfx -> return (ri,skipWs sfx)
+                    ';':sfx -> return (ri,dropWhile isSpace sfx)
                     s ->
                       case span (not . (`elem`",;{")) s of
                         (op,sfx) ->
                             case skipWs sfx of
                               ',':sfx -> parseOperands ri1 sfx
-                              ';':sfx -> return (ri1,sfx)
+                              ';':sfx -> return (ri1,dropWhile isSpace sfx)
                               '{':sfx ->
                                 case dropWhile (/=';') (drop 1 sfx) of
-                                  "" -> return (ri1,"")
-                                  ';':sfx -> return (ri1,sfx)
+                                  "" -> Nothing
+                                  ';':sfx -> return (ri1,dropWhile isSpace sfx)
                               "" -> Nothing
                           where ri1 = ri{riOperands = riOperands ri ++ [trimWs op]}
+
+parseRawInstWithBits :: String -> Maybe RawInst
+parseRawInstWithBits = parseOffsetOpt . dropWhile isSpace
+  where parseOffsetOpt :: String -> Maybe RawInst
+        parseOffsetOpt s =
+          case s of
+            -- /*0020*/ <- no 0x prefix
+            '/':'*':sfx ->
+              case span isHexDigit sfx of
+                (xds,'*':'/':sfx)
+                  | null xds -> parseSyntax 0 (skipWs sfx)
+                  | otherwise -> parseSyntax (read ("0x"++xds)) (skipWs sfx)
+            _ -> parseSyntax 0 s
+
+        parseSyntax :: Int -> String -> Maybe RawInst
+        parseSyntax off s =
+          case parseRawInst' s of
+            Nothing -> Nothing
+            Just (ri,sfx) ->
+              parseBitsSuffix ri{riOffset = off} sfx
+
+        parseBitsSuffix :: RawInst -> String -> Maybe RawInst
+        parseBitsSuffix ri sfx =
+          case parseDualBitsInSingleComment sfx of
+            Nothing ->
+              case parseBitsInCommentSequence sfx of
+                Nothing -> Nothing
+                Just (w128,_) -> return ri{riBits = w128}
+            Just (w128,_) -> return ri{riBits = w128}
+
+-- /* F123...`AFD0... */
+parseDualBitsInSingleComment :: String -> Maybe (Word128,String)
+parseDualBitsInSingleComment s =
+  case dropWhile isSpace s of
+    '/':'*':sfx ->
+      case span isHexDigit (dropWhile isSpace sfx) of
+        (ds0,sfx)
+          | null ds0 -> Nothing
+          | otherwise ->
+            case dropWhile isSpace sfx of
+              '`':sfx ->
+                case span isHexDigit sfx of
+                  (ds1,sfx) ->
+                    case dropWhile isSpace sfx of
+                      '*':'/':sfx -> return (w128,dropWhile isSpace sfx)
+                        where w128 = Word128 (read ("0x"++ds0)) (read ("0x"++ds1))
+                      _ -> Nothing
+              _ -> Nothing
+    _ -> Nothing
+
+-- reverse order (low bits first)
+-- /* 0x1234 */ /* 0x789A */
+parseBitsInCommentSequence :: String -> Maybe (Word128,String)
+parseBitsInCommentSequence s0 = do
+  (w0,s1) <- parseHexInComment s0
+  (w1,s2) <- parseHexInComment s1
+  return (Word128 w1 w0,s2)
+
+-- /* 0x1234 */
+parseHexInComment :: String -> Maybe (Word64,String)
+parseHexInComment s =
+  case dropWhile isSpace s of
+    '/':'*':sfx ->
+      case dropWhile isSpace sfx of
+        '0':'x':sfx ->
+          case span isHexDigit sfx of
+            (ds,sfx) ->
+              case dropWhile isSpace sfx of
+                '*':'/':sfx ->
+                  return (read ("0x" ++ ds), dropWhile isSpace sfx)
+                _ -> Nothing
+        _ -> Nothing
+    _ -> Nothing
 
 trimWs :: String -> String
 trimWs = reverse .  dropWhile isSpace . reverse .  dropWhile isSpace
