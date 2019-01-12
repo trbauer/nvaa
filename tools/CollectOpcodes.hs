@@ -1,6 +1,7 @@
 module CollectOpcodes where
 
-import NVT.Driver(getSubPaths)
+import NVT.Driver
+import NVT.CUDASDK
 import NVT.Opts
 import NVT.RawInst
 import NVT.Word128
@@ -27,10 +28,11 @@ collectOps = body
           --
           --
           createDirectoryIfMissing True output_root
-          samples_sass_files <- filter (".sass"`isSuffixOf`) <$> getSubPaths "examples/sm_75/samples"
---          libraries_sass_files <- filter (".sass"`isSuffixOf`) <$> getSubPaths "examples/sm_75/libs"
---          mapM_ processFile (samples_sass_files ++ libraries_sass_files)
-          mapM_ processFile (samples_sass_files)
+          let filterSassOnly = filter (".sass"`isSuffixOf`)
+--          samples_sass_files <-  filterSassOnly <$> getSubPaths "examples/sm_75/samples"
+--          mapM_ processFile (samples_sass_files)
+          libraries_sass_files <- filterSassOnly <$> getSubPaths "examples/sm_75/libs"
+          mapM_ processFile (libraries_sass_files)
           return ()
 
         output_root = "examples/sm_75/ops"
@@ -53,3 +55,33 @@ collectOps = body
                 let base_op = takeWhile (/='.') (riMnemonic ri)
                 appendFile (output_root ++ "/" ++ base_op ++ ".sass") $
                    printf "%-80s" syntax ++ " // " ++ source_info ++ "\n"
+
+
+-- want to infer the bit patterns of all opcodes
+-- for each opcode X
+--   load all samples (with bits)
+--   find the longest common field starting from 0 where all samples share the same value
+--
+
+-- QUERIES:
+--
+--  * SAMPLE FIELDS
+--    given fields Fs, list the values in a list of samples
+--             [15:10]    [27]
+--     SYN1    0x4        ...
+--     SYN2    0x4        ...
+--     SYN3    0x4        ...
+--     SYN4    0x4        ...
+--     SYN5    0x4        ...
+--
+--
+--   * TWIDDLE VALUES
+--   Given a base instruction word W, enumerate syntax as we try all
+--   values for fields Fs
+--    [15:10]       [27]
+--    0b000000 (0)    0     SYNTAX
+--    0b000000 (0)    1     *** CRASH *** one-line msg
+--    0b000001 (1)    0     SYNTAX
+--
+-- For each format
+--   *

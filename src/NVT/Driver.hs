@@ -51,6 +51,9 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.opt spec "" "save-cubin" "PATH"
                 "saves the intermediate .cubin file to this path" ""
                 (\f o -> (o {oSaveCuBin = f})) # PA.OptAttrAllowUnset
+            , PA.opt spec "" "save-ptx" "PATH"
+                "saves the intermediate .ptx file to this path" ""
+                (\f o -> (o {oSavePtx = f})) # PA.OptAttrAllowUnset
 
             , PA.opt spec "X" "" "ANYTHING"
                 "sets an extra argument for the nvcc tool (e.g. -X-Ic:\\foo\\bar)" ""

@@ -127,12 +127,12 @@ findWindowsKitsInclude = do
       --
       ds <- getSubPaths "C:\\Program Files (x86)\\Windows Kits\\10\\Include" >>= filterM isKitVersionedDir
       case sortOn (Down . takeFileName) ds of
-        (newest:_) -> return
+        (newest_kit:_) -> return
           [
-            newest </> "ucrt"
-          , newest </> "shared"
-          , newest </> "um"
-          , newest </> "winrt"
+            "-I" ++ newest_kit </> "ucrt"
+          , "-I" ++ newest_kit </> "shared"
+          , "-I" ++ newest_kit </> "um"
+          , "-I" ++ newest_kit </> "winrt"
           ]
 
 
@@ -155,21 +155,29 @@ getSubPaths dir =
 runCudaTool :: Opts -> String -> [String] -> IO String
 runCudaTool os tool args = do
   tool_exe <- findCudaTool os (mkExe tool)
-  -- debugLn os $ show tool_exe ++ " " ++ show args
   execProcess os tool_exe args
 
+runCudaToolWithExitCode :: Opts -> String -> [String] -> IO (ExitCode,String,String)
+runCudaToolWithExitCode os tool args = do
+  tool_exe <- findCudaTool os (mkExe tool)
+  execProcessWithExitCode os tool_exe args
 
 execProcess :: Opts -> FilePath -> [String] -> IO String
 execProcess os exe args = do
-  debugLn os $ "% " ++ exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
-  (ec,out,err) <- readProcessWithExitCode exe args ""
-  debugLn os $ "% " ++ show ec
+  (ec,out,err) <- execProcessWithExitCode os exe args
   case ec of
     ExitFailure ex_val -> do
       let lbl = "[" ++ dropExtension (takeFileName exe) ++ "] "
       fatal $ labelLines lbl $
         err ++ out ++ "\n" ++ "[exited " ++ show ex_val ++ "]"
     ExitSuccess -> return out
+
+execProcessWithExitCode :: Opts -> FilePath -> [String] -> IO (ExitCode,String,String)
+execProcessWithExitCode os exe args = do
+  debugLn os $ "% " ++ exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
+  ret@(ec,out,err) <- readProcessWithExitCode exe args ""
+  debugLn os $ "% " ++ show ec
+  return ret
 
 labelLines :: String -> String -> String
 labelLines pfx = unlines . map (pfx++) . lines

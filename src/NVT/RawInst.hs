@@ -10,6 +10,7 @@ import Data.Char
 import Data.List
 import Data.Word
 import Debug.Trace
+import System.Exit
 import System.Directory
 import System.IO
 import Text.Printf
@@ -359,21 +360,53 @@ getTempFile = do
 disBitsRaw :: Opts -> Word128 -> IO String
 disBitsRaw os w128 = head <$> disBitsRawBatch os [w128]
 
+-- need to fallback on failure and binary search
 disBitsRawBatch :: Opts -> [Word128] -> IO [String]
-disBitsRawBatch os w128s = do
-  temp_file <- getTempFile
-  BS.writeFile temp_file (BS.concat (map toByteStringW128 w128s))
-  oup <- runCudaTool os "nvdisasm" [
-            "--no-vliw"
-         -- , "--print-instruction-encoding"
-          , "--no-dataflow"
-          , "--binary=" ++ filter (/='_') (map toUpper (oArch os))
-          , temp_file
-          ]
-  removeFile temp_file
-  print oup
-  putStrLn oup
-  -- we get a header line with .headerflags first, drop it and emit
-  let filterOutput = map (trimWs . skipWs) . drop 1 . lines
-  return $ filterOutput oup
+disBitsRawBatch os w128s = setup
+  where setup = do
+          temp_file <- getTempFile
+          ss <- decodeChunk temp_file (length w128s) w128s
+          removeFile temp_file
+          return ss
+
+        decodeChunk :: FilePath -> Int -> [Word128] -> IO [String]
+        decodeChunk _         _       [] = return []
+        decodeChunk temp_file max_len w128s = do
+          let (w128s_chunk,w128s_sfx) = splitAt max_len w128s
+          BS.writeFile temp_file (BS.concat (map toByteStringW128 w128s_chunk))
+
+          (ec,oup,err) <-
+            runCudaToolWithExitCode os "nvdisasm" [
+                    "--no-vliw"
+                 -- , "--print-instruction-encoding"
+                  , "--no-dataflow"
+                  , "--binary=" ++ filter (/='_') (map toUpper (oArch os))
+                  , temp_file
+                  ]
+          case ec of
+            ExitFailure _
+              | max_len == 1 -> do
+                -- failed at the smallest value, it's a legit error
+                  let this_error = (\ls -> if null ls then "???" else head ls) (lines err)
+                  (this_error:) <$>
+                    decodeChunk temp_file max_len w128s_sfx
+              | otherwise -> do
+              -- TODO:
+                -- [nvdisasm]nvdisasm error   : Unrecognized operation for functional unit 'uC' at address 0x00000000
+                -- can use the address to intelligently skip ahead
+                --
+                -- take everything up to that address and assemble as a chunk, then
+                --
+                -- split it in half and try again
+                putStrLn $ "*** nvdisasm failed; trying chunk of " ++ show (max_len`div`2) ++ " ***"
+                decodeChunk temp_file (max_len`div`2) w128s
+            ExitSuccess -> do
+              -- we get a header line with .headerflags first, drop it and emit
+              let filterOutput = map (removeSemi . trimWs . skipWs) . drop 1 . lines
+                    where removeSemi s
+                            | null s = s
+                            | last s == ';' = trimWs (init s)
+                            | otherwise = s
+              -- hope we got past the error and reduce size
+              (filterOutput oup++) <$> decodeChunk temp_file (length w128s_sfx) w128s_sfx
 
