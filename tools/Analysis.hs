@@ -1,4 +1,4 @@
-module CollectOpcodes where
+module Analysis where
 
 import NVT.Opts
 import NVT.RawInst
@@ -35,7 +35,64 @@ findLdPredLowBit = do
   forM_ [87..100] $ \pix -> twiddleFieldsB [(82,2),(pix,1)] (sString "000EA200001EE900`0000000004067381")
 
 
+-- FIXME:
+--   start bit is the top part of another field, will this cause confusion
+probe :: Int -> Sample -> IO ()
+probe ix s = startProbe
+  where startProbe :: IO ()
+        startProbe = do
+          [str0,str1] <- disassembleField (ix,1) s
+          if str0 == str1 then extendFieldMbz 2
+            else extendField 2
+
+        extendFieldMbz :: Int -> IO ()
+        extendFieldMbz len = do
+          putStrLn $ "extend field MBZ: " ++ show len
+          strs <- disassembleField (ix,len) s
+          if all (==head strs) strs then extendFieldMbz (len+1)
+            else putStrLn $ "===> " ++ fFormat (ix,len-1) ++ ": is probably reserved <==="
+
+        extendField :: Int -> IO ()
+        extendField len = do
+          putStrLn $ "extend field: " ++ show len
+          strs <- disassembleField (ix,len) s
+          let (fst_half,snd_half) = splitAt (len`div`2) strs
+          if ix + len == 64 then do
+              mapM print fst_half
+              putStrLn $ "===> " ++ fFormat (ix,len-1) ++ ": is a field (stopping at bit 64) <==="
+            else if ix + len == 128 then do
+                mapM print fst_half
+                putStrLn $ "===> " ++ fFormat (ix,len-1) ++ ": is a field (stopping at bit 128) <==="
+              else if fst_half == snd_half then do
+                  -- BUG: this only works if the field is up against an MBZ field...
+                  mapM print fst_half
+                  putStrLn $ "===> " ++ fFormat (ix,len-1) ++ ": is a field <==="
+                else extendField (len + 1)
+
+
+
+
+disassembleFieldD :: Field -> Sample -> IO [String]
+disassembleFieldD f (Sample w128) = disBitsRawBatch opts{oVerbosity = 2} w128s
+  where w128s :: [Word128]
+        w128s = map (\v -> putField128 (fOff f) (fLen f) v w128) [0 .. 2^(fLen f)-1]
+disassembleField :: Field -> Sample -> IO [String]
+disassembleField f (Sample w128) = disBitsRawBatch opts w128s
+  where w128s :: [Word128]
+        w128s = map (\v -> putField128 (fOff f) (fLen f) v w128) [0 .. 2^(fLen f)-1]
+-- disassembleFields :: [Field] -> Sample -> IO [String]
+-- disassembleFields f (Sample w128) = disBitsRawBatch opts w128s
+--  where w128s :: [Word128]
+--        w128s = map (\v -> putField128 (fOff f) (fLen f) v w128) [0 .. 2^(fLen f)-1]
+
+
 -- LDG
+-- [14:12] predicat reg {.P0,.P1,.P2,.P3,.P4,.P5,.P6,.PT} -- PT doesn't show if [15] is not clear (since it's implied)
+-- [15] predicate negation
+-- [23:16] dst
+-- [31:24] src0
+-- [39:32] MBZ
+
 -- [76] .PRIVATE
 -- [78:77] = {.CTA,.SM,.GPU,.SYS}
 -- [81:79] = {.CONSTANT,.SYS,.STRONG,.MMIO}
@@ -102,6 +159,12 @@ help = do
 -- "  * findIgnoredFields  => given a sample S, report all max fields that don't change syntax\n" ++
 -- "  * listDiffCtls => similar to listDiffs except ignores known register and constant buffer fields\n" ++
 -- "      (uses opcode and ignores register and immediate differences)\n" ++
+-- "   *
+
+-- findIgnoredFields :: Sample -> IO ()
+-- findIgnoredFields s = body
+--  where body = do
+--          ...
 
 
 decode :: Sample -> IO ()
@@ -217,7 +280,8 @@ test_twiddle = twiddleField (79,2) (sString "000EA200001EE900`0000000004067381")
 
 twiddleField :: Field -> Sample -> IO ()
 twiddleField f s = twiddleFields [f] s
-
+twiddleFieldB :: Field -> Sample -> IO ()
+twiddleFieldB f s = twiddleFieldsB [f] s
 twiddleFields :: [Field] -> Sample -> IO ()
 twiddleFields = twiddleFieldsBase False
 twiddleFieldsB :: [Field] -> Sample -> IO ()
@@ -230,15 +294,19 @@ twiddleFieldsBase binary fs s0 = body
           let (fmtHeader,fmtValue)
                 | binary = (fmtFieldHeaderBinary,fmtFieldValueBinary)
                 | otherwise = (fmtFieldHeader,fmtFieldValue)
-          putStrLn $ intercalate "  " (map fmtHeader fs)
+          putStrLn $ intercalate " " (map ((++" ") . (" "++) . fmtHeader) fs)
           --
           let rows :: [Row]
               rows = map (\fvs -> (fvs,fieldValuesToSample fvs)) twiddle_cases
+
+              fmtVal f w = chr ++ fmtValue f w ++ chr
+                where chr = if fGetValue f s0 == w then "*" else " "
+
           -- disassemble en-mass
           strs <- disBitsRawBatch opts (map (sBits . snd) rows)
           forM_ (zip rows strs) $ \((fvs,_),syn) -> do
             putStrLn $
-              intercalate "  " (map (uncurry fmtValue) fvs) ++ "  " ++ syn
+              intercalate "  " (map (uncurry fmtVal) fvs) ++ "  " ++ syn
 
         fieldValuesToSample :: [(Field,Word64)] -> Sample
         fieldValuesToSample = Sample . foldl' acc (sBits s0)

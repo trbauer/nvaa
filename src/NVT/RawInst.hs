@@ -371,8 +371,8 @@ disBitsRawBatch os w128s = setup
 
         decodeChunk :: FilePath -> Int -> [Word128] -> IO [String]
         decodeChunk _         _       [] = return []
-        decodeChunk temp_file max_len w128s = do
-          let (w128s_chunk,w128s_sfx) = splitAt max_len w128s
+        decodeChunk temp_file chunk_len w128s = do
+          let (w128s_chunk,w128s_sfx) = splitAt chunk_len w128s
           BS.writeFile temp_file (BS.concat (map toByteStringW128 w128s_chunk))
 
           (ec,oup,err) <-
@@ -385,22 +385,27 @@ disBitsRawBatch os w128s = setup
                   ]
           case ec of
             ExitFailure _
-              | max_len == 1 -> do
+              | chunk_len == 1 -> do
                 -- failed at the smallest value, it's a legit error
+                  debugLn os $
+                    "*** nvdisasm failed chunk (" ++ show chunk_len ++ ") ***"
                   let this_error = (\ls -> if null ls then "???" else head ls) (lines err)
                   (this_error:) <$>
-                    decodeChunk temp_file max_len w128s_sfx
+                    decodeChunk temp_file chunk_len w128s_sfx
               | otherwise -> do
               -- TODO:
-                -- [nvdisasm]nvdisasm error   : Unrecognized operation for functional unit 'uC' at address 0x00000000
+                -- nvdisasm error   : Unrecognized operation for functional unit 'uC' at address 0x00000000
                 -- can use the address to intelligently skip ahead
                 --
                 -- take everything up to that address and assemble as a chunk, then
                 --
                 -- split it in half and try again
-                putStrLn $ "*** nvdisasm failed; trying chunk of " ++ show (max_len`div`2) ++ " ***"
-                decodeChunk temp_file (max_len`div`2) w128s
+                debugLn os $
+                  "*** nvdisasm failed chunk (" ++ show chunk_len ++ ") ***"
+                decodeChunk temp_file (chunk_len`div`2) w128s
             ExitSuccess -> do
+              debugLn os $
+                "*** nvdisasm succeeded with chunk(" ++ show chunk_len ++ ") ***"
               -- we get a header line with .headerflags first, drop it and emit
               let filterOutput = map (removeSemi . trimWs . skipWs) . drop 1 . lines
                     where removeSemi s

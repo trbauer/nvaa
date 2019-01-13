@@ -17,8 +17,8 @@ import System.Process
 -- "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.0\bin\"
 main :: IO ()
 main = do
---  collectSampleIsa        "" D.dft_opts_75
-  collectLibrarySampleIsa "" D.dft_opts_75
+  collectSampleIsa        "" D.dft_opts_75
+--  collectLibrarySampleIsa "" D.dft_opts_75
 
 
 collectSampleIsa :: String -> D.Opts -> IO ()
