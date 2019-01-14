@@ -76,8 +76,7 @@ fmtRawInstWithOpts ctl_info ri =
                   , rd_alloc_tk
                   , wait_mask_tk
                   ]
-
-
+                --
                 stall_tk
                   | stalls == 0 = ""
                   | otherwise = "!" ++ show stalls

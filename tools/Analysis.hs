@@ -3,6 +3,7 @@ module Analysis where
 import NVT.Opts
 import NVT.RawInst
 import NVT.Word128
+import NVT.CUDASDK
 
 import Control.Exception
 import Control.Monad
@@ -26,17 +27,54 @@ import qualified Data.Map.Strict as DM
 --   find the longest common field starting from 0 where all samples share the same value
 --
 
+stg :: IO Sample -- STG.E.SYS [R12], R17 {!2,+1.R} ;       // examples/sm_75/samples\boxFilter_kernel.sass:13563
+stg = sString ("0001E4000010E900`000000110C007386")
+
+-- LDG.E.SYS R3, [UR38+0x14] {!1,+5.W} ;  // examples/sm_75/samples\cdpQuadtree.sass:7890
+ldg_ur_off = sString "000F22000C1EE900`00001426FF037981" --
+-- LDG with UR
+-- 000EA8000C1EE900`00000404FF047981:        LDG.E.SYS R4, [UR4+0x4] {!4,+3.W} ;    // examples/sm_75/samples\bisect_large.sass:5800
+-- 000EE8000C1EE900`00000006FF057981:        LDG.E.SYS R5, [UR6] {!4,+4.W} ;        // examples/sm_75/samples\bisect_large.sass:5802
+-- 000EA8000C1EE900`00000004FF027981:        LDG.E.SYS R2, [UR4] {!4,+3.W} ;        // examples/sm_75/samples\bitonic.sass:3258
+-- 000EA8000C1EE900`00000404FF058981:  @!P0  LDG.E.SYS R5, [UR4+0x4] {!4,+3.W} ;    // examples/sm_75/samples\bitonic.sass:3260
+-- 000EE8000C1EE900`00000006FF037981:        LDG.E.SYS R3, [UR6] {!4,+4.W} ;        // examples/sm_75/samples\bitonic.sass:3262
+-- 000F22000C1EE900`00000406FF048981:  @!P0  LDG.E.SYS R4, [UR6+0x4] {!1,+5.W} ;    // examples/sm_75/samples\bitonic.sass:3264
+--                          ^^ FF means UR
+
+--                                           ^^
+-- LDG.E.SYS R0, [R24+0x20] {!1,+3.W} ;   // examples/sm_75/samples\BezierLineCDP.sass:1600
+ldg_v_off  = sString "000EA200001EE900`0000200018007381"
+-- 000F6200001EE900`0000000004077381:        LDG.E.SYS R7, [R4] {!1,+6.W} ;         // examples/sm_75/samples\alignedTypes.sass:2896
+-- 000EA8000C1EE900`00000004FF027981:        LDG.E.SYS R2, [UR4] {!4,+3.W} ;        // examples/sm_75/samples\bisect_large.sass:5798
+--                  ........
+
+
 showLoadControls :: IO ()
 showLoadControls =
-  twiddleField (76,5) (sString "000EA200001EE900`0000000004067381")
+  twiddleField (75,2) (sString "000EA200001EE900`0000000004067381")
 
 findLdPredLowBit = do
   -- 87 seemed to twidding things
-  forM_ [87..100] $ \pix -> twiddleFieldsB [(82,2),(pix,1)] (sString "000EA200001EE900`0000000004067381")
+  forM_ [87..100] $ \pix -> twiddleFieldsB [(82,2),(pix,1)]
+    (sString "000EA200001EE900`0000000004067381")
 
 
 -- FIXME:
 --   start bit is the top part of another field, will this cause confusion
+probeReserved :: Int -> Sample -> IO ()
+probeReserved ix s = startProbe
+  where startProbe :: IO ()
+        startProbe = do
+          [str0,str1] <- disassembleField (ix,1) s
+          if str0 == str1 then extendFieldMbz 2
+            else putStrLn "field has syntactic meaning"
+        extendFieldMbz :: Int -> IO ()
+        extendFieldMbz len = do
+          putStrLn $ "extend field MBZ: " ++ show len
+          strs <- disassembleField (ix,len) s
+          if all (==head strs) strs then extendFieldMbz (len+1)
+            else putStrLn $ "===> " ++ fFormat (ix,len-1) ++ ": is probably reserved <==="
+
 probe :: Int -> Sample -> IO ()
 probe ix s = startProbe
   where startProbe :: IO ()
@@ -167,12 +205,15 @@ help = do
 --          ...
 
 
-decode :: Sample -> IO ()
-decode s =
+decode :: IO Sample -> IO ()
+decode ms = do
+  s <- ms
   disBitsRaw opts (sBits s) >>= putStrLn
 
-listDiffs :: Sample -> Sample -> IO ()
-listDiffs s1 s2 = do
+listDiffs :: IO Sample -> IO Sample -> IO ()
+listDiffs ms1 ms2 = do
+  s1 <- ms1
+  s2 <- ms2
   let fs = sampleDifferences s1 s2
   if null fs then putStrLn "all fields match"
     else do
@@ -233,17 +274,23 @@ data Sample = Sample {sBits :: !Word128}
 
 
 -- e.g. 000EE800001EE900`0000000006068381
-sString :: String -> Sample
-sString str =
+sString :: String -> IO Sample
+sString = return . sStringPure
+sStringPure :: String -> Sample
+sStringPure str =
   case reads ("0x" ++ str) of
     [(s,"")] -> Sample s
     _ -> error ("sFromBits: syntax error: " ++ show str)
 sAllOps :: String -> IO [Sample]
 sAllOps opname =
-  sFile ("examples/" ++ oArch opts ++ "/ops/" ++ map toUpper opname)
+  sFile ("examples/" ++ oArch opts ++ "/ops/" ++ map toUpper opname++".sass")
 sAllOpsK :: Int -> String -> IO [Sample]
 sAllOpsK k opname = maybeTakePrefix <$> sAllOps opname
   where maybeTakePrefix = if k < 0 then id else take k
+sDir :: FilePath -> IO [Sample]
+sDir dir = do
+  fs <- getSubPaths dir
+  concat <$> mapM sFile fs
 sFile :: FilePath -> IO [Sample]
 sFile fp = do
   -- e.g. 000EE200001EED00`00001000020C7381:        LDG.E.128.SYS R12, [R2+0x10] {!1,+4.W} ; // examples/sm_75/samples\bodysystemcuda.sass:20925
@@ -278,17 +325,23 @@ type RowDis = (Row,String)
 -- LDG.E.SYS R6, [R4] {!1,+3.W}
 test_twiddle = twiddleField (79,2) (sString "000EA200001EE900`0000000004067381")
 
-twiddleField :: Field -> Sample -> IO ()
-twiddleField f s = twiddleFields [f] s
-twiddleFieldB :: Field -> Sample -> IO ()
+twiddleField :: Field -> IO Sample -> IO ()
+twiddleField = twiddleFieldB
+twiddleFields :: [Field] -> IO Sample -> IO ()
+twiddleFields = twiddleFieldsB
+twiddleFieldX :: Field -> IO Sample -> IO ()
+twiddleFieldX f s = twiddleFields [f] s
+twiddleFieldB :: Field -> IO Sample -> IO ()
 twiddleFieldB f s = twiddleFieldsB [f] s
-twiddleFields :: [Field] -> Sample -> IO ()
-twiddleFields = twiddleFieldsBase False
-twiddleFieldsB :: [Field] -> Sample -> IO ()
+twiddleFieldsX :: [Field] -> IO Sample -> IO ()
+twiddleFieldsX = twiddleFieldsBase False
+twiddleFieldsB :: [Field] -> IO Sample -> IO ()
 twiddleFieldsB = twiddleFieldsBase True
-
-twiddleFieldsBase :: Bool -> [Field] -> Sample -> IO ()
-twiddleFieldsBase binary fs s0 = body
+twiddleFieldsBase :: Bool -> [Field] -> IO Sample -> IO ()
+twiddleFieldsBase binary fs s0_io =
+  s0_io >>= twiddleFieldsBaseP binary fs
+twiddleFieldsBaseP :: Bool -> [Field] -> Sample -> IO ()
+twiddleFieldsBaseP binary fs s0 = body
   where body = do
           -- str0 <- disBitsRaw opts (sBits s)
           let (fmtHeader,fmtValue)
@@ -337,6 +390,81 @@ twiddleFieldsBase binary fs s0 = body
 --        overwriteWith (f,val) =
 --          case s of
 --            Sample w128 -> Sample $ putField128 (fOff f) (fLen f) val w128
+
+
+extractFields :: IO [Sample] -> [Field] -> IO ()
+extractFields io_ss fs = body
+  where body = do
+          ss <- io_ss
+          putStrLn "disassembling"
+          strs <- disBitsRawBatch opts (map sBits ss)
+          --
+          let binary = True
+          let (fmtHeader,fmtValue)
+                | binary = (fmtFieldHeaderBinary,fmtFieldValueBinary)
+                | otherwise = (fmtFieldHeader,fmtFieldValue)
+          putStrLn $ intercalate "  " (map fmtHeader fs)
+          --
+          let fmtVal f w = " " ++ fmtValue f w
+          --
+          forM_ (zip ss strs) $ \(s,str) -> do
+            let fvs = map (\f -> (f,getField128 (fOff f) (fLen f) (sBits s))) fs
+            putStrLn $
+              intercalate "  " (map (uncurry fmtValue) fvs) ++ "  " ++ str
+
+
+longestCommonFields :: IO [Sample] -> IO ()
+longestCommonFields io_ss = body
+  where body = do
+          ss <- io_ss
+          putStrLn $ show (length ss) ++ " samples"
+          find ss
+
+        find ss = printPattern 127
+          where w128s = map sBits ss
+
+                printPattern :: Int -> IO ()
+                printPattern ix = do
+                  let bs = map (\w128 -> getField128 ix 1 w128) w128s
+                  if all (==head bs) bs then putStr (show (head bs))
+                    else putStr "*"
+                  when (ix == 64) $
+                    putStr "`"
+                  when (ix > 0) $
+                    printPattern (ix-1)
+                  when (ix == 0) $
+                    putStrLn ""
+
+
+createPattern :: IO [Sample] -> IO String
+createPattern io_ss = body
+  where body = io_ss >>= mkStr . map sBits
+
+        mkStr w128s = bit 0 ""
+          where bit 128 rbits = return (reverse rbits)
+                bit ix  rbits = bit (ix+1) (chr:rbits)
+                  where bs = map (\w128 -> getField128 ix 1 w128) w128s
+                        chr
+                          | all (==head bs) bs = if head bs == 0 then '0' else '1'
+                          | otherwise = '*'
+
+
+listOps :: [String] -> IO ()
+listOps = mapM_ (\s -> putStrLn s >> longestCommonFields (sAllOps s))
+
+listOps_LDX :: IO ()
+listOps_LDX = listOps ["LD","LDC","LDG","LDL","LDS","LDSM"]
+
+
+opcodeTest :: IO ()
+opcodeTest = do
+  ps <- getSubPaths "examples/sm_75/ops"
+  -- let ops = map (dropExtension . takeFileName) ps
+  pats <- mapM (createPattern . sFile) ps
+  let prefixLen = length . takeWhile (/='*')
+  mapM_  (\(p,pat) -> putStrLn (printf "%5d " (prefixLen pat) ++ pat ++ "  " ++ dropExtension (takeFileName p))) (zip ps pats)
+
+
 
 
 

@@ -200,3 +200,54 @@ collectLibrarySampleIsa substr os_raw = body
                     return ()
 
 
+-- should generalize the top one to call this one
+collectLibrarySampleIsaFromDir :: D.Opts -> FilePath -> IO ()
+collectLibrarySampleIsaFromDir os_raw full_dll = body
+  where os = os_raw{D.oSourceMapping = True}
+
+        body = do
+          putStrLn $ "*** DUMPING " ++ full_dll
+          cuod_exe <- D.findCudaTool os "cuobjdump"
+          out <- readProcess cuod_exe ["--list-elf",full_dll] ""
+          let elfs_lines = filter (("." ++ D.oArch os ++ ".")`isInfixOf`) (lines out)
+          let output_dir = "examples/" ++ D.oArch os ++ "/libs"
+          createDirectoryIfMissing True output_dir
+          let output_prefix = output_dir ++ "/" ++ dropExtension (takeFileName full_dll)
+          mapM_ (processElf cuod_exe full_dll output_prefix) (map (last . words) elfs_lines)
+          putStrLn "  === DUMPING PTX"
+          z <- doesFileExist (output_prefix ++ ".ptx")
+          unless z $ do
+            -- burns up too much memory
+            -- oup <- readProcess cuod_exe ["--dump-ptx", full_lib_path] ""
+            -- writeFile (output_prefix ++ ".ptx") oup
+            withFile (output_prefix ++ ".ptx") WriteMode $ \h -> do
+              let cp =
+                    (proc cuod_exe ["--dump-ptx",full_dll]){
+                      std_out = UseHandle h
+                    }
+              (Nothing,Nothing,Nothing,ph) <- createProcess cp
+              ec <- waitForProcess ph
+              putStrLn $ "  ptx dumping => " ++ show ec
+
+        processElf :: FilePath -> FilePath -> FilePath -> String -> IO ()
+        processElf cuod_exe full_dll output_prefix elf_cubin = do
+          putStrLn $ "  dumping " ++ elf_cubin
+          let dst_elf_cubin = output_prefix ++ "-" ++ elf_cubin
+          z <- doesFileExist dst_elf_cubin
+          unless z $ do
+            readProcess cuod_exe ["--extract-elf", elf_cubin, full_dll] ""
+            -- oup <- readProcess nvdis_exe [
+            --           "--no-vliw"
+            --         , "--no-dataflow"
+            --         , "--print-line-info"
+            --         , "--print-instruction-encoding"
+            --         , elf
+            --         ] ""
+            --  appendFile (output_prefix ++ ".sass") oup
+            D.runWithOpts
+              os {
+                D.oInputFile = elf_cubin
+              , D.oOutputFile = output_prefix ++ "-" ++ dropExtension elf_cubin ++ ".sass"
+              }
+            renameFile elf_cubin dst_elf_cubin
+            return ()
