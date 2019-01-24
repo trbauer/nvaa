@@ -171,9 +171,9 @@ runWithOpts os = processFile (oInputFile os)
           -- let nv_cuod_args = ["--dump-sass", cubin_file]
           -- cuod_out <- runCudaTool os "cuobjdump" nv_cuod_args
           let nvdis_args_no_lines =
+                maybeOpt oTextOnly "--print-code" ++
                 [
                   "--no-vliw" -- disables the {...}
-                -- , "--print-code" -- print program text sections only
                 , "--print-instruction-encoding"
                 , "--no-dataflow"
                 , cubin_file
@@ -190,8 +190,8 @@ runWithOpts os = processFile (oInputFile os)
                 | otherwise = id
           emitOutput (filterAsm nvdis_out)
           --
-          cuod_res <- runCudaTool os "cuobjdump" ["--dump-resource-usage", cubin_file]
-          appendOutput cuod_res
+          -- cuod_res <- runCudaTool os "cuobjdump" ["--dump-resource-usage", cubin_file]
+          -- appendOutput cuod_res
 
         -- UNREACHABLE for the moment
         processCubinFileNative :: FilePath -> IO ()

@@ -138,6 +138,18 @@ collectLibrarySampleIsa substr os_raw = body
         dumpLibs cuod_exe nvdis_exe dll_dir = body
           where body = do
                   putStrLn $ "EMITTING LIBS FROM: " ++ dll_dir
+
+                  dumpLib "nppial64_100.dll"     --   9 MB
+                  dumpLib "nppicc64_100.dll"     --   3 MB
+                  dumpLib "nppicom64_100.dll"    --   3 MB
+                  dumpLib "nppidei64_100.dll"    --
+                  dumpLib "nppif64_100.dll"      --
+                  dumpLib "nppig64_100.dll"      --
+                  dumpLib "nppim64_100.dll"      --
+                  dumpLib "nppist64_100.dll"     --
+                  dumpLib "nppitc64_100.dll"     --
+                  dumpLib "npps64_100.dll"       --
+
                   dumpLib "curand64_100.dll"     --  48 MB
                   dumpLib "cusparse64_100.dll"   --  55 MB
                   dumpLib "cublas64_100.dll"     --  65 MB
@@ -153,52 +165,7 @@ collectLibrarySampleIsa substr os_raw = body
                     let full_lib_path = dll_dir ++ "/" ++ lib
                     z <- doesFileExist full_lib_path
                     if not z then putStrLn (lib ++ ": file not found in dir: SKIPPING")
-                      else do
-                        out <- readProcess cuod_exe ["--list-elf",full_lib_path] ""
-                        let elfs_lines = filter (("." ++ D.oArch os ++ ".")`isInfixOf`) (lines out)
-                        let output_dir = "examples/" ++ D.oArch os ++ "/libs"
-                        createDirectoryIfMissing True output_dir
-                        let output_prefix = output_dir ++ "/" ++ dropExtension (takeFileName lib)
-                        mapM_ (processElf full_lib_path output_prefix) (map (last . words) elfs_lines)
-                        putStrLn "  === DUMPING PTX"
-                        z <- doesFileExist (output_prefix ++ ".ptx")
-                        unless z $ do
-                          -- burns up too much memory
-                          -- oup <- readProcess cuod_exe ["--dump-ptx", full_lib_path] ""
-                          -- writeFile (output_prefix ++ ".ptx") oup
-                          withFile (output_prefix ++ ".ptx") WriteMode $ \h -> do
-                            let cp =
-                                  (proc cuod_exe ["--dump-ptx", full_lib_path]){
-                                    std_out = UseHandle h
-                                  }
-                            (Nothing,Nothing,Nothing,ph) <- createProcess cp
-                            ec <- waitForProcess ph
-                            putStrLn $ "  ptx dumping => " ++ show ec
-
-
-                processElf :: FilePath -> FilePath -> String -> IO ()
-                processElf full_lib_path output_prefix elf_cubin = do
-                  putStrLn $ "  dumping " ++ elf_cubin
-                  let dst_elf_cubin = output_prefix ++ "-" ++ elf_cubin
-                  z <- doesFileExist dst_elf_cubin
-                  unless z $ do
-                    readProcess cuod_exe ["--extract-elf", elf_cubin, full_lib_path] ""
-                    -- oup <- readProcess nvdis_exe [
-                    --           "--no-vliw"
-                    --         , "--no-dataflow"
-                    --         , "--print-line-info"
-                    --         , "--print-instruction-encoding"
-                    --         , elf
-                    --         ] ""
-                    --  appendFile (output_prefix ++ ".sass") oup
-                    D.runWithOpts
-                      os {
-                        D.oInputFile = elf_cubin
-                      , D.oOutputFile = output_prefix ++ "-" ++ dropExtension elf_cubin ++ ".sass"
-                      }
-                    renameFile elf_cubin dst_elf_cubin
-                    return ()
-
+                      else collectLibrarySampleIsaFromDir os (full_lib_path)
 
 -- should generalize the top one to call this one
 collectLibrarySampleIsaFromDir :: D.Opts -> FilePath -> IO ()
@@ -210,29 +177,30 @@ collectLibrarySampleIsaFromDir os_raw full_dll = body
           cuod_exe <- D.findCudaTool os "cuobjdump"
           out <- readProcess cuod_exe ["--list-elf",full_dll] ""
           let elfs_lines = filter (("." ++ D.oArch os ++ ".")`isInfixOf`) (lines out)
-          let output_dir = "examples/" ++ D.oArch os ++ "/libs"
+          let output_dir = "examples/" ++ D.oArch os ++ "/libs/" ++ takeFileName (dropExtension full_dll)
           createDirectoryIfMissing True output_dir
-          let output_prefix = output_dir ++ "/" ++ dropExtension (takeFileName full_dll)
-          mapM_ (processElf cuod_exe full_dll output_prefix) (map (last . words) elfs_lines)
+          mapM_ (processElf cuod_exe output_dir) (map (last . words) elfs_lines)
           putStrLn "  === DUMPING PTX"
-          z <- doesFileExist (output_prefix ++ ".ptx")
+          let ptx_file = output_dir ++ "/" ++ takeFileName (dropExtension full_dll) ++ ".ptx"
+          z <- doesFileExist ptx_file
           unless z $ do
             -- burns up too much memory
             -- oup <- readProcess cuod_exe ["--dump-ptx", full_lib_path] ""
             -- writeFile (output_prefix ++ ".ptx") oup
-            withFile (output_prefix ++ ".ptx") WriteMode $ \h -> do
+            withFile ptx_file WriteMode $ \h -> do
+              hSetNewlineMode h nativeNewlineMode{outputNL = LF}
               let cp =
-                    (proc cuod_exe ["--dump-ptx",full_dll]){
+                    (proc cuod_exe ["--dump-ptx",full_dll]) {
                       std_out = UseHandle h
                     }
               (Nothing,Nothing,Nothing,ph) <- createProcess cp
               ec <- waitForProcess ph
               putStrLn $ "  ptx dumping => " ++ show ec
 
-        processElf :: FilePath -> FilePath -> FilePath -> String -> IO ()
-        processElf cuod_exe full_dll output_prefix elf_cubin = do
+        processElf :: FilePath -> FilePath -> String -> IO ()
+        processElf cuod_exe output_dir elf_cubin = do
           putStrLn $ "  dumping " ++ elf_cubin
-          let dst_elf_cubin = output_prefix ++ "-" ++ elf_cubin
+          let dst_elf_cubin = output_dir ++ "/" ++ elf_cubin
           z <- doesFileExist dst_elf_cubin
           unless z $ do
             readProcess cuod_exe ["--extract-elf", elf_cubin, full_dll] ""
@@ -247,7 +215,12 @@ collectLibrarySampleIsaFromDir os_raw full_dll = body
             D.runWithOpts
               os {
                 D.oInputFile = elf_cubin
-              , D.oOutputFile = output_prefix ++ "-" ++ dropExtension elf_cubin ++ ".sass"
+              , D.oOutputFile = output_dir ++ "/" ++ dropExtension elf_cubin ++ ".sass"
+              , D.oTextOnly = True
+              -- , D.oExtraArgs = D.oExtraArgs os ++ ["--dump-resource-usage"]
               }
+            res <- readProcess cuod_exe ["--dump-resource-usage", elf_cubin] ""
+            res_cpp <- readProcess ("C:\\Haskell\\8.4.2\\mingw\\bin\\c++filt.exe") [] res
+            writeFile (replaceExtension dst_elf_cubin "txt") res_cpp
             renameFile elf_cubin dst_elf_cubin
             return ()

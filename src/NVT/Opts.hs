@@ -14,6 +14,7 @@ data Opts =
   , oInputFile :: !FilePath
   , oSourceMapping :: !Bool
   , oFilterAssembly :: !Bool
+  , oTextOnly :: !Bool
   , oRDC :: !Bool
   , oExtraArgs :: [String]
   } deriving Show
@@ -29,6 +30,7 @@ dft_opts =
 --  , oUseCuobjdump = False
   , oSourceMapping = False
   , oFilterAssembly = True
+  , oTextOnly = False
   , oRDC = False
   , oExtraArgs = []
   }

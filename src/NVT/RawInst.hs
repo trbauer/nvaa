@@ -47,54 +47,64 @@ data RawInst =
 
 
 fmtRawInstWithOpts :: Bool -> RawInst -> String
-fmtRawInstWithOpts ctl_info ri =
-      pred ++ " " ++ riMnemonic ri ++ opnds ++ control_info ++ " ;"
-  where pred = printf "%-5s" (riPredication ri)
+fmtRawInstWithOpts ctl_info ri = maybePad prefix ++ suffix
+  where prefix = pred ++ " " ++ riMnemonic ri ++ opnds
+        maybePad
+          | ctl_info = padR 64
+          | otherwise = id
+        pred = printf "%-5s" (riPredication ri)
         opnds
           | null (riOperands ri) = ""
           | otherwise  = " " ++ intercalate ", " (riOperands ri)
-        control_info
-          | ctl_info = " {" ++ intercalate "," tokens ++ "}"
+        suffix
+          | ctl_info = "  " ++ padR 16 (fmtExtendedInfo (riBits ri) ++ ";")
+          | otherwise = ";"
+
+padR :: Int -> String -> String
+padR k s = s ++ replicate (k - length s) ' '
+
+-- just the hidden syntax parts as instruction options
+fmtExtendedInfo :: Word128 -> String
+fmtExtendedInfo w128 = "{" ++ intercalate "," tokens ++ "}"
+  where control_bits = getField128 (128 - 23) 23 w128
+        -- Volta control words are the top 23 bits.  The meaning is pretty much
+        -- unchanged since Maxwell (I think).
+        --   https://arxiv.org/pdf/1804.06826
+        --   https://github.com/NervanaSystems/maxas/wiki/Control-Codes
+        --
+        --  [22:21] / [127:126] = MBZ
+        --  [20:17] / [125:122] = .reuse
+        --  [16:11] / [121:116] = wait barrier mask
+        --  [10:8]  / [115:113] = read barrier index
+        --  [7:5]   / [112:110] = write barrier index
+        --  [4]     / [109]     = !yield (yield if zero)
+        --  [3:0]   / [108:105] = stall cycles (0 to 15)
+        tokens = filter (not . null) [
+            stall_tk
+          , yield_tk
+          , wr_alloc_tk
+          , rd_alloc_tk
+          , wait_mask_tk
+          ]
+        --
+        stall_tk
+          | stalls == 0 = ""
+          | otherwise = "!" ++ show stalls
+          where stalls = getField64 0 4 control_bits
+        yield_tk
+          | getField64 4 1 control_bits == 0 = "Y"
           | otherwise = ""
-          where control_bits = getField128 (128 - 23) 23 (riBits ri)
-                -- Volta control words are the top 23 bits.  The meaning is pretty much
-                -- unchanged since Maxwell (I think).
-                --   https://arxiv.org/pdf/1804.06826
-                --   https://github.com/NervanaSystems/maxas/wiki/Control-Codes
-                --
-                --  [22:21] / [127:126] = MBZ
-                --  [20:17] / [125:122] = .reuse
-                --  [16:11] / [121:116] = wait barrier mask
-                --  [10:8]  / [115:113] = read barrier index
-                --  [7:5]   / [112:110] = write barrier index
-                --  [4]     / [109]     = !yield (yield if zero)
-                --  [3:0]   / [108:105] = stall cycles (0 to 15)
-                tokens = filter (not . null) [
-                    stall_tk
-                  , yield_tk
-                  , wr_alloc_tk
-                  , rd_alloc_tk
-                  , wait_mask_tk
-                  ]
-                --
-                stall_tk
-                  | stalls == 0 = ""
-                  | otherwise = "!" ++ show stalls
-                  where stalls = getField64 0 4 control_bits
-                yield_tk
-                  | getField64 4 1 control_bits == 0 = "Y"
-                  | otherwise = ""
-                wr_alloc_tk = mkAllocTk ".W" 5
-                rd_alloc_tk = mkAllocTk ".R" 8
-                mkAllocTk sfx off
-                  | val == 7 = "" -- I guess 7 is their ignored value
-                  | otherwise = "+" ++ show (val + 1) ++ sfx
-                  where val = getField64 off 3 control_bits
-                wait_mask_tk
-                  | null indices = ""
-                  | otherwise = intercalate "," (map (\i -> "^" ++ show (i + 1)) indices)
-                  where indices = filter (testBit wait_mask) [0..5]
-                         where wait_mask = getField64 11 6 control_bits
+        wr_alloc_tk = mkAllocTk ".W" 5
+        rd_alloc_tk = mkAllocTk ".R" 8
+        mkAllocTk sfx off
+          | val == 7 = "" -- I guess 7 is their ignored value
+          | otherwise = "+" ++ show (val + 1) ++ sfx
+          where val = getField64 off 3 control_bits
+        wait_mask_tk
+          | null indices = ""
+          | otherwise = intercalate "," (map (\i -> "^" ++ show (i + 1)) indices)
+          where indices = filter (testBit wait_mask) [0..5]
+                 where wait_mask = getField64 11 6 control_bits
 
 
 fmtRiWithControlInfo :: RawInst -> String
@@ -412,5 +422,5 @@ disBitsRawBatch os w128s = setup
                             | last s == ';' = trimWs (init s)
                             | otherwise = s
               -- hope we got past the error and reduce size
-              (filterOutput oup++) <$> decodeChunk temp_file (length w128s_sfx) w128s_sfx
+              (filterOutput oup++) <$> decodeChunk temp_file (min (chunk_len*2) (length w128s_sfx)) w128s_sfx
 
