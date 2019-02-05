@@ -1,9 +1,9 @@
 module NVT.RawInst where
 
+import NVT.Bits
 import NVT.CUDASDK
 import NVT.Lop3
 import NVT.Opts
-import NVT.Word128
 
 import Data.Bits
 import Data.Char
@@ -48,7 +48,7 @@ data RawInst =
 
 fmtRawInstWithOpts :: Bool -> RawInst -> String
 fmtRawInstWithOpts ctl_info ri = maybePad prefix ++ suffix
-  where prefix = pred ++ " " ++ riMnemonic ri ++ opnds
+  where prefix = pred ++ " " ++ padR 16 (riMnemonic ri) ++ opnds
         maybePad
           | ctl_info = padR 64
           | otherwise = id

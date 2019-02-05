@@ -3,5 +3,4 @@ let ghciEscapeShellArg arg = "\"" ++ concatMap (\c -> if c == '\"' then "\\" els
 :def! search return . (":! hoogle " ++) . ghciEscapeShellArg
 :def! k      return . (":!cls"++) . const ""
 :def! strict \_ -> return $ unlines [ ":set -Wall", ":set -w -fwarn-dodgy-exports", ":set -w -fwarn-dodgy-foreign-imports", ":set -w -fwarn-dodgy-imports", ":set -w -fwarn-duplicate-exports", ":set -w -fwarn-hi-shadowing", ":set -w -fwarn-incomplete-patterns", ":set -w -fwarn-missing-fields", ":set -w -fwarn-missing-methods", "-- :set -fwarn-name-shadowing", ":set -w -fwarn-orphans", ":set -w -fwarn-overlapping-patterns", ":set -w -fwarn-tabs", ":set -w -fwarn-type-defaults", ":set -w -fwarn-unrecognised-pragmas", ":set -w -fwarn-unused-binds", ":set -w -fwarn-unused-do-bind", ":set -w -fwarn-unused-imports", ":set -w -fwarn-unused-matches",":set -w -fwarn-warnings-deprecations", ":set -w -fwarn-wrong-do-bind"]
-:set -isrc
-:set -DCLASM_IP_SENSITIVE
+:set -isrc -itools

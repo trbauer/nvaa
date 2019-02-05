@@ -1,9 +1,11 @@
 module Analysis where
 
+import Sample
+import NVT.Bits
+import NVT.CUDASDK
 import NVT.Opts
 import NVT.RawInst
-import NVT.Word128
-import NVT.CUDASDK
+
 
 import Control.Exception
 import Control.Monad
@@ -21,109 +23,32 @@ import Text.Printf
 import qualified Data.ByteString as S
 import qualified Data.Map.Strict as DM
 
--- want to infer the bit patterns of all opcodes
--- for each opcode X
---   load all samples (with bits)
---   find the longest common field starting from 0 where all samples share the same value
---
 
-stg :: IO Sample -- STG.E.SYS [R12], R17 {!2,+1.R} ;       // examples/sm_75/samples\boxFilter_kernel.sass:13563
-stg = sString ("0001E4000010E900`000000110C007386")
-
--- LDG.E.SYS R3, [UR38+0x14] {!1,+5.W} ;  // examples/sm_75/samples\cdpQuadtree.sass:7890
-ldg_ur_off = sString "000F22000C1EE900`00001426FF037981" --
-
--- LDG with R
--- 000EA200001EE900`0000200018187381:        LDG.E.SYS R24, [R24+0x20] {!1,+3.W} ;  // examples/sm_75/samples\BezierLineCDP.sass:1625
--- 00016800001EE900`0000000008067381:        LDG.E.SYS R6, [R8] {!4,+6.W,+1.R} ;    // examples/sm_75/samples\bisect_large.sass:6743
--- LDG with UR
--- 000EA8000C1EE900`00000404FF047981:        LDG.E.SYS R4, [UR4+0x4] {!4,+3.W} ;    // examples/sm_75/samples\bisect_large.sass:5800
--- 000EE8000C1EE900`00000006FF057981:        LDG.E.SYS R5, [UR6] {!4,+4.W} ;        // examples/sm_75/samples\bisect_large.sass:5802
--- 000EA8000C1EE900`00000004FF027981:        LDG.E.SYS R2, [UR4] {!4,+3.W} ;        // examples/sm_75/samples\bitonic.sass:3258
--- 000EA8000C1EE900`00000404FF058981:  @!P0  LDG.E.SYS R5, [UR4+0x4] {!4,+3.W} ;    // examples/sm_75/samples\bitonic.sass:3260
--- 000EE8000C1EE900`00000006FF037981:        LDG.E.SYS R3, [UR6] {!4,+4.W} ;        // examples/sm_75/samples\bitonic.sass:3262
--- 000F22000C1EE900`00000406FF048981:  @!P0  LDG.E.SYS R4, [UR6+0x4] {!1,+5.W} ;    // examples/sm_75/samples\bitonic.sass:3264
---                          ^^ FF means RZ, so it doesn't show up as part of the equation
-
--- LDG.E.SYS R0, [R24+0x20] {!1,+3.W} ;   // examples/sm_75/samples\BezierLineCDP.sass:1600
-ldg_v_off  = sString "000EA200001EE900`0000200018007381"
--- 000F6200001EE900`0000000004077381:        LDG.E.SYS R7, [R4] {!1,+6.W} ;         // examples/sm_75/samples\alignedTypes.sass:2896
--- 000EA8000C1EE900`00000004FF027981:        LDG.E.SYS R2, [UR4] {!4,+3.W} ;        // examples/sm_75/samples\bisect_large.sass:5798
---                  ........
-
--- 000FE40007FFE011`0000001210117210:        IADD3 R17, R16, R18, R17 {!2} ;        // examples/sm_75/samples\bisect_small.sass:1870
--- 000FE2000FFFE0FF`0000000402027C10:        IADD3 R2, R2, UR4, RZ {!1} ;           // examples/sm_75/samples\bitonic.sass:3248
-
-
--- Uniform register
--- 0002620000000000`0000001A00117309:        POPC R17, R26 {!1,+2.W,+2.R} ;         // examples/sm_75/samples\cdpAdvancedQuicksort.sass:4699
--- 000E240000000000`0000000400047309:        POPC R4, R4 {!2,+1.W} ;                // examples/sm_75/samples\cdpQuadtree.sass:7096
--- 000EA20000000000`0000003D0004D309:  @!P5  POPC R4, R61 {!1,+3.W} ;               // examples/sm_75/samples\particleSystem_cuda.sass:88390
--- 000EA20000000000`0000004A004A7309:        POPC R74, R74 {!1,+3.W} ;              // examples/sm_75/samples\particleSystem_cuda.sass:88748
--- 000E620000000000`0000000900048309:  @!P0  POPC R4, R9 {!1,+2.W} ;                // examples/sm_75/samples\particleSystem_cuda.sass:88937
--- 000E620000000000`000000790004D309:  @!P5  POPC R4, R121 {!1,+2.W} ;              // examples/sm_75/samples\particleSystem_cuda.sass:89956
---
--- 000E660008000000`0000000400077D09:        POPC R7, UR4 {!3,+2.W} ;               // examples/sm_75/samples\cdpAdvancedQuicksort.sass:4828
---           ......
--- 000E620008000000`0000000400087D09:        POPC R8, UR4 {!1,+2.W} ;               // examples/sm_75/samples\cdpAdvancedQuicksort.sass:4983
---
--- D09 vs 309
---
-
---
--- 000E640008201400`0000000400037D06:        I2F R3, UR4 {!2,+2.W} ;                // examples/sm_75/samples\boxFilter_kernel.sass:8696
--- 000E260000201400`0000001400147306:        I2F R20, R20 {!3,+1.W} ;               // examples/sm_75/samples\MonteCarlo_kernel.sass:31865
--- 000E240000201400`00000014000A7306:        I2F R10, R20 {!2,+1.W} ;               // examples/sm_75/samples\postProcessGL.sass:1469
--- 000E240000201400`00000013000B7306:        I2F R11, R19 {!2,+1.W} ;               // examples/sm_75/samples\postProcessGL.sass:1470
--- seems that D vs
---
--- 000FE2000FFFE0FF`000000050E0E7C10:        IADD3 R14, R14, UR5, RZ {!1} ;         // examples/sm_75/samples\Mandelbrot_cuda.sass:11118
--- 000FE4000FFFE0FF`0000000408087C10:        IADD3 R8, R8, UR4, RZ {!2} ;           // examples/sm_75/samples\Mandelbrot_cuda.sass:11868
--- 000FC8000FF3E0FF`0000000711117C10:        IADD3 R17, P1, R17, UR7, RZ {!4,Y} ;   // examples/sm_75/samples\recursiveGaussian_cuda.sass:7735
--- 000FE4000F8E00FF`00000006FF067E24:        IMAD.U32 R6, RZ, RZ, UR6 {!2} ;        // examples/sm_75/samples\cdpAdvancedQuicksort.sass:5454
-
--- 000FE2000fFFE0FF`0000001210117210
---           ......
---
-fadd_rr = sString "000FE40000000000`0000000513057221" -- FADD R5, R19, R5 {!2} ;                // examples/sm_75/samples\bindlessTexture_kernel.sass:894
-fadd_rc = sString "002FE40000000000`8000600005057621" -- FADD R5, R5, -c[0x0][0x180] {!2,^2} ;  // examples/sm_75/samples\bicubicTexture_cuda.sass:3098
-fadd_ri = sString "000FE20000000000`3F0000000B0B7421" -- FADD R11, R11, 0.5 {!1} ;              // examples/sm_75/samples\bicubicTexture_cuda.sass:2553
---
-ffma_rrr = sString "000FE4000000001F`0000001E1D1D7223" -- FFMA R29, R29, R30, R31 {!2} ;         // examples/sm_75/samples\bicubicTexture_cuda.sass:2350
--- yield flag kills the .reuse
--- ffma_rrr = sString "000FC80000000004`0000000903007223" -- FFMA R0, R3, R9, R4 {!4,Y} ;           // examples/sm_75/samples\BezierLineCDP.sass:2071
-ffma_rrc = sString "000FC60000000006`0000600005057623" -- FFMA R5, R5, R6, c[0x0][0x180] {!3,Y} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2229
-ffma_rri = sString "000FC40000000004`BF0000001E047423" -- FFMA R4, R30, R4, -0.5 {!2,Y} ;        // examples/sm_75/samples\bicubicTexture_cuda.sass:2309
-ffma_rir = sString "000FC40000000009`3E2AAAAB04047823" -- FFMA R4, R4, 0.16666667163372039795, R9 {!2,Y} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2504
-ffma_rcr = sString "001FCC0000000004`0000580005047A23" -- FFMA R4, R5, c[0x0][0x160], R4 {!6,Y,^1} ; // examples/sm_75/libs\cudnn64_7-cudnn64_7.1310.sm_75.sass:98825
-
-
-
-showLoadControls :: IO ()
-showLoadControls =
-  twiddleField (75,2) (sString "000EA200001EE900`0000000004067381")
-
-findLdPredLowBit = do
-  -- 87 seemed to twidding things
-  forM_ [87..100] $ \pix -> twiddleFieldsB [(82,2),(pix,1)]
-    (sString "000EA200001EE900`0000000004067381")
 
 
 -- FIXME:
---   start bit is the top part of another field, will this cause confusion
-probeReserved :: Int -> IO Sample -> IO ()
-probeReserved ix io_s = io_s >>= startProbe
-  where startProbe :: Sample -> IO ()
+--   if start bit is the top part of another field, will this cause confusion
+
+probeReserved :: Int -> IO [Sample] -> IO ()
+probeReserved ix io_ss = io_ss >>= body
+  where body :: [Sample] -> IO ()
+        body ss = do
+          lens <- mapM startProbe ss
+          let min_len = minimum (0:lens)
+          if min_len == 0 then putStrLn "field has syntactic meaning for at least one sample"
+            else putStrLn $ "===> " ++ fFormat (ix,min_len) ++ ": is probably reserved <==="
+
+        startProbe :: Sample -> IO Int
         startProbe s = do
           [str0,str1] <- disassembleField (ix,1) s
           if str0 == str1 then extendFieldMbz s 2
-            else putStrLn "field has syntactic meaning"
-        extendFieldMbz :: Sample -> Int -> IO ()
+            else return 0
+        extendFieldMbz :: Sample -> Int -> IO Int
         extendFieldMbz s len = do
-          putStrLn $ "extend field MBZ: " ++ show len
+          -- putStrLn $ "extend field MBZ: " ++ show len
           strs <- disassembleField (ix,len) s
           if all (==head strs) strs then extendFieldMbz s (len+1)
-            else putStrLn $ "===> " ++ fFormat (ix,len-1) ++ ": is probably reserved <==="
+            else return (len-1)
 
 probe :: Int -> Sample -> IO ()
 probe ix s = startProbe
@@ -255,20 +180,20 @@ help = do
 --          ...
 
 
-decode :: IO Sample -> IO ()
+decode :: IO [Sample] -> IO ()
 decode ms = do
-  s <- ms
+  (s:_) <- ms
   disBitsRaw opts (sBits s) >>= putStr
   putStrLn $ "  " ++ fmtExtendedInfo (sBits s)
-decodeR :: IO Sample -> IO ()
+decodeR :: IO [Sample] -> IO ()
 decodeR ms = do
-  s <- ms
+  (s:_) <- ms
   disBitsRaw opts (sBits s) >>= putStrLn
 
-listDiffs :: IO Sample -> IO Sample -> IO ()
+listDiffs :: IO [Sample] -> IO [Sample] -> IO ()
 listDiffs ms1 ms2 = do
-  s1 <- ms1
-  s2 <- ms2
+  (s1:_) <- ms1
+  (s2:_) <- ms2
   let fs = sampleDifferences s1 s2
   if null fs then putStrLn "all fields match"
     else do
@@ -324,88 +249,36 @@ padL k s = replicate (k - length s) ' ' ++ s
 padR :: Int -> String -> String
 padR k s = s ++ replicate (k - length s) ' '
 
-data Sample = Sample {sBits :: !Word128}
-  deriving (Eq,Ord,Show)
-
--- 000E280000005800`0004200002097984:        LDS.U R9, [R2.X4+0x420] {!4,+1.W} ;    // examples/sm_75/samples\bitonic.sass:3554
--- 000E220000009A00`0008000000027984:        LDS.U.64 R2, [R0.X8+0x800] {!1,+1.W} ; // examples/sm_75/samples\bitonic.sass:3652
---
-
--- e.g. 000EE800001EE900`0000000006068381
-sString :: String -> IO Sample
-sString = return . sStringPure
-sStringPure :: String -> Sample
-sStringPure str =
-  case reads ("0x" ++ str) of
-    [(s,"")] -> Sample s
-    _ -> error ("sFromBits: syntax error: " ++ show str)
-sAllOps :: String -> IO [Sample]
-sAllOps opname =
-  sFile ("examples/" ++ oArch opts ++ "/ops/" ++ map toUpper opname++".sass")
-sAllOpsK :: Int -> String -> IO [Sample]
-sAllOpsK k opname = maybeTakePrefix <$> sAllOps opname
-  where maybeTakePrefix = if k < 0 then id else take k
-sDir :: FilePath -> IO [Sample]
-sDir dir = do
-  fs <- getSubPaths dir
-  concat <$> mapM sFile fs
-sFile :: FilePath -> IO [Sample]
-sFile fp = do
-  -- e.g. 000EE200001EED00`00001000020C7381:        LDG.E.128.SYS R12, [R2+0x10] {!1,+4.W} ; // examples/sm_75/samples\bodysystemcuda.sass:20925
-  flns <- zip [1..] . lines <$> readFile fp
-  let parseLine :: (Int,String) -> IO Sample
-      parseLine (lno,lnstr) =
-        case reads ("0x"++lnstr) of
-          [(w128,_)] -> return (Sample w128)
-          _ -> fail ("sLoadFile ("++fp++"): error on line " ++ show lno)
-  mapM parseLine flns
-
-type Field = (Int,Int)
-fOff :: Field -> Int
-fOff = fst
-fLen :: Field -> Int
-fLen = snd
-fGetValue :: Field -> Sample -> Word64
-fGetValue f = getField128 (fOff f) (fLen f) . sBits
-fFormat :: Field -> String
-fFormat f
-  | fLen f == 1 = "[" ++ show (fOff f) ++ "]"
-  | otherwise  = "[" ++ show (fOff f + fLen f - 1) ++ ":" ++ show (fOff f) ++ "]"
 
 
-opts :: Opts
-opts = dft_opts_75
 
 
-type Row = ([(Field,Word64)],Sample)
-type RowDis = (Row,String)
+
+
+-- type RowDis = (Row,String)
 
 -- LDG.E.SYS R6, [R4] {!1,+3.W}
-test_twiddle = twiddleField (79,2) (sString "000EA200001EE900`0000000004067381")
+-- test_twiddle = twiddleField (79,2) (sString "000EA200001EE900`0000000004067381")
+type TwiddleRow = ([(Field,Word64)],[Sample])
 
--- TODO: generalize this to
--- twiddleField :: FieldValue
--- data FieldValue
---     FieldValue Field [Word64]
--- then we can constrain the fields like [11:9]
 
-twiddleField :: Field -> IO Sample -> IO ()
+twiddleField :: Field -> IO [Sample] -> IO ()
 twiddleField = twiddleFieldB
-twiddleFields :: [Field] -> IO Sample -> IO ()
+twiddleFields :: [Field] -> IO [Sample] -> IO ()
 twiddleFields = twiddleFieldsB
-twiddleFieldX :: Field -> IO Sample -> IO ()
-twiddleFieldX f s = twiddleFields [f] s
-twiddleFieldB :: Field -> IO Sample -> IO ()
-twiddleFieldB f s = twiddleFieldsB [f] s
-twiddleFieldsX :: [Field] -> IO Sample -> IO ()
+twiddleFieldX :: Field -> IO [Sample] -> IO ()
+twiddleFieldX f = twiddleFields [f]
+twiddleFieldB :: Field -> IO [Sample] -> IO ()
+twiddleFieldB f = twiddleFieldsB [f]
+twiddleFieldsX :: [Field] -> IO [Sample] -> IO ()
 twiddleFieldsX = twiddleFieldsBase False
-twiddleFieldsB :: [Field] -> IO Sample -> IO ()
+twiddleFieldsB :: [Field] -> IO [Sample] -> IO ()
 twiddleFieldsB = twiddleFieldsBase True
-twiddleFieldsBase :: Bool -> [Field] -> IO Sample -> IO ()
+twiddleFieldsBase :: Bool -> [Field] -> IO [Sample] -> IO ()
 twiddleFieldsBase binary fs s0_io =
   s0_io >>= twiddleFieldsBaseP binary fs
-twiddleFieldsBaseP :: Bool -> [Field] -> Sample -> IO ()
-twiddleFieldsBaseP binary fs s0 = body
+twiddleFieldsBaseP :: Bool -> [Field] -> [Sample] -> IO ()
+twiddleFieldsBaseP binary fs s0s = body
   where body = do
           -- str0 <- disBitsRaw opts (sBits s)
           let (fmtHeader,fmtValue)
@@ -413,23 +286,43 @@ twiddleFieldsBaseP binary fs s0 = body
                 | otherwise = (fmtFieldHeader,fmtFieldValue)
           putStrLn $ intercalate " " (map ((++" ") . (" "++) . fmtHeader) fs)
           --
-          let rows :: [Row]
-              rows = map (\fvs -> (fvs,fieldValuesToSample fvs)) twiddle_cases
+          let rows :: [TwiddleRow]
+              rows = map (\fvs -> (fvs,fieldValuesToSamples fvs)) twiddle_cases
 
-              fmtVal :: Field -> Word64 -> String
-              fmtVal f w = chr ++ fmtValue f w ++ chr
-                where chr = if fGetValue f s0 == w then "*" else " "
+              fmtVal :: Bool -> Sample -> Field -> Word64 -> String
+              fmtVal first s0 f w = maybe_star ++ middle ++ maybe_star
+                where maybe_star = if fGetValue f s0 == w then "*" else " "
+                      middle
+                        | first = str
+                        | otherwise = replicate (length str) ' '
+                        where str = fmtValue f w
 
           -- disassemble en-mass
-          strs <- disBitsRawBatch opts (map (sBits . snd) rows)
-          forM_ (zip rows strs) $ \((fvs,s),syn) -> do
-            putStrLn $
-              intercalate "  " (map (uncurry fmtVal) fvs) ++
-                  " " ++ drop (length "0x") (show (sBits s)) ++  -- bits
-                  "  " ++ syn -- syntax
+          -- strs <- disBitsRawBatch opts (map (sBits . snd) rows)
+          let chunk _ [] = []
+              chunk k as =
+                case splitAt k as of
+                  (pfx,sfx) -> pfx : chunk k sfx
+          syns_chunks <- chunk (length s0s) <$> disBitsRawBatch opts (concatMap (map sBits . snd) rows)
+          -- mapM_ putStrLn (concat strs)
+          -- strs is [[String]]
+          forM_ (zip rows syns_chunks) $ \((fvs,mod_ss),mod_ss_syns) -> do
+            let fmtRowEntry :: (Int,Sample,Sample,String) -> String
+                fmtRowEntry (i,s0,s_m,syn) =
+                    values ++
+                    " " ++ drop (length "0x") (show (sBits s_m)) ++  -- bits
+                    "  " ++ syn ++
+                    "\n"
+                  where values = intercalate "  " (map (uncurry (fmtVal (i==0) s0)) fvs)
+            putStr $
+              concatMap fmtRowEntry
+                (zip4 [0..] s0s mod_ss mod_ss_syns)
 
-        fieldValuesToSample :: [(Field,Word64)] -> Sample
-        fieldValuesToSample = Sample . foldl' acc (sBits s0)
+--        fmtRow :: Row -> String
+--        fmtRow (fvs,ss)
+
+        fieldValuesToSamples :: [(Field,Word64)] -> [Sample]
+        fieldValuesToSamples fvs = map (\s0 -> Sample (foldl' acc (sBits s0) fvs)) s0s
           where acc w128 (f,v) = putField128 (fOff f) (fLen f) v w128
 
         -- flatten the rows out so we can build a table of rows with samples
@@ -534,5 +427,22 @@ opcodeTest = do
 
 
 
-
-
+------------------------------------------------------------
+-- The goal is to emit formats by looking at initial syntax
+-- Come up with a basic parser.
+--   data InstMid
+--
+--
+-- extract instruction options
+-- discover register files
+-- see if it supports constant buffers
+-- if it's ternary, it behaves differently
+--
+-- studyInstruction :: IO [Sample] -> IO ()
+-- studyInstruction =
+--   parse all the instructions to my IR
+--   determine if they are:
+--     nullary
+--     unary
+--     ternary
+--

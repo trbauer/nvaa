@@ -267,3 +267,124 @@ format_FFMA =
         src1IsImm = fREGFILE == 2
         src1IsReg = fREGFILE == 1
 
+
+
+
+
+
+
+
+
+
+
+
+
+format_IMAD ::
+format_IMAD =
+    [
+    {- [8:0] -}  fOPCODE # always
+    {- [11:9] -} , fIMAD_REGFILE -- SrcX.RegFile {1->RRR,2->RRI,3->RRC,4->RIR,5->RCR,all others illegal}
+    -- 100b RIR =>
+    --  if [64:32] == 0 then IMAD.MOV
+    --  else if [64:32] == 1 then IMAD.IADD
+    --  else IMAD with whatever immediate value
+    --
+    {- [15:12] -} , fEXECPRED
+    {- [23:16] -} , fDST_REG
+    {- [31:24] -} , fSRC0_REG
+    ----------------------------------------------------------------------------
+    -- ternary formats have a "fixed" operand (always register)
+    -- and a "variable" operand that can be reg, imm, or constant
+    -- [11:9] specifies which source
+    --
+    -- variable operand can float to src1 or src2 based on [11:9]
+    {- [39:32] -} , fSRCX_REG             # isVarR
+    {- [63:40] -} , fReserved 40 23       # isVarR
+    --
+    {- [39:32] -} , fReserved 32 8        # isVarC .&. not isIndirectSurface
+    --
+    {- [37:32] -} , fSRCX_CINDREG         # isVarC .&.     isIndirectSurface -- cx[UR###][...]
+    {- [39:38] -} , fReserved 38 2        # isVarC .&.     isIndirectSurface
+    --
+    {- [53:40] -} , fSRCX_COFF 40 14      # isVarC                           -- c[..][THIS/4]
+    {- [58:54] -} , fSRCX_CSRF 54 5       # isVarC .&. not isIndirectSurface -- c[THIS][..]
+    {- [61:59] -} , fReserved 59 3        # isVarC
+    --
+    {- [63:62] -} , fSRCX_MODS            # isVarC .|. isVarR
+    --
+    {- [63:32] -} , fSRCX_IMM32           # isVarI
+    ----------------------------------------------------------------------------
+    {- [71:64] -} , fSRCR_REG -- fixed source
+    {- [72] -} , fReserved 72 1
+    {- [73] -} , fIMAD_U32
+    {- [74] -} , fIMAD_X
+    {- [75] -} , fSRC0_NEG
+    {- [90:76] -} , fReserved 76 15
+    {- [91] -}    , fIS_CINDREG  -- use fSRCX as as uniform register (only valid if RCR or RRC)
+    {- [95:92] -} , fReserved 92 4
+    ----------------------------------------------------------------------------
+    {- [104:96] -} , fReserved 96 9
+    {- [125:105] -} , fSCHEDULING -- 122,123,124 are Src{0,1,2}.Reuse
+    {- [127:126] -} , fReserved 126 2
+    ]
+  where isIndirectSurface = isSet fIS_CSRF_INDIRECT
+        src1IsCon = fREGFILE == 3
+        src1IsImm = fREGFILE == 2
+        src1IsReg = fREGFILE == 1
+
+
+
+format_CALL ::
+format_CALL =
+    [
+    {- [8:0] -}  fOPCODE # always
+    {- [11:9] -} , fREGFILE -- Src.RegFile {1->REG, 4->IMM (with [91]=0) and 4->UR (with [91]=1), 5->CONST,all others illegal}
+    --
+    {- [15:12] -} , fEXECPRED
+    {- [23:16] -} , fReserved 16 8 # always -- fDST_REG
+    {- [31:24] -} , fSRC0_REG      #      isReg
+    {- [29:24] -} , fSRC0_UREG     #      isUReg
+    {- [31:30] -} , fReserved 30 2 #      isUReg
+
+    {- [31:24] -} , fReserved 24 8 #      cNot isReg .&. cNot isUReg
+
+    ----------------------------------------------------------------------------
+    -- ternary formats have a "fixed" operand (always register)
+    -- and a "variable" operand that can be reg, imm, or constant
+    -- [11:9] specifies which source
+    --
+    -- variable operand can float to src1 or src2 based on [11:9]
+    {- [39:32] -} , fSRC_IMM32            # isImm -- bottom two bits are masked out
+    {- [39:32] -} , fReserved 32 8        # isReg
+    {- [39:32] -} , fReserved 32 8        # isReg
+
+    --
+    {- [39:32] -} , fReserved 32 8        # isCon .&. cNot cIndirectSurface
+    --
+    {- [37:32] -} , fSRC_CINDREG          # isCon .&.      cIndirectSurface -- cx[UR###][...]
+    {- [39:38] -} , fReserved 38 2        # isCon .&.      cIndirectSurface
+    --
+    {- [53:40] -} , fSRC_COFF 38 16       # isCon                           -- c[..][THIS]
+    {- [58:54] -} , fSRC_CSRF 54 5        # isCon .&. cNot cIndirectSurface -- c[THIS][..]
+    {- [61:59] -} , fReserved 59 3        # isCon
+    --
+    {- [63:62] -} , fSRCX_MODS            # isCon .|. isVarR
+    --
+    {- [63:32] -} , fSRCX_IMM32           # isImm
+    ----------------------------------------------------------------------------
+    {- [79:64] -} , fSRC_IMM_HI16         # isImm
+    {- [90:80] -} , fReserved 80 11
+    {- [91] -}    , fIS_CINDREG  -- use fSRCX as as uniform register
+    {- [95:92] -} , fReserved 92 4
+    ----------------------------------------------------------------------------
+    {- [104:96] -} , fReserved 96 9
+    {- [125:105] -} , fSCHEDULING -- 122,123,124 are Src{0,1,2}.Reuse
+    {- [127:126] -} , fReserved 126 2
+    ]
+  where cIndirectSurface = isSet fIS_CSRF_INDIRECT
+        isReg  = fREGFILE .== 1
+        isUReg = fREGFILE .== 4 .&. fIS_CINDREG .== 1
+        isImm  = fREGFILE .== 4 .&. fIS_CINDREG .== 0
+        isConDir = fREGFILE .== 5
+        -- isConInd = error "isConInd"
+

@@ -185,10 +185,14 @@ runWithOpts os = processFile (oInputFile os)
           --
           nvdis_out <- runCudaTool os "nvdisasm" (["--print-line-info"] ++ nvdis_args_no_lines)
             `catch` tryNvdisasmWithoutLineNumbers
-          let filterAsm
-                | oFilterAssembly os = filterAssembly (oArch os)
-                | otherwise = id
-          emitOutput (filterAsm nvdis_out)
+          let maybeFilterAsmIO :: String -> IO String
+              maybeFilterAsmIO
+                | oFilterAssembly os =
+                  if oSourceMapping os
+                    then filterAssemblyWithInterleavedSrcIO (oArch os)
+                    else return . filterAssembly (oArch os)
+                | otherwise = return
+          maybeFilterAsmIO nvdis_out >>= emitOutput
           --
           -- cuod_res <- runCudaTool os "cuobjdump" ["--dump-resource-usage", cubin_file]
           -- appendOutput cuod_res

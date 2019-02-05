@@ -1,4 +1,4 @@
-module NVT.Word128 where
+module NVT.Bits where
 
 import Data.Bits
 import Data.Char
@@ -35,7 +35,7 @@ instance Read Word128 where
 
 getField128 :: Int -> Int -> Word128 -> Word64
 getField128 off len w128
-  | off + len > 128 = error "NVT.Word128.getField128: offsets out of bounds"
+  | off + len > 128 = error "NVT.Bits.getField128: offsets out of bounds"
   | off < 64 && off + len > off + 64 = error "NVT.Word128.getField128: field cannot cross 64b boundary"
   | otherwise = shifted_value .&. mask
   -- TODO: enable splits
@@ -45,22 +45,24 @@ getField128 off len w128
 
 getField64 :: Int -> Int -> Word64 -> Word64
 getField64 off len w
-  | off + len > 64 = error "NVT.Word128.getField64: offsets out of bounds"
+  | off + len > 64 = error "NVT.Bits.getField64: offsets out of bounds"
   | otherwise = shifted_value .&. mask
   where shifted_value = w `shiftR` off
-        mask = (1 `shiftL` len) - 1
+        mask
+          | len == 64 = 0xFFFFFFFFFFFFFFFF
+          | otherwise = (1 `shiftL` len) - 1
 
 putField128 :: Int -> Int -> Word64 -> Word128 -> Word128
 putField128 off len v w
-  | off + len > 128 = error "NVT.Word128.putField128: offsets out of bounds"
+  | off + len > 128 = error "NVT.Bits.putField128: offsets out of bounds"
   | off < 64 && off + len > off + 64 = error "NVT.Word128.putField128: field cannot cross 64b boundary"
   | off < 64 = w{wLo64 = putField64 (off`mod`64) len v (wLo64 w)}
   | otherwise = w{wHi64 = putField64 (off`mod`64) len v (wHi64 w)}
   -- TODO enable splits
 putField64 :: Int -> Int -> Word64 -> Word64 -> Word64
 putField64 off len v w
-  | off + len > 64 = error "NVT.Word128.putField64: offsets out of bounds"
-  | v > mask = error "NVT.Word128.putField64: value too large for field"
+  | off + len > 64 = error "NVT.Bits.putField64: offsets out of bounds"
+  | v > mask = error "NVT.Bits.putField64: value too large for field"
   | otherwise = (w .&. complement (mask`shiftL`off)) .|. shifted_value
   where shifted_value = v `shiftL` off
         mask = (1 `shiftL` len) - 1
@@ -90,3 +92,4 @@ fromByteStringW128 bs
   | otherwise = Word128 (fromByteStringW64 bs_hi8) (fromByteStringW64 bs_lo8)
   where (bs_lo8,bs_hi8sfx) = BS.splitAt 8 bs
         bs_hi8 = BS.take 8 bs_hi8sfx
+
