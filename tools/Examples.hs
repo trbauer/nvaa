@@ -34,9 +34,11 @@ import qualified Data.Map.Strict as DM
 --    (sString "000EA200001EE900`0000000004067381")
 
 call_rel, call_abs :: IO [Sample]
-call_rel = sString ("000FEA0003C00000`0000000000007943")
-call_abs = sString ("000FEA0003C00000`0000047000007944")
-
+call_rel = sString ("000FEA0003C00000`0000047000007944")
+call_abs = sString ("000FEA0003C00000`0000000000007943")
+ret_rel, ret_abs :: IO [Sample]
+ret_rel = sString ("000FEA0003C3FFFF`FFFFF7300C007950")
+ret_abs = sString ("000FEE0003E00000`0000000014007950") -- R20
 
 -- want to infer the bit patterns of all opcodes
 -- for each opcode X

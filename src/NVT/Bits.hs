@@ -69,9 +69,16 @@ putField64 off len v w
 
 toByteStringW128 :: Word128 -> BS.ByteString
 toByteStringW128 w128 =
-  toByteStringW64 (wLo64 w128) `BS.append`
-    toByteStringW64 (wHi64 w128)
+  toByteStringU64 (wLo64 w128) `BS.append`
+    toByteStringU64 (wHi64 w128)
+fromByteStringW128 :: BS.ByteString -> Word128
+fromByteStringW128 bs
+  | BS.length bs_hi8 < 8 = error "fromByteStringW128: insufficient bytes"
+  | otherwise = Word128 (fromByteStringU64 bs_hi8) (fromByteStringU64 bs_lo8)
+  where (bs_lo8,bs_hi8sfx) = BS.splitAt 8 bs
+        bs_hi8 = BS.take 8 bs_hi8sfx
 
+{-
 toByteStringW64 :: Word64 -> BS.ByteString
 toByteStringW64 = BS.pack . packBytes 8
   where packBytes :: Int ->  Word64 -> [Word8]
@@ -85,11 +92,124 @@ fromByteStringW64 = go 8 0 . BS.unpack
         go 0 w64 _ = w64
         go _ _ [] = error "fromByteStringW64: insufficient bytes"
         go n w64 (b:bs) = go (n+1) (w64 .|. (fromIntegral b`shiftL`((n-1)*8))) bs
+-}
 
-fromByteStringW128 :: BS.ByteString -> Word128
-fromByteStringW128 bs
-  | BS.length bs_hi8 < 8 = error "fromByteStringW128: insufficient bytes"
-  | otherwise = Word128 (fromByteStringW64 bs_hi8) (fromByteStringW64 bs_lo8)
-  where (bs_lo8,bs_hi8sfx) = BS.splitAt 8 bs
-        bs_hi8 = BS.take 8 bs_hi8sfx
+w128_zero :: Word128
+w128_zero = Word128 0 0
 
+instance Bits Word128 where
+  (.&.) = w128binOp (.&.)
+  (.|.) = w128binOp (.|.)
+  xor = w128binOp xor
+  complement (Word128 hi lo) = Word128 (complement hi) (complement lo)
+  zeroBits = w128_zero
+
+  -- DOESN'T WORK for shift sizes like 128
+  shiftL (Word128 hi lo) off
+    | off >= 64  = Word128 (lo`shiftL`off-64) 0
+    | otherwise = Word128 new_hi new_lo
+    where new_hi = hi `shiftL` off .|. lo `shiftR` (64 - off)
+          new_lo = lo `shiftL` off
+  shiftR (Word128 hi lo) off
+    | off >= 64  = Word128 0 (hi`shiftR`off-64)
+    | otherwise = Word128 new_hi new_lo
+    where new_hi = hi `shiftR` off .|. lo `shiftR` (64 - off)
+          new_lo = hi `shiftL` (64 - off) .|. lo `shiftR` off
+  -- positive is left
+  -- negative is right
+  rotate w@(Word128 hi lo) off0
+    -- rotate right
+    | off < 0 = rotate w (128-off)
+    -- normal bit align
+    --   hhhhhhhhhhhhhhhh llllllllllllllll (each char is 4 bits)
+    --     rol 4
+    --   hhhhhhhhhhhhhhhl lllllllllllllllh
+    | off < 64 = Word128 new_hi new_lo
+    --     rol 124 = ror -4
+    --   lhhhhhhhhhhhhhhh hlllllllllllllll
+    | otherwise = rotate w (off-128)
+    where off = off0 `mod` 128
+          new_hi = hi `shiftL` off .|. lo `shiftR` (64 - off)
+          new_lo = lo `shiftL` off .|. hi `shiftR` (64 - off)
+  bitSize _ = 128
+  bitSizeMaybe _ = Just 128
+  isSigned _ = False
+  testBit (Word128 hi lo) off
+    | off < 64 = testBit lo off
+    | otherwise = testBit hi (off - 64)
+  bit off
+    | off < 64 = Word128 0 (1 `shiftL` off)
+    | otherwise = Word128 (1 `shiftL` off-64) 0
+  popCount (Word128 hi lo) = popCount hi + popCount lo
+
+instance FiniteBits Word128 where
+  finiteBitSize _ = 128
+
+  countLeadingZeros (Word128 hi lo)
+    | clz_hi < 64 = clz_hi
+    | otherwise = 64 + countLeadingZeros lo
+    where clz_hi = countLeadingZeros hi
+  countTrailingZeros (Word128 hi lo)
+    | ctz_lo < 64 = ctz_lo
+    | otherwise = 64 + countTrailingZeros hi
+    where ctz_lo = countTrailingZeros lo
+
+
+
+w128binOp :: (Word64 -> Word64 -> Word64) -> Word128 -> Word128 -> Word128
+w128binOp f (Word128 hi1 lo1) (Word128 hi2 lo2) = Word128 (f hi1 hi2) (f lo1 lo2)
+
+--------------------------
+fromByteStringU8 :: BS.ByteString -> Word8
+fromByteStringU8 = BS.head
+fromByteStringU16 :: BS.ByteString -> Word16
+fromByteStringU16 = fromByteStringG reverse
+fromByteStringU16BE :: BS.ByteString -> Word16
+fromByteStringU16BE = fromByteStringG id
+fromByteStringU32 :: BS.ByteString -> Word32
+fromByteStringU32 = fromByteStringG reverse
+fromByteStringU32BE :: BS.ByteString -> Word32
+fromByteStringU32BE = fromByteStringG id
+fromByteStringU64 :: BS.ByteString -> Word64
+fromByteStringU64 = fromByteStringG reverse
+fromByteStringU64BE :: BS.ByteString -> Word64
+fromByteStringU64BE = fromByteStringG id
+
+fromByteStringG :: (FiniteBits i,Integral i) => ([Word8] -> [Word8]) -> BS.ByteString -> i
+fromByteStringG reoder_bytes = go bytes zero . reoder_bytes . BS.unpack . BS.take 8
+  where zero = 0
+        --
+        bytes = finiteBitSize zero `div` 8
+        --
+        -- go :: Int -> i -> [Word8] -> Word64
+        go 0   i    _ = i
+        go _   _    [] = error "fromByteStringG: insufficient bytes"
+        go n   i    (b:bs) = go (n-1) ((i`shiftL`8) .|. fromIntegral b) bs
+
+
+toByteStringU8 :: Word8 -> BS.ByteString
+toByteStringU8 w8 = BS.singleton w8
+--
+toByteStringU16 :: Word16 -> BS.ByteString
+toByteStringU16 = toByteStringG id
+toByteStringU16BE :: Word16 -> BS.ByteString
+toByteStringU16BE = toByteStringG reverse
+--
+toByteStringU32 :: Word32 -> BS.ByteString
+toByteStringU32 = toByteStringG id
+toByteStringU32BE :: Word32 -> BS.ByteString
+toByteStringU32BE = toByteStringG reverse
+--
+toByteStringU64 :: Word64 -> BS.ByteString
+toByteStringU64 = toByteStringG id
+toByteStringU64BE :: Word64 -> BS.ByteString
+toByteStringU64BE = toByteStringG reverse
+
+toByteStringG :: (FiniteBits i,Integral i) => ([Word8] -> [Word8]) -> i -> BS.ByteString
+toByteStringG reoder_bytes i = BS.pack . reoder_bytes $ packBytes bytes i
+  where bytes = finiteBitSize i `div` 8
+
+        -- packBytes :: Int -> i -> [Word8]
+        packBytes 0 _ = []
+        packBytes n i =
+          fromIntegral (i.&.0xFF) : packBytes (n-1) (i`shiftR`8)

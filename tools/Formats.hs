@@ -10,30 +10,30 @@ format_LDG =
   -- usually 9 bits but can be longer
   -- sometimes the same mnemonics
   -- some of the higher bits in the opcode
-  {- [8:0] -}  fOPCODE # always
-  {- [11:9] -} , fREGFILE
+  {- [8:0]  -}    fOPCODE   # always
+  {- [11:9] -}  , fREGFILE  # always
   --
-  {- [15:12] -} , fEXECPRED
-  {- [23:16] -} , fDSTREG
-  {- [31:24] -} , fSRCREG
+  {- [15:12] -} , fEXECPRED # always
+  {- [23:16] -} , fDSTREG   # always
+  {- [31:24] -} , fSRCREG   # always
   ----------------------------------------------------------------------------
-  {- [39:32] -} , fLDST_UREGSRC
-  {- [49:40] -} , fLDST_IMMOFF_S24 -- 24b offset
+  {- [39:32] -} , fLDST_UREGSRC     # always
+  {- [63:40] -} , fLDST_IMMOFF_S24  # always
   ----------------------------------------------------------------------------
-  {- [66:64] -} , fLDST_SRCPRED
-  {- [67] -} , fLDST_SRCPREDSIGN
-  {- [69:68] -} , fl "Unknown" 68 2 ["",".LTC64B",".LTC128B"] -- .INVALID3
-  {- [71:70] -} , fReserved 70 2
-  {- [72] -}, fl "AddressSize" 72 1 ["",".E"]
-  {- [75:73] -}, fLDST_DATATYPE
-  {- [76] -} , fl "Private" 76 1 ["",".PRIVATE"]
+  {- [66:64] -} , fLDST_SRCPRED      # always
+  {- [67] -}    , fLDST_SRCPREDSIGN  # always
+  {- [69:68] -} , fl "Unknown" 68 2 ["",".LTC64B",".LTC128B"]  # always -- .INVALID3
+  {- [71:70] -} , fReserved 70 2                     # always
+  {- [72] -}    , fl "AddressSize" 72 1 ["",".E"]    # always
+  {- [75:73] -} , fLDST_DATATYPE                     # always
+  {- [76] -}    , fl "Private" 76 1 ["",".PRIVATE"]  # always
   -- for LDS this controls default .X4, .X8, and .X16
   -- {- [78:77] -} , fLDST_REGEXT -- default, .X4, .X8, .X16
-  {- [78:77] -} , fLDST_COHERENCY
+  {- [78:77] -} , fLDST_SCOPE
   {- [80:79] -} , fLD_SEMANTICS
   {- [83:81] -} , fLDST_DSTPRED
   {- [86:84] -} , fLDST_CACHING
-  {- [87] -} , fl "ZD" 87 1 ["",".ZD"] -- implies predicate register must be used
+  {- [87] -}    , fl "ZD" 87 1 ["",".ZD"] -- implies predicate register must be used
   --
   {- [89:88] -} , fReserved 88 2
   -- bits [91:90] adds a .U32 or .64 (10b,11b) on the reg with [11:9] == 100b
@@ -56,13 +56,13 @@ format_STG =
   {- [31:24] -} , fSRCREG
   ----------------------------------------------------------------------------
   {- [39:32] -} , fLDST_UREGSRC
-  {- [49:40] -} , fLDST_IMMOFF_S24 -- 24b offset
+  {- [63:40] -} , fLDST_IMMOFF_S24 -- 24b offset
   ----------------------------------------------------------------------------
   {- [71:64] -} , fReserved 64 8
   {- [72] -} , fl "AddressSize" 72 1 ["",".E"]
   {- [75:73] -}, fLDST_DATATYPE
   {- [76] -} , fl "Private" 76 1 ["",".PRIVATE"]
-  {- [78:77] -} , fLDST_COHERENCY
+  {- [78:77] -} , fLDST_SCOPE
   {- [80:79] -} , fST_SEMANTICS
   {- [83:81] -} , fReserved 81 3
   {- [86:84] -} , fLDST_CACHING
@@ -111,8 +111,8 @@ fLDST_SRCPREDSIGN :: Field -- weirdly in reverse order 1->P6,...7->P0
 fLDST_SRCPREDSIGN = f "SrcPredicateSign" 67 1 $ \_ v -> if v == 0 then "" else "!"
 fLDST_DATATYPE :: Field
 fLDST_DATATYPE = fl "DataType" 73 3 [".U8",".S8",".U16",".S16","",".64",".128",".U.128"]
-fLDST_COHERENCY :: Field
-fLDST_COHERENCY = fl "Coherency" 77 2 [".CTA",".SM",".GPU",".SYS"]
+fLDST_SCOPE :: Field
+fLDST_SCOPE = fl "Scope" 77 2 [".CTA",".SM",".GPU",".SYS"]
 fLDST_DSTPRED :: Field -- weirdly in reverse order 1->P6,...7->P0
 fLDST_DSTPRED = f "DstPredicate" 81 3 $ \_ v -> if v == 7 then "" else ("P" ++ show v)
 fLDST_CACHING :: Field
@@ -333,11 +333,11 @@ format_IMAD =
         src1IsReg = fREGFILE == 1
 
 
-
+-- CALL.{REL,ABS}(.NOINC)?  REG?  IMM49?
 format_CALL ::
 format_CALL =
     [
-    {- [8:0] -}  fOPCODE # always
+    {- [8:0] -}  fOPCODE # always -- [2:0] => {011b => CALL.REL, 100b => CALL.ABS}
     {- [11:9] -} , fREGFILE -- Src.RegFile {1->REG, 4->IMM (with [91]=0) and 4->UR (with [91]=1), 5->CONST,all others illegal}
     --
     {- [15:12] -} , fEXECPRED
@@ -354,26 +354,14 @@ format_CALL =
     -- [11:9] specifies which source
     --
     -- variable operand can float to src1 or src2 based on [11:9]
-    {- [39:32] -} , fSRC_IMM32            # isImm -- bottom two bits are masked out
-    {- [39:32] -} , fReserved 32 8        # isReg
-    {- [39:32] -} , fReserved 32 8        # isReg
-
-    --
-    {- [39:32] -} , fReserved 32 8        # isCon .&. cNot cIndirectSurface
-    --
-    {- [37:32] -} , fSRC_CINDREG          # isCon .&.      cIndirectSurface -- cx[UR###][...]
-    {- [39:38] -} , fReserved 38 2        # isCon .&.      cIndirectSurface
-    --
-    {- [53:40] -} , fSRC_COFF 38 16       # isCon                           -- c[..][THIS]
-    {- [58:54] -} , fSRC_CSRF 54 5        # isCon .&. cNot cIndirectSurface -- c[THIS][..]
-    {- [61:59] -} , fReserved 59 3        # isCon
-    --
-    {- [63:62] -} , fSRCX_MODS            # isCon .|. isVarR
-    --
-    {- [63:32] -} , fSRCX_IMM32           # isImm
+    {- [63:32] -} , fSRC_IMM49_LO32       # isImm -- bottom two bits are masked out
     ----------------------------------------------------------------------------
-    {- [79:64] -} , fSRC_IMM_HI16         # isImm
-    {- [90:80] -} , fReserved 80 11
+    {- [80:64] -} , fSRC_IMM49_HI17       # isImm
+    {- [85:81] -} , fReserved 80 5        # always
+    -- unlike RET, [85] does not mean absolute
+    {- [86] -}    , fNOINC                # always
+    {- [89:87] -} , fSRCPRED              # always
+    {- [90] -}    , fSRCPREDSIGN          # always
     {- [91] -}    , fIS_CINDREG  -- use fSRCX as as uniform register
     {- [95:92] -} , fReserved 92 4
     ----------------------------------------------------------------------------
@@ -386,5 +374,40 @@ format_CALL =
         isUReg = fREGFILE .== 4 .&. fIS_CINDREG .== 1
         isImm  = fREGFILE .== 4 .&. fIS_CINDREG .== 0
         isConDir = fREGFILE .== 5
+        -- isConInd = error "isConInd"
+
+
+format_RET ::
+format_RET =
+    [
+    {- [8:0] -}     fOPCODE   # always
+    {- [11:9] -}  , fREGFILE  # always -- Src.RegFile {1->REG, 4->IMM (with [91]=0) and 4->UR (with [91]=1)}
+    --
+    {- [15:12] -} , fEXECPRED             # always
+    {- [23:16] -} , fReserved 16 8        # always -- fDST_REG
+    {- [31:24] -} , fSRC0_REG             # isReg
+    {- [29:24] -} , fSRC0_UREG            # isUReg
+    {- [31:30] -} , fReserved 30 2        # isUReg
+    {- [31:24] -} , fReserved 24 8        # isImm
+    {- [63:32] -} , fSRC_IMM49_LO32       # isImm -- bottom two bits are masked out
+    ----------------------------------------------------------------------------
+    {- [80:64] -} , fSRC_IMM49_HI17       # isImm
+
+    {- [84:81] -} , fReserved 80 4        # always
+    {- [85] -}    , fABSOLUTE             # always -- 0 = rel. implies some extra implicit offsets
+
+    {- [86] -}    , fNODEC                # always
+    {- [89:87] -} , fSRCPRED              # always
+    {- [90] -}    , fSRCPREDSIGN          # always
+    {- [91] -}    , fISUREG               # always
+    {- [95:92] -} , fReserved 92 4        # always
+    ----------------------------------------------------------------------------
+    {- [104:96] -} , fReserved 96 9       # always
+    {- [125:105] -} , fSCHEDULING         # always  -- 122,123,124 are Src{0,1,2}.Reuse
+    {- [127:126] -} , fReserved 126 2     # always
+    ]
+  where isReg  = fREGFILE .== 1
+        isUReg = fREGFILE .== 4 .&. fIS_UREG .== 1
+        isImm  = fREGFILE .== 4 .&. fIS_UREG .== 0
         -- isConInd = error "isConInd"
 
