@@ -11,6 +11,7 @@ import System.Directory
 import System.Environment(lookupEnv)
 import System.Exit
 import System.FilePath
+import System.IO
 import System.Process
 
 
@@ -170,7 +171,11 @@ execProcess os exe args = do
       let lbl = "[" ++ dropExtension (takeFileName exe) ++ "] "
       fatal $ labelLines lbl $
         err ++ out ++ "\n" ++ "[exited " ++ show ex_val ++ "]"
-    ExitSuccess -> return out
+    ExitSuccess -> do
+      unless (null err) $
+        hPutStrLn stderr $
+          unlines (map (\ln -> "[" ++ dropExtension (takeFileName exe) ++ "] " ++ ln) (lines err))
+      return out
 
 execProcessWithExitCode :: Opts -> FilePath -> [String] -> IO (ExitCode,String,String)
 execProcessWithExitCode os exe args = do

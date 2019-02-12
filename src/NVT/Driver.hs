@@ -17,6 +17,7 @@ import System.Directory
 import System.Process
 import System.Exit
 import System.Environment(lookupEnv)
+import System.IO
 import qualified Data.ByteString as S
 
 -------------------------------------------------------------------------------
@@ -57,7 +58,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
 
             , PA.opt spec "X" "" "ANYTHING"
                 "sets an extra argument for the nvcc tool (e.g. -X-Ic:\\foo\\bar)" ""
-                (\a o -> (o {oExtraArgs = oExtraArgs o ++ [a]})) # PA.OptAttrAllowUnset
+                (\a o -> (o {oExtraArgs = oExtraArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
             ]
             [ -- arguments
                 PA.arg spec "PATH"
@@ -127,7 +128,8 @@ runWithOpts os = processFile (oInputFile os)
                 oExtraArgs os ++
                 -- cuda_sample_incs_dir ++
                 [oInputFile os]
-          runCudaTool os "nvcc" (mkArgs "-cubin")
+          out <- runCudaTool os "nvcc" (mkArgs "-cubin")
+          hPutStrLn stdout out
           let cubin_file = takeFileName (dropExtension fp) ++ ".cubin"
           let output_path_without_ext
                 | null (oOutputFile os) = takeFileName (dropExtension fp)
