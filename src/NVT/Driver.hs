@@ -33,7 +33,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.optF spec "v2" "debug"
                 "the verbosity level" ""
                 (\o -> (o {oVerbosity = 2})) # PA.OptAttrAllowUnset
-            , PA.optF spec "" "line-mappings"
+            , PA.optF spec "lines" "line-mappings"
                 "enables line mappings" ""
                 (\o -> (o {oSourceMapping = True})) # PA.OptAttrAllowUnset
             , PA.optF spec "" "no-filter-asm"
@@ -42,6 +42,9 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.optF spec "rdc" "relocatable-device-code"
                 "pass -rdc=true to nvcc" ""
                 (\o -> (o {oRDC = True})) # PA.OptAttrAllowUnset
+            , PA.optF spec "" "no-bits"
+                "eliminates the text bits" ""
+                (\o -> (o {oNoComments = True})) # PA.OptAttrAllowUnset
             , PA.opt spec "o" "output" "PATH"
                 "sets the output file" "(defaults to stdout)"
                 (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
@@ -191,7 +194,7 @@ runWithOpts os = processFile (oInputFile os)
               maybeFilterAsmIO
                 | oFilterAssembly os =
                   if oSourceMapping os
-                    then filterAssemblyWithInterleavedSrcIO (oArch os)
+                    then filterAssemblyWithInterleavedSrcIO (oNoComments os) (oArch os)
                     else return . filterAssembly (oArch os)
                 | otherwise = return
           maybeFilterAsmIO nvdis_out >>= emitOutput

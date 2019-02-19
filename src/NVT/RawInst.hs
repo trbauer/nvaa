@@ -109,8 +109,8 @@ fmtExtendedInfo w128 = "{" ++ intercalate "," tokens ++ "}"
 
 fmtRiWithControlInfo :: RawInst -> String
 fmtRiWithControlInfo ri =
-    ln_pfx ++ ln_spaces ++ bits ++ "\n"
-  where ln_pfx = printf "  /*%04x*/ " (riOffset ri) ++ syntax ++ lop3_lut_suffix
+    ln_pfx ++ ln_spaces
+  where ln_pfx = syntax ++ lop3_lut_suffix
         syntax = fmtRawInstWithOpts True ri
         lop3_lut_suffix
           | "LOP3.LUT" `isInfixOf` riMnemonic ri = lop_func
@@ -123,7 +123,14 @@ fmtRiWithControlInfo ri =
                     [(x,"")] -> "/* " ++ fmtLop3 x ++ " */"
                     _ -> ""
         ln_spaces = replicate (90 - length ln_pfx) ' '
-        bits = printf "/* %016x`%016x */" (wHi64 (riBits ri)) (wLo64 (riBits ri))
+
+fmtRiWithControlInfoBits :: RawInst -> String
+fmtRiWithControlInfoBits ri =
+    ln_pfx ++ fmtRiWithControlInfo ri ++ bits
+  where ln_pfx = printf "  /*%04x*/ " (riOffset ri)
+
+        bits :: String
+        bits = printf "  /* %016x`%016x */" (wHi64 (riBits ri)) (wLo64 (riBits ri))
 
 {-
 
