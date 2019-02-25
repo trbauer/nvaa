@@ -44,7 +44,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
                 (\o -> (o {oRDC = True})) # PA.OptAttrAllowUnset
             , PA.optF spec "" "no-bits"
                 "eliminates the text bits" ""
-                (\o -> (o {oNoComments = True})) # PA.OptAttrAllowUnset
+                (\o -> (o {oNoBits = True})) # PA.OptAttrAllowUnset
             , PA.opt spec "o" "output" "PATH"
                 "sets the output file" "(defaults to stdout)"
                 (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
@@ -192,10 +192,10 @@ runWithOpts os = processFile (oInputFile os)
             `catch` tryNvdisasmWithoutLineNumbers
           let maybeFilterAsmIO :: String -> IO String
               maybeFilterAsmIO
-                | oFilterAssembly os =
+                | oFilterAssembly os = do
                   if oSourceMapping os
-                    then filterAssemblyWithInterleavedSrcIO (oNoComments os) (oArch os)
-                    else return . filterAssembly (oArch os)
+                    then filterAssemblyWithInterleavedSrcIO (oNoBits os) (oArch os)
+                    else return . filterAssembly (oNoBits os) (oArch os)
                 | otherwise = return
           maybeFilterAsmIO nvdis_out >>= emitOutput
           --

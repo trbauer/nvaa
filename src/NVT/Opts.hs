@@ -16,7 +16,7 @@ data Opts =
   , oFilterAssembly :: !Bool
   , oTextOnly :: !Bool
   , oRDC :: !Bool
-  , oNoComments :: !Bool
+  , oNoBits :: !Bool
   , oExtraArgs :: [String]
   } deriving Show
 dft_opts :: Opts
@@ -33,7 +33,7 @@ dft_opts =
   , oFilterAssembly = True
   , oTextOnly = False
   , oRDC = False
-  , oNoComments = False
+  , oNoBits = False
   , oExtraArgs = []
   }
 dft_opts_75 :: Opts

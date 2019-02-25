@@ -127,10 +127,10 @@ fmtRiWithControlInfo ri =
 fmtRiWithControlInfoBits :: RawInst -> String
 fmtRiWithControlInfoBits ri =
     ln_pfx ++ fmtRiWithControlInfo ri ++ bits
-  where ln_pfx = printf "  /*%04x*/ " (riOffset ri)
+  where ln_pfx = printf "  /*%04X*/ " (riOffset ri)
 
         bits :: String
-        bits = printf "  /* %016x`%016x */" (wHi64 (riBits ri)) (wLo64 (riBits ri))
+        bits = printf "  /* %016X`%016X */" (wHi64 (riBits ri)) (wLo64 (riBits ri))
 
 {-
 
