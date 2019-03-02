@@ -252,6 +252,10 @@ public:
     }
   }
 
+  void prefetch() const {
+    CUDA_API(cudaMemPrefetchAsync, mem, elems*sizeof(*mem));
+  }
+
   template <typename R>
   void apply(const init<R> &i) {
     i.apply<T>(mem,elems);
