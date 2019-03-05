@@ -260,6 +260,7 @@ public:
   void apply(const init<R> &i) {
     i.apply<T>(mem,elems);
   }
+  size_t size() const{return elems;}
 
   // elements
   operator       T *()       {return mem;}

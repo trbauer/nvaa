@@ -7,6 +7,11 @@ import Debug.Trace
 import Text.Printf
 import qualified Data.ByteString as BS
 
+type Binary = BS.ByteString
+
+bConcat :: [Binary] -> Binary
+bConcat = BS.concat
+
 data Word128 =
   Word128 {
     wHi64 :: !Word64
