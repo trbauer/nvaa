@@ -69,30 +69,14 @@ putField64 off len v w
 
 toByteStringW128 :: Word128 -> BS.ByteString
 toByteStringW128 w128 =
-  toByteStringU64 (wLo64 w128) `BS.append`
-    toByteStringU64 (wHi64 w128)
+  toByteStringLE (wLo64 w128) `BS.append`
+    toByteStringLE (wHi64 w128)
 fromByteStringW128 :: BS.ByteString -> Word128
 fromByteStringW128 bs
   | BS.length bs_hi8 < 8 = error "fromByteStringW128: insufficient bytes"
-  | otherwise = Word128 (fromByteStringU64 bs_hi8) (fromByteStringU64 bs_lo8)
+  | otherwise = Word128 (fromByteStringLE bs_hi8) (fromByteStringLE bs_lo8)
   where (bs_lo8,bs_hi8sfx) = BS.splitAt 8 bs
         bs_hi8 = BS.take 8 bs_hi8sfx
-
-{-
-toByteStringW64 :: Word64 -> BS.ByteString
-toByteStringW64 = BS.pack . packBytes 8
-  where packBytes :: Int ->  Word64 -> [Word8]
-        packBytes 0 _ = []
-        packBytes n w64 =
-          fromIntegral (w64.&.0xFF) : packBytes (n-1) (w64`shiftR`8)
-
-fromByteStringW64 :: BS.ByteString -> Word64
-fromByteStringW64 = go 8 0 . BS.unpack
-  where go :: Int -> Word64 -> [Word8] -> Word64
-        go 0 w64 _ = w64
-        go _ _ [] = error "fromByteStringW64: insufficient bytes"
-        go n w64 (b:bs) = go (n+1) (w64 .|. (fromIntegral b`shiftL`((n-1)*8))) bs
--}
 
 w128_zero :: Word128
 w128_zero = Word128 0 0
@@ -156,30 +140,41 @@ instance FiniteBits Word128 where
 
 
 
-w128binOp :: (Word64 -> Word64 -> Word64) -> Word128 -> Word128 -> Word128
-w128binOp f (Word128 hi1 lo1) (Word128 hi2 lo2) = Word128 (f hi1 hi2) (f lo1 lo2)
+w128binOp ::
+  (Word64 -> Word64 -> Word64) ->
+  Word128 ->
+  Word128 ->
+  Word128
+w128binOp f (Word128 hi1 lo1) (Word128 hi2 lo2) =
+  Word128 (f hi1 hi2) (f lo1 lo2)
 
 --------------------------
 fromByteStringU8 :: BS.ByteString -> Word8
 fromByteStringU8 = BS.head
-fromByteStringU16 :: BS.ByteString -> Word16
-fromByteStringU16 = fromByteStringG reverse
+fromByteStringU16LE :: BS.ByteString -> Word16
+fromByteStringU16LE = fromByteStringLE
 fromByteStringU16BE :: BS.ByteString -> Word16
-fromByteStringU16BE = fromByteStringG id
-fromByteStringU32 :: BS.ByteString -> Word32
-fromByteStringU32 = fromByteStringG reverse
+fromByteStringU16BE = fromByteStringBE
+fromByteStringU32LE :: BS.ByteString -> Word32
+fromByteStringU32LE = fromByteStringLE
 fromByteStringU32BE :: BS.ByteString -> Word32
-fromByteStringU32BE = fromByteStringG id
-fromByteStringU64 :: BS.ByteString -> Word64
-fromByteStringU64 = fromByteStringG reverse
+fromByteStringU32BE = fromByteStringBE
+fromByteStringU64LE :: BS.ByteString -> Word64
+fromByteStringU64LE = fromByteStringLE
 fromByteStringU64BE :: BS.ByteString -> Word64
-fromByteStringU64BE = fromByteStringG id
+fromByteStringU64BE = fromByteStringBE
+
+fromByteStringLE :: (FiniteBits i,Integral i) => BS.ByteString -> i
+fromByteStringLE = fromByteStringG reverse
+fromByteStringBE :: (FiniteBits i,Integral i) => BS.ByteString -> i
+fromByteStringBE = fromByteStringG id
 
 fromByteStringG :: (FiniteBits i,Integral i) => ([Word8] -> [Word8]) -> BS.ByteString -> i
-fromByteStringG reoder_bytes = go bytes zero . reoder_bytes . BS.unpack . BS.take 8
+fromByteStringG reoder_bytes =
+    go num_bytes zero . reoder_bytes . BS.unpack . BS.take num_bytes
   where zero = 0
         --
-        bytes = finiteBitSize zero `div` 8
+        num_bytes = finiteBitSize zero `div` 8
         --
         -- go :: Int -> i -> [Word8] -> Word64
         go 0   i    _ = i
@@ -190,21 +185,26 @@ fromByteStringG reoder_bytes = go bytes zero . reoder_bytes . BS.unpack . BS.tak
 toByteStringU8 :: Word8 -> BS.ByteString
 toByteStringU8 w8 = BS.singleton w8
 --
-toByteStringU16 :: Word16 -> BS.ByteString
-toByteStringU16 = toByteStringG id
+toByteStringU16LE :: Word16 -> BS.ByteString
+toByteStringU16LE = toByteStringLE
 toByteStringU16BE :: Word16 -> BS.ByteString
-toByteStringU16BE = toByteStringG reverse
+toByteStringU16BE = toByteStringBE
 --
-toByteStringU32 :: Word32 -> BS.ByteString
-toByteStringU32 = toByteStringG id
+toByteStringU32LE :: Word32 -> BS.ByteString
+toByteStringU32LE = toByteStringLE
 toByteStringU32BE :: Word32 -> BS.ByteString
-toByteStringU32BE = toByteStringG reverse
+toByteStringU32BE = toByteStringBE
 --
-toByteStringU64 :: Word64 -> BS.ByteString
-toByteStringU64 = toByteStringG id
+toByteStringU64LE :: Word64 -> BS.ByteString
+toByteStringU64LE = toByteStringLE
 toByteStringU64BE :: Word64 -> BS.ByteString
-toByteStringU64BE = toByteStringG reverse
+toByteStringU64BE = toByteStringBE
 
+toByteStringLE :: (FiniteBits i,Integral i) => i -> BS.ByteString
+toByteStringLE = toByteStringG id
+toByteStringBE :: (FiniteBits i,Integral i) => i -> BS.ByteString
+toByteStringBE = toByteStringG reverse
+--
 toByteStringG :: (FiniteBits i,Integral i) => ([Word8] -> [Word8]) -> i -> BS.ByteString
 toByteStringG reoder_bytes i = BS.pack . reoder_bytes $ packBytes bytes i
   where bytes = finiteBitSize i `div` 8
