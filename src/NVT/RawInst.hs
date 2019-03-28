@@ -33,7 +33,7 @@ data RawInst =
   , riMnemonic :: !String
   , riOptions :: ![String] -- . suffixes of mnemonic
   , riOperands :: ![String]
-  , riInstOpts :: ![String]
+  , riDepInfo :: ![String]
   } deriving Show
 
 
@@ -70,23 +70,45 @@ data SampleInst =
 --   | Operands_Load !Reg !Reg !UReg !Imm -- LD.... [R12 + UR2 + 0x120]    URZ means none
 
 
-
 fmtRawInst :: RawInst -> String
-fmtRawInst ri = maybePad prefix ++ suffix ++ ";"
-  where prefix = pred ++ " " ++ padR 16 (riMnemonic ri) ++ opnds
-        maybePad
-          | ctl_info = padR 64
-          | otherwise = id
+fmtRawInst = fmtRawInstG False
+fmtRawInstG :: Bool -> RawInst -> String
+fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
+  where prefix = pred ++ " " ++ padR 16 mne ++ opnds
+        --
         pred = printf "%-5s" (riPredication ri)
+        --
         opnds
           | null (riOperands ri) = ""
           | otherwise  = " " ++ intercalate ", " (riOperands ri)
-        suffix
+        --        
+        mne
+          | raw = riMnemonic ri
+          | "LOP3.LUT" `isInfixOf` riMnemonic ri = lop ++ "." ++ lop_func            
+          | otherwise = riMnemonic ri
+          where lop :: String
+                lop = takeWhile (/='.') (riMnemonic ri)
+                --
+                lut_ix :: Int
+                lut_ix
+                  | "P" `isPrefixOf` head (riOperands ri) = 5
+                  | otherwise = 4
+                --
+                lop_func :: String
+                lop_func =
+                  case reads (riOperands ri !! lut_ix) of
+                    [(x,"")] -> "(" ++ fmtLop3 x ++ ")"
+                    _ -> "LUT"
+        --
+        dep_info
+          | raw = ""
           | null tokens = ""
-          | otherwise " {" ++ intercalate "," tokens ++ "}"
-          where tokens = riInstOpts ri
-fmtRiWithControlInfo :: RawInst -> String
-fmtRiWithControlInfo ri =
+          | otherwise = " {" ++ intercalate "," tokens ++ "}"
+          where tokens = riDepInfo ri
+
+{-
+fmtRawInstWithoutControlInfo :: RawInst -> String
+fmtRawInstWithoutControlInfo ri =
     ln_pfx ++ ln_spaces
   where ln_pfx = syntax ++ lop3_lut_suffix
         syntax = fmtRawInst ri
@@ -101,63 +123,15 @@ fmtRiWithControlInfo ri =
                     [(x,"")] -> "/* " ++ fmtLop3 x ++ " */"
                     _ -> ""
         ln_spaces = replicate (90 - length ln_pfx) ' '
-
+-}
 
 fmtSampleInst :: SampleInst -> String
 fmtSampleInst si =
-    ln_pfx ++ fmtRawInst (siRawInst ri) ++ bits
-  where ln_pfx = printf "  /*%04X*/ " (siRawInst (riOffset ri))
+    ln_pfx ++ fmtRawInst (siRawInst si) ++ bits
+  where ln_pfx = printf "  /*%04X*/ " (riOffset (siRawInst si))
 
         bits :: String
         bits = printf "  /* %016X`%016X */" (wHi64 (siBits si)) (wLo64 (siBits si))
-
-
-
-
-
-expandControlInfo :: Word128 -> [String]
-expandControlInfo w128 = tokens
-  where tokens = filter (not . null) [
-            stall_tk
-          , yield_tk
-          , wr_alloc_tk
-          , rd_alloc_tk
-          , wait_mask_tk
-          ]
-
-        control_bits = getField128 (128 - 23) 23 w128
-        -- Volta control words are the top 23 bits.  The meaning is pretty much
-        -- unchanged since Maxwell (I think).
-        --   https://arxiv.org/pdf/1804.06826
-        --   https://github.com/NervanaSystems/maxas/wiki/Control-Codes
-        --
-        --  [22:21] / [127:126] = MBZ
-        --  [20:17] / [125:122] = .reuse
-        --  [16:11] / [121:116] = wait barrier mask
-        --  [10:8]  / [115:113] = read barrier index
-        --  [7:5]   / [112:110] = write barrier index
-        --  [4]     / [109]     = !yield (yield if zero)
-        --  [3:0]   / [108:105] = stall cycles (0 to 15)
-        stall_tk
-          | stalls == 0 = ""
-          | otherwise = "!" ++ show stalls
-          where stalls = getField64 0 4 control_bits
-        yield_tk
-          | getField64 4 1 control_bits == 0 = "Y"
-          | otherwise = ""
-        wr_alloc_tk = mkAllocTk ".W" 5
-        rd_alloc_tk = mkAllocTk ".R" 8
-        mkAllocTk sfx off
-          | val == 7 = "" -- I guess 7 is their ignored value
-          | otherwise = "+" ++ show (val + 1) ++ sfx
-          where val = getField64 off 3 control_bits
-        wait_mask_tk
-          | null indices = ""
-          | otherwise = intercalate "," (map (\i -> "^" ++ show (i + 1)) indices)
-          where indices = filter (testBit wait_mask) [0..5]
-                 where wait_mask = getField64 11 6 control_bits
-
-
 
 
 
@@ -210,8 +184,8 @@ formatDepInfoMaxwell control_info =
 -- s0 = "        /*0000*/                   MOV R1, c[0x0][0x28] ;    /* 0x00000a0000017a02 */"
 -- s1 = "                                                             /* 0x000fd00000000f00 */"
 
-s0 = "        /*2820*/               @P0 EXIT ;    /* 0x000000000000094d */"
-s1 = "                                              /* 0x000fea0003800000 */"
+-- s0 = "        /*2820*/               @P0 EXIT ;    /* 0x000000000000094d */"
+-- s1 = "                                              /* 0x000fea0003800000 */"
 
 {-
 tryParseInstructionLines :: String -> String -> Maybe RawInst
@@ -237,21 +211,69 @@ parseSlashStarHexWord ('/':'*':ds) =
 parseSlashStarHexWord s = error $ "parseSlashStarHexWord: " ++ show s
 -}
 
+decodeDepInfo :: Word128 -> [String]
+decodeDepInfo w128 = tokens
+  where tokens = filter (not . null) [
+            stall_tk
+          , yield_tk
+          , wr_alloc_tk
+          , rd_alloc_tk
+          , wait_mask_tk
+          ]
+
+        control_bits = getField128 (128 - 23) 23 w128
+        -- Volta control words are the top 23 bits.  The meaning is pretty much
+        -- unchanged since Maxwell (I think).
+        --   https://arxiv.org/pdf/1804.06826
+        --   https://github.com/NervanaSystems/maxas/wiki/Control-Codes
+        --
+        --  [22:21] / [127:126] = MBZ
+        --  [20:17] / [125:122] = .reuse
+        --  [16:11] / [121:116] = wait barrier mask
+        --  [10:8]  / [115:113] = read barrier index
+        --  [7:5]   / [112:110] = write barrier index
+        --  [4]     / [109]     = !yield (yield if zero)
+        --  [3:0]   / [108:105] = stall cycles (0 to 15)
+        stall_tk
+          | stalls == 0 = ""
+          | otherwise = "!" ++ show stalls
+          where stalls = getField64 0 4 control_bits
+        yield_tk
+          | getField64 4 1 control_bits == 0 = "Y"
+          | otherwise = ""
+        wr_alloc_tk = mkAllocTk ".W" 5
+        rd_alloc_tk = mkAllocTk ".R" 8
+        mkAllocTk sfx off
+          | val == 7 = "" -- I guess 7 is their ignored value
+          | otherwise = "+" ++ show (val + 1) ++ sfx
+          where val = getField64 off 3 control_bits
+        wait_mask_tk
+          | null indices = ""
+          | otherwise = intercalate "," (map (\i -> "^" ++ show (i + 1)) indices)
+          where indices = filter (testBit wait_mask) [0..5]
+                 where wait_mask = getField64 11 6 control_bits
+
+
+-- TODO: use Parsec
+--
 -- parses a raw instruction
-parseRawInstInst :: String -> Maybe RawInst
-parseRawInstInst = fmap fst . parseRawInstInst'
-parseRawInstInst' :: String -> Maybe (RawInst,String)
-parseRawInstInst' = parseSyntax 0 . skipWs
-  where parseSyntax :: String -> Maybe (RawInst,String)
+parseRawInst :: String -> Either String RawInst
+parseRawInst = fmap fst . parseRawInst'
+parseRawInst' :: String -> Either String (RawInst,String)
+parseRawInst' = parseSyntax . skipWs
+  where parseSyntax :: String -> Either String (RawInst,String)
         parseSyntax =
             parsePredication $
               RawInst {
                 riOffset = 0
+              , riLine = 0
               , riPredication = ""
               , riMnemonic = ""
+              , riOptions = []
               , riOperands = []
+              , riDepInfo = []
               }
-          where parsePredication :: RawInst -> String -> Maybe (RawInst,String)
+          where parsePredication :: RawInst -> String -> Either String (RawInst,String)
                 parsePredication ri sfx =
                   case skipWs sfx of
                     '@':sfx ->
@@ -259,12 +281,12 @@ parseRawInstInst' = parseSyntax 0 . skipWs
                         (pred,sfx) -> parseMnemonic (ri{riPredication = "@" ++ pred}) (skipWs sfx)
                     s -> parseMnemonic ri (skipWs s)
 
-                parseMnemonic :: RawInst -> String -> Maybe (RawInst,String)
+                parseMnemonic :: RawInst -> String -> Either String (RawInst,String)
                 parseMnemonic ri sfx =
                   case span (\c -> isAlphaNum c || c == '.') (skipWs sfx) of
                     (mne,sfx) -> parseOperands (ri{riMnemonic = mne}) (skipWs sfx)
 
-                parseOperands :: RawInst -> String -> Maybe (RawInst,String)
+                parseOperands :: RawInst -> String -> Either String (RawInst,String)
                 parseOperands ri sfx =
                   case sfx of
                     -- nullary instruction
@@ -274,19 +296,23 @@ parseRawInstInst' = parseSyntax 0 . skipWs
                         (op,sfx) ->
                             case skipWs sfx of
                               ',':sfx -> parseOperands ri1 sfx
-                              ';':sfx -> return (SampleInst ri1 (Word128 0 0),dropWhile isSpace sfx)
+                              ';':sfx -> return (ri1,dropWhile isSpace sfx)
                               -- skip control info
-                              '{':sfx ->
-                                case dropWhile (/=';') (drop 1 sfx) of
-                                  "" -> Nothing
-                                  ';':sfx -> return (SampleInst ri1 (Word128 0 0),dropWhile isSpace sfx)
-                              "" -> Nothing
+                              '{':sfx -> 
+                                case span (/='}') sfx of
+                                  (opts,'}':s) -> parseOperands (ri1 {riDepInfo = ws}) (skipWs s)
+                                    where ws = words (map (\c -> if c == ',' then ' ' else c) opts)
+                                  (opts,s) -> Left "expected }"
+                              -- case dropWhile (/=';') (drop 1 sfx) of
+                              --  "" -> Nothing
+                              --  ';':sfx -> return (SampleInst ri1 (Word128 0 0),dropWhile isSpace sfx)
+                              "" -> Left "expected ;"
                           where ri1 = ri{riOperands = riOperands ri ++ [trimWs op]}
 
 
-parseSampleInstWithBits :: String -> Maybe SampleInst
-parseSampleInstWithBits = parseOffsetOpt . dropWhile isSpace
-  where parseOffsetOpt :: String -> Maybe RawInst
+parseSampleInst :: String -> Either String SampleInst
+parseSampleInst = parseOffsetOpt . dropWhile isSpace
+  where parseOffsetOpt :: String -> Either String SampleInst
         parseOffsetOpt s =
           case s of
             -- /*0020*/ <- no 0x prefix
@@ -295,23 +321,28 @@ parseSampleInstWithBits = parseOffsetOpt . dropWhile isSpace
                 (xds,'*':'/':sfx)
                   | null xds -> parseSyntax 0 (skipWs sfx)
                   | otherwise -> parseSyntax (read ("0x"++xds)) (skipWs sfx)
+                _ -> Left "expected */"
             _ -> parseSyntax 0 s
 
-        parseSyntax :: Int -> String -> Maybe SampleInst
+        parseSyntax :: Int -> String -> Either String SampleInst
         parseSyntax off s =
           case parseRawInst' s of
-            Nothing -> Nothing
-            Just (ri,sfx) ->
+            Left err -> Left err
+            Right (ri,sfx) ->
               parseBitsSuffix (SampleInst ri{riOffset = off} (Word128 0 0)) sfx
 
-        parseBitsSuffix :: RawInst -> String -> Maybe RawInst
-        parseBitsSuffix ri sfx =
+        parseBitsSuffix :: SampleInst -> String -> Either String SampleInst
+        parseBitsSuffix si sfx =
           case parseDualBitsInSingleComment sfx of
             Nothing ->
               case parseBitsInCommentSequence sfx of
-                Nothing -> Nothing
-                Just (w128,_) -> return si{siBits = w128}
-            Just (w128,_) -> return si{siBits = w128}
+                Nothing -> Left "unable to parse suffix bits"
+                Just (w128,_) -> completeInstruction si{siBits = w128}
+            Just (w128,_) -> completeInstruction si{siBits = w128}
+
+        completeInstruction :: SampleInst -> Either String SampleInst
+        completeInstruction si = return $ 
+          si{siRawInst = (siRawInst si){riDepInfo = decodeDepInfo (siBits si)}}
 
 -- /* F123...`AFD0... */
 parseDualBitsInSingleComment :: String -> Maybe (Word128,String)

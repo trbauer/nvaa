@@ -18,9 +18,9 @@ import System.Process
 main :: IO ()
 main = do
 --  collectSampleIsa        "" D.dft_opts_61
---  collectSampleIsa        "" D.dft_opts_75
+  collectSampleIsa        "" D.dft_opts_75
 --  collectLibrarySampleIsa "" D.dft_opts_75
-
+  return ()
 
 collectSampleIsa :: String -> D.Opts -> IO ()
 collectSampleIsa filter_str os_raw = body

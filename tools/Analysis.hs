@@ -184,7 +184,7 @@ decode :: IO [Sample] -> IO ()
 decode ms = do
   (s:_) <- ms
   disBitsRaw opts (sBits s) >>= putStr
-  putStrLn $ "  " ++ fmtExtendedInfo (sBits s)
+  putStrLn $ "  " ++ "{" ++ intercalate "," (decodeDepInfo (sBits s)) ++ "}"
 decodeR :: IO [Sample] -> IO ()
 decodeR ms = do
   (s:_) <- ms

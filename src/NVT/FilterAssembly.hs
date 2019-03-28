@@ -51,15 +51,15 @@ filterAssemblyWithInterleavedSrcIO no_bits arch = processLns . zip [1..] . lines
         processLns128B :: FilterProcessorIO
         processLns128B dict rlns [] = return $ unlines $ reverse rlns
         processLns128B dict rlns  lns@((_,ln0str):(_,ln1str):lns_sfx) =
-          case parseRawInstWithBits (ln0str ++ ln1str) of
-            Just ri -> processLns128B dict (fmtRi ri:rlns) lns_sfx
-            Nothing -> tryProcessLineMapping dict rlns lns processLns128B
+          case parseSampleInst (ln0str ++ ln1str) of
+            Right si -> processLns128B dict (fmtSi si:rlns) lns_sfx
+            Left _ -> tryProcessLineMapping dict rlns lns processLns128B
         processLns128B dict rlns [(_,lnstr)] = processLns128B dict (lnstr:rlns) []
 
-        fmtRi :: RawInst -> String
-        fmtRi ri
-          | no_bits = fmtRiWithControlInfo ri
-          | otherwise = fmtRiWithControlInfoBits ri
+        fmtSi :: SampleInst -> String
+        fmtSi si
+          | no_bits = fmtRawInst (siRawInst si)
+          | otherwise = fmtSampleInst si
 
         tryProcessLineMapping :: SrcDict -> [String] -> [(Int,String)] -> FilterProcessorIO -> IO String
         tryProcessLineMapping dict0 rlns ((_,lnstr):lns) cont =
@@ -96,13 +96,13 @@ filterAssemblyWithInterleavedSrcIO no_bits arch = processLns . zip [1..] . lines
                     -- since the Maxwell and Volta control fields have the same encoding
                     -- we can cheat and just synthesize the "high 64b" of the Volta word
                     -- and using that in tryParseInstructionLines.
-                    case parseRawInstWithBits (lnstr ++ fake_second_line) of
-                      Nothing ->
+                    case parseSampleInst (lnstr ++ fake_second_line) of
+                      Left _ ->
                         -- e.g. parse failure just means the end of the function
                         -- NOTE: we might drop unused control codes here; that's okay
                         processLnsMaxwell dict rlns ((lno,lnstr):lns)
-                      Just ri ->
-                        parseInstGroup (fmtRi ri:rlns) deps lns
+                      Right si ->
+                        parseInstGroup (fmtSampleInst si:rlns) deps lns
 
                   where fake_second_line = printf "  /* 0x%016X */" shifted_word
                         -- in Volta it is stored at [125:105]
@@ -120,19 +120,19 @@ filterAssembly no_bits arch = processLns . zip [1..] . lines
           | arch >= "sm_50" = processLnsMaxwell
           | otherwise = unlines . map snd
 
-        fmtRi :: RawInst -> String
-        fmtRi ri
-          | no_bits = fmtRiWithControlInfo ri
-          | otherwise = fmtRiWithControlInfoBits ri
+        fmtSi :: SampleInst -> String
+        fmtSi si
+          | no_bits = fmtRawInst (siRawInst si)
+          | otherwise = fmtSampleInst si
 
         -- Volta and Turing
         processLns128B [] = ""
         processLns128B ((lno0,ln0str):(lno1,ln1str):lns) =
-          case parseRawInstWithBits (ln0str ++ ln1str) of
-            Just ri ->
-              fmtRi ri ++ "\n" ++
+          case parseSampleInst (ln0str ++ ln1str) of
+            Right si ->
+              fmtSampleInst si ++ "\n" ++
               processLns lns
-            Nothing ->
+            Left _ ->
               ln0str ++ "\n" ++
               processLns ((lno1,ln1str):lns)
 --          case tryParseInstructionLines ln0str ln1str of
@@ -161,13 +161,13 @@ filterAssembly no_bits arch = processLns . zip [1..] . lines
                     -- since the Maxwell and Volta control fields have the same encoding
                     -- we can cheat and just synthesize the "high 64b" of the Volta word
                     -- and using that in tryParseInstructionLines.
-                    case parseRawInstWithBits (lnstr ++ fake_second_line) of
-                      Nothing ->
+                    case parseSampleInst (lnstr ++ fake_second_line) of
+                      Left _ ->
                         -- e.g. parse failure just means the end of the function
                         -- NOTE: we might drop unused control codes here
                         processLnsMaxwell ((lno,lnstr):lns)
-                      Just ri ->
-                        fmtRi ri ++ "\n" ++
+                      Right si ->
+                        fmtSampleInst si ++ "\n" ++
                         parseInstGroup deps lns
                   where fake_second_line = printf "  /* 0x%016X */" shifted_word
                         -- in Volta it is stored at [125:105]
