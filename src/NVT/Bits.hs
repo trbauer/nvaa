@@ -7,6 +7,23 @@ import Debug.Trace
 import Text.Printf
 import qualified Data.ByteString as BS
 
+type Binary = BS.ByteString
+
+bConcat :: [Binary] -> Binary
+bConcat = BS.concat
+
+bAppend :: Binary -> Binary -> Binary
+bAppend = BS.append
+
+bEmpty :: Binary
+bEmpty = BS.empty
+
+bZeros :: Int -> Binary
+bZeros k = BS.pack (replicate k 0)
+
+bSize :: Binary -> Int
+bSize = BS.length
+
 data Word128 =
   Word128 {
     wHi64 :: !Word64
@@ -32,11 +49,22 @@ instance Read Word128 where
         _ -> []
   readsPrec _ _ = []
 
+{-
+getFieldBits :: FiniteBits b => Int -> Int -> b -> Word64
+getFieldBits off len b =
+  | off + len > finiteBitSize b = error "NVT.Bits.getFieldBits: offsets out of bounds for type"
+  -- TODO: enable splits
+  | off < 64 && off + len > off + 64 = error "NVT.Bits.getField: field cannot cross 64b boundary"
+  | otherwise = shifted_value .&. mask
+  where shifted_value = w `shiftR` (off `mod` 64)
+          where w = if off < 64 then wLo64 w128 else wHi64 w128
+        mask = (1 `shiftL` len) - 1
+-}
 
 getField128 :: Int -> Int -> Word128 -> Word64
 getField128 off len w128
   | off + len > 128 = error "NVT.Bits.getField128: offsets out of bounds"
-  | off < 64 && off + len > off + 64 = error "NVT.Word128.getField128: field cannot cross 64b boundary"
+  | off < 64 && off + len > off + 64 = error "NVT.Bits.getField128: field cannot cross 64b boundary"
   | otherwise = shifted_value .&. mask
   -- TODO: enable splits
   where shifted_value = w `shiftR` (off `mod` 64)
@@ -55,7 +83,7 @@ getField64 off len w
 putField128 :: Int -> Int -> Word64 -> Word128 -> Word128
 putField128 off len v w
   | off + len > 128 = error "NVT.Bits.putField128: offsets out of bounds"
-  | off < 64 && off + len > off + 64 = error "NVT.Word128.putField128: field cannot cross 64b boundary"
+  | off < 64 && off + len > off + 64 = error "NVT.Bits.putField128: field cannot cross 64b boundary"
   | off < 64 = w{wLo64 = putField64 (off`mod`64) len v (wLo64 w)}
   | otherwise = w{wHi64 = putField64 (off`mod`64) len v (wHi64 w)}
   -- TODO enable splits

@@ -17,6 +17,7 @@ import System.Directory
 import System.Process
 import System.Exit
 import System.Environment(lookupEnv)
+import System.IO
 import qualified Data.ByteString as S
 
 -------------------------------------------------------------------------------
@@ -32,7 +33,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.optF spec "v2" "debug"
                 "the verbosity level" ""
                 (\o -> (o {oVerbosity = 2})) # PA.OptAttrAllowUnset
-            , PA.optF spec "" "line-mappings"
+            , PA.optF spec "lines" "line-mappings"
                 "enables line mappings" ""
                 (\o -> (o {oSourceMapping = True})) # PA.OptAttrAllowUnset
             , PA.optF spec "" "no-filter-asm"
@@ -41,6 +42,9 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
             , PA.optF spec "rdc" "relocatable-device-code"
                 "pass -rdc=true to nvcc" ""
                 (\o -> (o {oRDC = True})) # PA.OptAttrAllowUnset
+            , PA.optF spec "" "no-bits"
+                "eliminates the text bits" ""
+                (\o -> (o {oNoBits = True})) # PA.OptAttrAllowUnset
             , PA.opt spec "o" "output" "PATH"
                 "sets the output file" "(defaults to stdout)"
                 (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
@@ -57,7 +61,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
 
             , PA.opt spec "X" "" "ANYTHING"
                 "sets an extra argument for the nvcc tool (e.g. -X-Ic:\\foo\\bar)" ""
-                (\a o -> (o {oExtraArgs = oExtraArgs o ++ [a]})) # PA.OptAttrAllowUnset
+                (\a o -> (o {oExtraArgs = oExtraArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
             ]
             [ -- arguments
                 PA.arg spec "PATH"
@@ -127,7 +131,8 @@ runWithOpts os = processFile (oInputFile os)
                 oExtraArgs os ++
                 -- cuda_sample_incs_dir ++
                 [oInputFile os]
-          runCudaTool os "nvcc" (mkArgs "-cubin")
+          out <- runCudaTool os "nvcc" (mkArgs "-cubin")
+          hPutStrLn stdout out
           let cubin_file = takeFileName (dropExtension fp) ++ ".cubin"
           let output_path_without_ext
                 | null (oOutputFile os) = takeFileName (dropExtension fp)
@@ -187,10 +192,10 @@ runWithOpts os = processFile (oInputFile os)
             `catch` tryNvdisasmWithoutLineNumbers
           let maybeFilterAsmIO :: String -> IO String
               maybeFilterAsmIO
-                | oFilterAssembly os =
+                | oFilterAssembly os = do
                   if oSourceMapping os
-                    then filterAssemblyWithInterleavedSrcIO (oArch os)
-                    else return . filterAssembly (oArch os)
+                    then filterAssemblyWithInterleavedSrcIO (oNoBits os) (oArch os)
+                    else return . filterAssembly (oNoBits os) (oArch os)
                 | otherwise = return
           maybeFilterAsmIO nvdis_out >>= emitOutput
           --

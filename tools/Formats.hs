@@ -59,9 +59,9 @@ format_STG =
   {- [63:40] -} , fLDST_IMMOFF_S24 -- 24b offset
   ----------------------------------------------------------------------------
   {- [71:64] -} , fReserved 64 8
-  {- [72] -} , fl "AddressSize" 72 1 ["",".E"]
-  {- [75:73] -}, fLDST_DATATYPE
-  {- [76] -} , fl "Private" 76 1 ["",".PRIVATE"]
+  {- [72] -}    , f64B_ADDR, -- fl "AddressSize" 72 1 ["",".E"]
+  {- [75:73] -} , fLDST_DATATYPE
+  {- [76] -}    , fl "Private" 76 1 ["",".PRIVATE"]
   {- [78:77] -} , fLDST_SCOPE
   {- [80:79] -} , fST_SEMANTICS
   {- [83:81] -} , fReserved 81 3
@@ -411,3 +411,71 @@ format_RET =
         isImm  = fREGFILE .== 4 .&. fIS_UREG .== 0
         -- isConInd = error "isConInd"
 
+format_CCTL ::
+format_CCTL =
+    [
+    {- [8:0] -}     fOPCODE   # always
+    {- [11:9] -}  , fREGFILE  # always -- Src.RegFile {4->REG,6=REG+UREG (w/[91]=0))
+    --
+    {- [15:12] -} , fEXECPRED             # always
+    {- [23:16] -} , fReserved 16 8        # always -- fDST_REG
+    {- [31:24] -} , fSRC0_REG             # isReg .|. isUReg
+    {- [37:32] -} , fUREG                 # isUReg
+    {- [63:38] -} , fReserved 32 26       # always
+    ----------------------------------------------------------------------------
+    {- [71:64] -} , fReserved 64 8
+    {- [72] -}    , f64B_ADDR             # always
+    {- [77:73] -} , fReserved 73 5        # always
+    {- [81:78] -} , fCACHETYPE            # always -- {0->nothing, 1->.U, 2->.C, 3->.I, 4->???, ...}
+    {- [86:82] -} , fReserved 82 5        # always
+    {- [89:87] -} , fCCTLFUNC             # cNot is64BAddr -- {0->.PF1, 1->.PF2, 2->.WB, 3->.IV, 4->.IVALL (invalid if [72] != 0), 5->.RS, .IVALLP (invalid if [72]!=0), .WBALL (invalid if [72]!=0}
+    {- [89:87] -} , fCCTLFUNC_E           #      is64BAddr -- {0->.PF1, 1->.PF2, 2->.WB, 3->.IV, 4->.IVALL (invalid if [72] != 0), 5->.RS, .IVALLP (invalid if [72]!=0), .WBALL (invalid if [72]!=0}
+    {- [90] -}    , fSRCPREDSIGN          # always
+    {- [91] -}    , fENABLE_UREG          # always -- [R2+UR4]
+    {- [95:92] -} , fReserved 92 4        # always
+    ----------------------------------------------------------------------------
+    {- [104:96] -} , fReserved 96 9       # always
+    {- [125:105] -} , fSCHEDULING         # always  -- 122,123,124 are Src{0,1,2}.Reuse
+    {- [127:126] -} , fReserved 126 2     # always
+    ]
+  where isReg  = fREGFILE .== 4
+        isUReg = fREGFILE .== 6 .&. fENABLE_UREG .== 1
+        needAllBit = fCCTLFUNC
+        is64BAddr = f64B_ADDR .== 1
+        -- isConInd = error "isConInd"
+
+fCCTLFUNC :: Field
+fCCTLFUNC = f 87 3 $ [".PF1",".PF2",".WB",".IV","IVALL","RS","IVALLP","WBALL"]
+fCCTLFUNC_E = f 87 3 $ [".PF1",".PF2",".WB",".IV","???","RS","???","???"]
+
+
+
+format_MEMBAR ::
+format_MEMBAR =
+    [
+    {- [8:0] -}     fOPCODE   # always
+    {- [11:9] -}  , fREGFILE  # always -- Src.RegFile (=4)
+    --
+    {- [15:12] -} , fEXECPRED             # always
+    {- [23:16] -} , fReserved 16 8        # always -- fDST_REG
+    {- [63:38] -} , fReserved 32 26       # always
+    ----------------------------------------------------------------------------
+    {- [71:64] -} , fReserved 64 (76-64)  # always
+    {- [78:76] -} , fMEMBARSCOPE          # always
+    {- [80:79] -} , fMEMBARCONSISTENCY    # always
+    {- [95:81] -} , fReserved 81 (96-81)  # always
+    ----------------------------------------------------------------------------
+    {- [104:96] -} , fReserved 96 9       # always
+    {- [125:105] -} , fSCHEDULING         # always  -- 122,123,124 are Src{0,1,2}.Reuse
+    {- [127:126] -} , fReserved 126 2     # always
+    ]
+  where isReg  = fREGFILE .== 4
+        isUReg = fREGFILE .== 6 .&. fENABLE_UREG .== 1
+        needAllBit = fCCTLFUNC
+        is64BAddr = f64B_ADDR .== 1
+
+fMEMBARSCOPE :: Field
+fMEMBARSCOPE = f 76 3 [".CTA",".SM",".GPU",".SYS",".4?",".VC",".6?",".7?"]
+
+fMEMBARCONSISTENCY :: Field
+fMEMBARCONSISTENCY = f 79 2 [".SC",".ALL","",".3?"]

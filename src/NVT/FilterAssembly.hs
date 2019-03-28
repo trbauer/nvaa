@@ -39,8 +39,8 @@ lm_test = "//## File \"D:\\\\dev\\\\nvaa\\\\cuda-tests/cf.cu\", line 62"
 --   "JUNK\n" ++
 type FilterProcessorIO = SrcDict -> [String] -> [(Int,String)] -> IO String
 
-filterAssemblyWithInterleavedSrcIO :: String -> String -> IO String
-filterAssemblyWithInterleavedSrcIO arch = processLns . zip [1..] . lines
+filterAssemblyWithInterleavedSrcIO :: Bool -> String -> String -> IO String
+filterAssemblyWithInterleavedSrcIO no_bits arch = processLns . zip [1..] . lines
   where processLns :: [(Int,String)] -> IO String
         processLns
           | arch >= "sm_70" = processLns128B [] []
@@ -52,10 +52,14 @@ filterAssemblyWithInterleavedSrcIO arch = processLns . zip [1..] . lines
         processLns128B dict rlns [] = return $ unlines $ reverse rlns
         processLns128B dict rlns  lns@((_,ln0str):(_,ln1str):lns_sfx) =
           case parseRawInstWithBits (ln0str ++ ln1str) of
-            Just ri -> processLns128B dict (reverse (lines fmt_lns) ++ rlns) lns_sfx
-              where fmt_lns = fmtRiWithControlInfo ri
+            Just ri -> processLns128B dict (fmtRi ri:rlns) lns_sfx
             Nothing -> tryProcessLineMapping dict rlns lns processLns128B
         processLns128B dict rlns [(_,lnstr)] = processLns128B dict (lnstr:rlns) []
+
+        fmtRi :: RawInst -> String
+        fmtRi ri
+          | no_bits = fmtRiWithControlInfo ri
+          | otherwise = fmtRiWithControlInfoBits ri
 
         tryProcessLineMapping :: SrcDict -> [String] -> [(Int,String)] -> FilterProcessorIO -> IO String
         tryProcessLineMapping dict0 rlns ((_,lnstr):lns) cont =
@@ -98,7 +102,7 @@ filterAssemblyWithInterleavedSrcIO arch = processLns . zip [1..] . lines
                         -- NOTE: we might drop unused control codes here; that's okay
                         processLnsMaxwell dict rlns ((lno,lnstr):lns)
                       Just ri ->
-                        parseInstGroup (fmtRiWithControlInfo ri:rlns) deps lns
+                        parseInstGroup (fmtRi ri:rlns) deps lns
 
                   where fake_second_line = printf "  /* 0x%016X */" shifted_word
                         -- in Volta it is stored at [125:105]
@@ -108,20 +112,25 @@ filterAssemblyWithInterleavedSrcIO arch = processLns . zip [1..] . lines
 
 
 
-filterAssembly :: String -> String -> String
-filterAssembly arch = processLns . zip [1..] . lines
+filterAssembly :: Bool -> String -> String -> String
+filterAssembly no_bits arch = processLns . zip [1..] . lines
   where processLns :: [(Int,String)] -> String
         processLns
           | arch >= "sm_70" = processLns128B
           | arch >= "sm_50" = processLnsMaxwell
           | otherwise = unlines . map snd
 
+        fmtRi :: RawInst -> String
+        fmtRi ri
+          | no_bits = fmtRiWithControlInfo ri
+          | otherwise = fmtRiWithControlInfoBits ri
+
         -- Volta and Turing
         processLns128B [] = ""
         processLns128B ((lno0,ln0str):(lno1,ln1str):lns) =
           case parseRawInstWithBits (ln0str ++ ln1str) of
             Just ri ->
-              fmtRiWithControlInfo ri ++
+              fmtRi ri ++ "\n" ++
               processLns lns
             Nothing ->
               ln0str ++ "\n" ++
@@ -158,7 +167,7 @@ filterAssembly arch = processLns . zip [1..] . lines
                         -- NOTE: we might drop unused control codes here
                         processLnsMaxwell ((lno,lnstr):lns)
                       Just ri ->
-                        fmtRiWithControlInfo ri ++
+                        fmtRi ri ++ "\n" ++
                         parseInstGroup deps lns
                   where fake_second_line = printf "  /* 0x%016X */" shifted_word
                         -- in Volta it is stored at [125:105]
