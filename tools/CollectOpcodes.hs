@@ -4,7 +4,7 @@ import NVT.Driver
 import NVT.CUDASDK
 import NVT.Opts
 import NVT.RawInst
-import NVT.Word128
+import NVT.Bits
 
 import Control.Exception
 import Control.Monad
@@ -29,9 +29,12 @@ collectOps = body
           --
           createDirectoryIfMissing True output_root
           let filterSassOnly = filter (".sass"`isSuffixOf`)
+          --
           samples_sass_files <-  filterSassOnly <$> getSubPaths "examples/sm_75/samples"
           mapM_ processFile (samples_sass_files)
-          libraries_sass_files <- filterSassOnly <$> getSubPaths "examples/sm_75/libs"
+          --
+          library_dirs <- getSubPaths "examples/sm_75/libs" >>= filterM doesDirectoryExist
+          libraries_sass_files <- filterSassOnly . concat <$> mapM getSubPaths library_dirs
           mapM_ processFile (libraries_sass_files)
           return ()
 
@@ -45,14 +48,14 @@ collectOps = body
 
         processLine :: FilePath -> Int -> String -> IO ()
         processLine fp lno lnstr =
-            case parseRawInstWithBits lnstr of
-              Nothing -> return ()
-              Just ri -> do
+            case parseSampleInst lnstr of
+              Left _ -> return ()
+              Right si -> do
                 let syntax =
-                      printf "%016X`%016X:  " (wHi64 (riBits ri)) (wLo64 (riBits ri)) ++
-                      fmtRawInstWithOpts True ri
+                      printf "%016X`%016X:  " (wHi64 (siBits si)) (wLo64 (siBits si)) ++
+                      fmtRawInst (siRawInst si)
                     source_info = fp ++ ":" ++ show lno
-                let base_op = takeWhile (/='.') (riMnemonic ri)
+                let base_op = takeWhile (/='.') (riMnemonic (siRawInst si))
                 appendFile (output_root ++ "/" ++ base_op ++ ".sass") $
                    printf "%-80s" syntax ++ " // " ++ source_info ++ "\n"
 

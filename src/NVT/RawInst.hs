@@ -127,7 +127,7 @@ fmtRawInstWithoutControlInfo ri =
 
 fmtSampleInst :: SampleInst -> String
 fmtSampleInst si =
-    ln_pfx ++ fmtRawInst (siRawInst si) ++ bits
+    ln_pfx ++ padR 64 (fmtRawInst (siRawInst si)) ++ bits
   where ln_pfx = printf "  /*%04X*/ " (riOffset (siRawInst si))
 
         bits :: String

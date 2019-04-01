@@ -21,6 +21,7 @@ findCudaTool os exe_raw =
     tryEnvs
       [
         "CUDA_PATH"
+      , "CUDA_PATH_V10_1"
       , "CUDA_PATH_V10_0"
       , "CUDA_PATH_V9_0"
       , "CUDA_PATH_V9_1"
@@ -38,7 +39,7 @@ findCudaTool os exe_raw =
 #ifdef mingw32_HOST_OS
         tryEnvs [] =
           tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) vers)
-            where vers = ["v10.0","v9.1","v9.0","v8.0","v7.5"]
+            where vers = ["v10.1","v10.0","v9.1","v9.0","v8.0","v7.5"]
 #else
         -- TODO: /opt/nvidia/nvcc ?
         tryEnvs [] = tryFixedPaths ["/usr/local/cuda/bin"]

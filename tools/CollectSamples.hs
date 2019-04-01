@@ -18,8 +18,8 @@ import System.Process
 main :: IO ()
 main = do
 --  collectSampleIsa        "" D.dft_opts_61
-  collectSampleIsa        "" D.dft_opts_75
---  collectLibrarySampleIsa "" D.dft_opts_75
+  -- collectSampleIsa        "" D.dft_opts_75
+  collectLibrarySampleIsa "" D.dft_opts_75
   return ()
 
 collectSampleIsa :: String -> D.Opts -> IO ()
@@ -110,7 +110,7 @@ collectSampleIsa filter_str os_raw = body
           walkCuFiles fs
 
 findCudaSamplesDir :: IO FilePath
-findCudaSamplesDir = tryPathVers ["v10.0","v9.1","v9.0","v8.0"]
+findCudaSamplesDir = tryPathVers ["v10.1","v10.0","v9.1","v9.0","v8.0"]
   where tryPathVers [] = return ""
         tryPathVers (p:ps) = do
           z <- doesDirectoryExist (mkCudaSampleDir p)
@@ -140,23 +140,26 @@ collectLibrarySampleIsa substr os_raw = body
           where body = do
                   putStrLn $ "EMITTING LIBS FROM: " ++ dll_dir
 
-                  dumpLib "nppial64_100.dll"     --   9 MB
-                  dumpLib "nppicc64_100.dll"     --   3 MB
-                  dumpLib "nppicom64_100.dll"    --   3 MB
-                  dumpLib "nppidei64_100.dll"    --
-                  dumpLib "nppif64_100.dll"      --
-                  dumpLib "nppig64_100.dll"      --
-                  dumpLib "nppim64_100.dll"      --
-                  dumpLib "nppist64_100.dll"     --
-                  dumpLib "nppitc64_100.dll"     --
-                  dumpLib "npps64_100.dll"       --
+                  dumpLib "nppial64_10.dll"     --   9 MB
+                  dumpLib "nppicc64_10.dll"     --   3 MB
+                  dumpLib "nppicom64_10.dll"    --   3 MB
+                  dumpLib "nppidei64_10.dll"    --
+                  dumpLib "nppif64_10.dll"      --
+                  dumpLib "nppig64_10.dll"      --
+                  dumpLib "nppim64_10.dll"      --
+                  dumpLib "nppist64_10.dll"     --
+                  -- dumpLib "nppisu64_10.dll"     -- no device code
+                  dumpLib "nppitc64_10.dll"     --
+                  dumpLib "npps64_10.dll"       --
 
-                  dumpLib "curand64_100.dll"     --  48 MB
-                  dumpLib "cusparse64_100.dll"   --  55 MB
-                  dumpLib "cublas64_100.dll"     --  65 MB
-                  dumpLib "nvgraph64_100.dll"    --  68 MB
-                  dumpLib "cufft64_100.dll"      --  99 MB
-                  dumpLib "cusolver64_100.dll"   -- 125 MB
+                  dumpLib "curand64_10.dll"     --  48 MB
+                  dumpLib "cusparse64_10.dll"   --  55 MB
+                  dumpLib "cublas64_10.dll"     --  65 MB
+                  -- dumpLib "cublasLt64_10.dll" --  65 MB
+                  -- dumpLib "cuinj64_101.dll"   -- 4.6 MB no device code
+                  dumpLib "nvgraph64_10.dll"    --  68 MB
+                  dumpLib "cufft64_10.dll"      --  99 MB
+                  dumpLib "cusolver64_10.dll"   -- 125 MB
 
                 dumpLib :: String -> IO ()
                 dumpLib lib
@@ -221,7 +224,7 @@ collectLibrarySampleIsaFromDir os_raw full_dll = body
               -- , D.oExtraArgs = D.oExtraArgs os ++ ["--dump-resource-usage"]
               }
             res <- readProcess cuod_exe ["--dump-resource-usage", elf_cubin] ""
-            res_cpp <- readProcess ("C:\\Haskell\\8.4.2\\mingw\\bin\\c++filt.exe") [] res
+            res_cpp <- readProcess ("C:\\Bin\\Haskell\\8.4.3\\mingw\\bin\\c++filt.exe") [] res
             writeFile (replaceExtension dst_elf_cubin "txt") res_cpp
             renameFile elf_cubin dst_elf_cubin
             return ()
