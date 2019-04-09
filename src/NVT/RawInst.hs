@@ -83,6 +83,7 @@ fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
           | otherwise  = " " ++ intercalate ", " (riOperands ri)
         --        
         mne
+          | trace (show raw) False = undefined
           | raw = riMnemonic ri
           | "LOP3.LUT" `isInfixOf` riMnemonic ri = lop ++ "." ++ lop_func            
           | otherwise = riMnemonic ri
@@ -106,24 +107,6 @@ fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
           | otherwise = " {" ++ intercalate "," tokens ++ "}"
           where tokens = riDepInfo ri
 
-{-
-fmtRawInstWithoutControlInfo :: RawInst -> String
-fmtRawInstWithoutControlInfo ri =
-    ln_pfx ++ ln_spaces
-  where ln_pfx = syntax ++ lop3_lut_suffix
-        syntax = fmtRawInst ri
-        lop3_lut_suffix
-          | "LOP3.LUT" `isInfixOf` riMnemonic ri = lop_func
-          | otherwise = ""
-          where ix
-                  | "P" `isPrefixOf` head (riOperands ri) = 5
-                  | otherwise = 4
-                lop_func =
-                  case reads (riOperands ri !! ix) of
-                    [(x,"")] -> "/* " ++ fmtLop3 x ++ " */"
-                    _ -> ""
-        ln_spaces = replicate (90 - length ln_pfx) ' '
--}
 
 fmtSampleInst :: SampleInst -> String
 fmtSampleInst si =
@@ -134,82 +117,6 @@ fmtSampleInst si =
         bits = printf "  /* %016X`%016X */" (wHi64 (siBits si)) (wLo64 (siBits si))
 
 
-
-{-
-
--- 0x001c7c00e22007f6
-debugDepInfoMaxwellTriple :: Word64 -> IO ()
-debugDepInfoMaxwellTriple w64 =
-  putStrLn $ concatMap (\s -> s ++ "\n") (decodeDepInfoMaxwellTriple w64)
-decodeDepInfoMaxwellTriple :: Word64 -> [String]
-decodeDepInfoMaxwellTriple w64 =
-  map formatDepInfoMaxwell [
-        -- maxas uses high bits for the first instructions
-        w64 .&. 0x000000000001FFFF
-      , (w64`shiftR`21) .&. 0x000000000001FFFF
-      , (w64`shiftR`(2*21)) .&. 0x000000000001FFFF
-      ]
-
-formatDepInfoMaxwell :: Word64 -> String
-formatDepInfoMaxwell control_info =
-    "{" ++ intercalate "," tokens ++ "}"
-  where getField off len = getField64 off len control_info
-
-        tokens = filter (not . null) $ [
-            stall_tk
-          , yield_tk
-          , wr_alloc_tk
-          , rd_alloc_tk
-          , wait_mask_tk
-          ]
-        stall_tk
-          | stalls == 0 = ""
-          | otherwise = "!" ++ show stalls
-          where stalls = getField 0 4
-        yield_tk
-          | getField 4 1 == 0 = "Y"
-          | otherwise = ""
-        wr_alloc_tk = mkAllocTk ".W" 5
-        rd_alloc_tk = mkAllocTk ".R" 8
-        mkAllocTk nm off
-          | val == 7 = "" -- I guess 7 is their ignored value
-          | otherwise = "+" ++ show (val + 1) ++ nm
-          where val = getField off 3
-        wait_mask_tk
-          | null indices = ""
-          | otherwise = intercalate "," (map (\i -> "^" ++ show (i + 1)) indices)
-          where indices = filter (testBit wait_mask) [0..5]
-                 where wait_mask = getField 11 6
--}
--- s0 = "        /*0000*/                   MOV R1, c[0x0][0x28] ;    /* 0x00000a0000017a02 */"
--- s1 = "                                                             /* 0x000fd00000000f00 */"
-
--- s0 = "        /*2820*/               @P0 EXIT ;    /* 0x000000000000094d */"
--- s1 = "                                              /* 0x000fea0003800000 */"
-
-{-
-tryParseInstructionLines :: String -> String -> Maybe RawInst
-tryParseInstructionLines ln0 ln1 =
-    case parseSampleInstNoSuffix (dropWhile isSpace ln0) of
-      Just (ri,sfx) -> parseBits ri (dropWhile isSpace sfx)
-      Nothing -> Nothing
-  where parseBits :: RawInst -> String -> Maybe RawInst
-        parseBits ri sfx = do
-          w_lo <- parseSlashStarHexWord (dropWhile isSpace sfx)
-          w_hi <- parseSlashStarHexWord (dropWhile isSpace ln1)
-          return $ ri{riBits = Word128 w_hi w_lo}
-
---- "/* 0x123 */" -> 0x123
-parseSlashStarHexWord :: String -> Maybe Word64
-parseSlashStarHexWord ('/':'*':ds) =
- case reads (dropWhile isSpace ds) of
-  [(x,sfx)] ->
-    case dropWhile isSpace sfx of
-      ('*':'/':_) -> Just x
-      _ -> Nothing
-  _ -> Nothing
-parseSlashStarHexWord s = error $ "parseSlashStarHexWord: " ++ show s
--}
 
 decodeDepInfo :: Word128 -> [String]
 decodeDepInfo w128 = tokens
