@@ -7,10 +7,15 @@ import Data.Bits
 import Data.Int
 import Data.List
 import Data.Word
+import Text.Printf
 
 type PC = Int
 
-type Op = String
+-- type Op = String
+data Op = Op {oMnemonic :: !String}
+  deriving (Show,Eq,Ord)
+instance Syntax Op where
+  format = oMnemonic
 
 data Inst =
   Inst {
@@ -23,6 +28,9 @@ data Inst =
   , iSrcs :: ![Src]
   , iDepInfo :: !DepInfo
   } deriving (Show,Eq)
+instance Syntax Inst where
+  format = fmtInst
+
 data Pred =
     PredNONE
     --     sign  reg
@@ -46,6 +54,12 @@ data Dst =
   | DstP !PR
   | DstB !BR
   deriving (Show,Eq)
+instance Syntax Dst where
+  format d =
+    case d of
+      DstR r -> format r
+      DstP r -> format r
+      DstB r -> format r
 
 data Src =
     --    neg    abs   reuse  
@@ -57,6 +71,25 @@ data Src =
   | SrcB  !BR                      -- barrier register
   | SrcI  !Int64                   -- immediate (f32 is in the low 32 in binary)
   deriving (Show,Eq)
+instance Syntax Src where
+  format s =
+      case s of
+        SrcR neg abs reuse reg -> 
+            negAbs neg abs (format reg) ++ reuses
+          where reuses = maybeS reuse ".reuse"
+        SrcC neg abs six soff -> 
+          negAbs neg abs ("c[" ++ show six ++ "][" ++ show soff ++ "]")
+        SrcCX neg abs sur soff -> 
+          negAbs neg abs ("cx[" ++ format sur ++ "][" ++ show soff ++ "]")
+        SrcU ur -> format ur
+        SrcP neg pr -> maybeS neg "!" ++ format pr
+        SrcB br -> format br
+        SrcI i -> printf "0x%08X" (fromIntegral i :: Word32)
+    where maybeS z s = if z then s else ""
+          negAbs neg abs reg = negs ++ abss ++ reg ++ abss
+            where negs = maybeS neg "!" 
+                  abss = maybeS abs "|"
+
 
 sNegated :: Src -> Bool
 sNegated s = 
@@ -220,12 +253,29 @@ data InstOpt =
   | InstOptOR
   --
   | InstOptFTZ -- FSETP, others
-  | InstOptRN
-  | InstOptRE
-  | InstOptRU
-  | InstOptRD
+  | InstOptRZ -- round to zero
+  | InstOptRE -- round to even
+  | InstOptRP -- round to plus inf
+  | InstOptRM -- round to minus inf
   --
   | InstOptU32
+  -- 
+  | InstOptL -- SHF.R
+  | InstOptR
+  --
+  | InstOptHI -- SHF, IADD3, ...
+  --
+  | InstOptREL -- call/ret
+  | InstOptABS
+  | InstOptNODEC
+  | InstOptNOINC
+  --
+  | InstOptRCP
+  | InstOptLG2
+  | InstOptEX2
+  | InstOptRSQ
+  --
+  | InstOptLUT -- LOP3/PLOP3
   deriving (Show,Eq,Ord,Enum)
 instance Syntax InstOpt where
   -- format = ('.':) . drop (length "InstOpt") . show
@@ -233,3 +283,16 @@ instance Syntax InstOpt where
 
 all_inst_opts :: [InstOpt]
 all_inst_opts = [toEnum 0 ..]
+
+
+fmtInst :: Inst -> String
+fmtInst i = 
+    pred ++ opstr ++ optsstr ++ " " ++ opndsstr ++ depinfostr ++ ";"
+  where pred = padR 5 (format (iPredication i))
+        opstr = padR 5 (format (iOp i))
+        optsstr = padR 10 $ concatMap (\io -> "." ++ format io) (iOptions i) 
+        opndsstr = intercalate ", " (dsts ++ srcs)
+          where dsts = map format (iDsts i)
+                srcs = map format (iSrcs i)
+        depinfostr = if null d then "" else (" " ++ d)
+          where d = format (iDepInfo i)

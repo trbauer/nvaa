@@ -40,7 +40,10 @@ instance Codeable Word32 where
   encode = Right . fromIntegral
 
 
-
+padR :: Int -> String -> String
+padR k s = s ++ replicate (k - length s) ' '
+padL :: Int -> String -> String
+padL k s = replicate (k - length s) ' ' ++ s
 
 class Syntax s where
   format :: s -> String

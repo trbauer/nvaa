@@ -67,11 +67,11 @@ pPred = P.option PredNONE $ do
         tryUP sign = PredUP sign <$> pSyntax
 
 
-pOp :: PI String
+pOp :: PI Op
 pOp = do
   op <- pIdentifier
   -- stuff
-  return op
+  return $ Op op
 
 pInstOpts :: PI [InstOpt]
 pInstOpts = P.try pLop3Code <|> P.many (pSymbol "." >> pSyntax)
@@ -93,9 +93,10 @@ pLop3Expr = pOrExpr
           where pNeg = do
                   pSymbol "~"
                   complement <$> pAtomExpr
-        pAtomExpr = pGrp <|> pAtom
+        pAtomExpr = pGrp <|> pAtom <|> pW8
           where pGrp = do {pSymbol "("; e<-pOrExpr; pSymbol ")"; return e}
-                pAtom = pOneOf [("s0",0xF0),("s1",0xCC),("s2",0xAA),("0",0x00),("1",0xFF)]
+                pAtom = pOneOf [("s0",0xF0),("s1",0xCC),("s2",0xAA)]
+                pW8 = pHexImm <* pWhiteSpace
         
         
 
@@ -192,16 +193,16 @@ pSrc op =
 
         pSrcImm :: PI Src
         pSrcImm
-          | "F"`isPrefixOf`op = SrcI <$> (pFltImm <|> pIntImm)
+          | "F"`isPrefixOf`(oMnemonic op) = SrcI <$> (pFltImm <|> pIntImm)
           | otherwise = SrcI <$> pIntImm
 
 
 oHasDstPred :: Op -> Bool
-oHasDstPred op = 
-  op `elem` ["LOP","DSETP","FSETP"]
+oHasDstPred (Op op) = 
+  op `elem` ["LOP3","PLOP3","DSETP","FSETP","ISET","HSETP2"]
 
 oOpIsFP :: Op -> Bool
-oOpIsFP op = 
+oOpIsFP (Op op) = 
   op `elem` ["FADD","FFMA","FCHK","FMNMX","FMUL","FSEL","FSET","FSETP"] ||
   op `elem` ["DADD","DFMA","DMUL","DSETP"]
 
