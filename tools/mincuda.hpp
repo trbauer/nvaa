@@ -241,7 +241,7 @@ public:
   }
   template <typename R>
   umem(size_t _elems, const init<R> &i)
-    : umem<T>(elems)
+    : umem<T>(_elems)
   {
     apply<R>(i);
   }
