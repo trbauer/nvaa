@@ -7,6 +7,8 @@
 #include <sstream>
 #include <string>
 
+#include <cuda_runtime_api.h>
+
 template <typename...Ts>
 static void format_to(std::stringstream &os) { }
 template <typename T, typename...Ts>
@@ -237,7 +239,7 @@ public:
   umem(size_t _elems)
     : elems(_elems)
   {
-    CUDA_API(cudaMallocManaged,&mem, _elems*sizeof(*mem));
+    CUDA_API(cudaMallocManaged,(void **)&mem, _elems*sizeof(*mem));
   }
   template <typename R>
   umem(size_t _elems, const init<R> &i)
