@@ -18,19 +18,39 @@ import Debug.Trace
 import Text.Parsec((<|>),(<?>))
 import qualified Text.Parsec           as P
 
-parseInst :: PC -> FilePath -> String -> Either Diagnostic (Inst,[Diagnostic])
+data LblExpr =
+    LblExprDiff !LblExpr !LblExpr -- (.L_18 - micro)
+  | LblExprLit  !Int64
+  deriving Show
+
+
+parseInst :: PC -> FilePath -> String -> Either Diagnostic (Inst,[LblExpr],[Diagnostic])
 parseInst pc = runPI (pInst pc)
 
-runPI :: PI a -> FilePath -> String -> Either Diagnostic (a,[Diagnostic])
-runPI p = runPID p ()
+runPI :: PI a -> FilePath -> String -> Either Diagnostic (a,[LblExpr],[Diagnostic])
+runPI pa fp inp =
+    case runPID p1 (PISt []) fp inp of
+      Left err -> Left err
+      Right ((a,lbls),ws) -> Right (a,lbls,ws)
+  where p1 = do
+          a <- pa
+          lbls <- pGets pisLabels
+          return (a,lbls)
+
+
 testPI :: Show a => PI a -> String -> IO ()
-testPI pa inp = 
+testPI pa inp =
   case runPI (pa <* P.eof) "<interactive>" inp of
     Left d -> putStrLn $ dFormat d
-    Right (a,_) -> print a
+    Right (a,_,_) -> print a
 
-type PI a = PID () a
+type PI a = PID PISt a
 
+
+data PISt =
+  PISt {
+    pisLabels :: [LblExpr]
+  } deriving Show
 
 pInst :: PC -> PI Inst
 pInst pc = body
@@ -38,13 +58,13 @@ pInst pc = body
           pWhiteSpace
           prd <- pPred
           op <- pOp
-          opts <- pInstOpts          
+          opts <- pInstOpts
           dsts <- pDsts op
           -- unless (null dsts || not (oHasSrcs op)) $
           P.try $ pSymbol ","
           srcs <- pSrcs op
           dep_info <- pDepInfo
-          let i = 
+          let i =
                 Inst {
                   iLoc = loc
                 , iPc = pc
@@ -97,8 +117,8 @@ pLop3Expr = pOrExpr
           where pGrp = do {pSymbol "("; e<-pOrExpr; pSymbol ")"; return e}
                 pAtom = pOneOf [("s0",0xF0),("s1",0xCC),("s2",0xAA)]
                 pW8 = pHexImm <* pWhiteSpace
-        
-        
+
+
 
 
 pDsts :: Op -> PI [Dst]
@@ -108,7 +128,7 @@ pDsts op = do
     return $ dst_pred_opt ++ [dst]
   where pDstPredOpt
           | oHasDstPred op = do
-              dp <- pDstPred 
+              dp <- pDstPred
               pSymbol ","
               return [dp]
           | otherwise = return []
@@ -116,9 +136,9 @@ pDsts op = do
 
 pDst :: PI Dst
 pDst = pDstReg <|> pDstPred <|> pDstRegB
-pDstReg :: PI Dst          
+pDstReg :: PI Dst
 pDstReg = DstR <$> pSyntax
-pDstRegB :: PI Dst          
+pDstRegB :: PI Dst
 pDstRegB = DstB <$> pSyntax
 pDstPred :: PI Dst
 pDstPred = DstP <$> pSyntax
@@ -127,11 +147,11 @@ pDstPred = DstP <$> pSyntax
 pSrcs :: Op -> PI [Src]
 pSrcs op = P.sepBy (pSrc op) (pSymbol ",")
 pSrc :: Op -> PI Src
-pSrc op = 
-    P.try pSrcConstInd <|> 
-      P.try pSrcConstDir <|> 
-        pSrcReg <|> 
-        pSrcRegU <|> 
+pSrc op =
+    P.try pSrcConstInd <|>
+      P.try pSrcConstDir <|>
+        pSrcReg <|>
+        pSrcRegU <|>
         pSrcRegP <|>
         pSrcRegB <|>
         pSrcImm
@@ -168,7 +188,7 @@ pSrc op =
 
         pSrcConstInd :: PI Src
         pSrcConstInd = do
-          ((u,o),neg,abs) <- 
+          ((u,o),neg,abs) <-
             pWithNegAbs $ do
               pSymbol "cx"
               pSymbol "["
@@ -198,16 +218,16 @@ pSrc op =
 
 
 oHasDstPred :: Op -> Bool
-oHasDstPred (Op op) = 
+oHasDstPred (Op op) =
   op `elem` ["LOP3","PLOP3","DSETP","FSETP","ISET","HSETP2"]
 
 oOpIsFP :: Op -> Bool
-oOpIsFP (Op op) = 
+oOpIsFP (Op op) =
   op `elem` ["FADD","FFMA","FCHK","FMNMX","FMUL","FSEL","FSET","FSETP"] ||
   op `elem` ["DADD","DFMA","DMUL","DSETP"]
 
 -- oHasSrcs :: Op -> Bool
--- oHasSrcs op = 
+-- oHasSrcs op =
 
 pIntImm :: PI Int64
 pIntImm = do
@@ -217,7 +237,7 @@ pIntImm = do
 pFltImm :: PI Int64
 pFltImm = do
     maybeNegate <- P.option id $ pSymbol "-" >> return (flip complementBit 31)
-    maybeNegate <$> (pInf <|> pNonInf) 
+    maybeNegate <$> (pInf <|> pNonInf)
   where pInf = pSymbol "INF" >> return 0x7FF00000
         pNonInf = fromIntegral . floatToBits . doubleToFloat <$> pFloating
 
@@ -225,16 +245,16 @@ pFltImm = do
 -- {!8,Y,+2.R,+3.W,^4,^1}
 pDepInfo :: PI DepInfo
 pDepInfo = (pSymbol "{" >> pTokenLoop 0 di0 ) <|> return di0
-  where di0 = DepInfo 0 False 0 Nothing Nothing
+  where di0 = DepInfo 0 False Nothing Nothing 0
         pTokenLoop :: Int -> DepInfo -> PI DepInfo
         pTokenLoop ix di = pEnd <|> (pMaybeSep >> pToken)
           where pEnd = do pSymbol "}" >> return di
                 pMaybeSep = if ix == 0 then return () else pSymbol_ ","
-                pToken = 
-                  pDist <|> 
-                    pWait <|> 
-                      P.try (pAlloc diAllocRd 'R' (\b -> di{diAllocRd = Just b})) <|> 
-                        pAlloc diAllocWr 'W' (\b -> di{diAllocWr = Just b}) <|> 
+                pToken =
+                  pDist <|>
+                    pWait <|>
+                      P.try (pAlloc diAllocRd 'R' (\b -> di{diAllocRd = Just b})) <|>
+                        pAlloc diAllocWr 'W' (\b -> di{diAllocWr = Just b}) <|>
                           pYield
 
                 pDist = do
@@ -246,8 +266,8 @@ pDepInfo = (pSymbol "{" >> pTokenLoop 0 di0 ) <|> return di0
                   pTokenLoop (ix+1) di{diWaitSet = setBit (diWaitSet di) (ix-1)}
 
                 pAlloc f what cons = do
-                  P.char '+' 
-                  b_ix <- pBarrier 
+                  P.char '+'
+                  b_ix <- pBarrier
                   P.char '.' >> P.char what
                   case f di of
                     Nothing -> pTokenLoop (ix+1) (cons b_ix)

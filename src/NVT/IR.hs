@@ -17,6 +17,7 @@ data Op = Op {oMnemonic :: !String}
 instance Syntax Op where
   format = oMnemonic
 
+
 data Inst =
   Inst {
     iLoc :: !Loc
@@ -31,19 +32,38 @@ data Inst =
 instance Syntax Inst where
   format = fmtInst
 
+fmtInstIr :: Inst -> String
+fmtInstIr i =
+    "Inst {\n" ++
+    fS "iLoc" iLoc ++
+    fS "iPc" iPc ++
+    fS "iPredication" iPredication ++
+    fS "iOp" iOp ++
+    fS "iOptions" iOptions ++
+    fS "iDsts" iDsts ++
+    fS "iSrcs" iSrcs ++
+    fS "iDepInfo" iDepInfo ++
+    "}"
+  where fS :: Show a => String -> (Inst -> a) -> String
+        fS = f show
+        f :: (a -> String) -> String -> (Inst -> a) -> String
+        f fmt nm prj =
+          printf "  %-12s" nm ++ " = " ++ fmt (prj i) ++ "\n"
+
 data Pred =
     PredNONE
     --     sign  reg
   | PredP  !Bool !PR -- regular predicate
-  | PredUP !Bool !UP -- uniform predicate (True,UP7) is "UPZ" 
-                  -- renders as nothing
+  | PredUP !Bool !UP -- uniform predicate (True,UP7) is "UPZ"
+                     -- this should act the same as PredNONE
   deriving (Show,Eq)
 instance Syntax Pred where
   format pp =
       case pp of
+        PredNONE -> ""
         PredP z p -> "@" ++ sign z ++ format p
         PredUP z p -> "@" ++ sign z ++ format p
-    where sign z = if z then "!" else "" 
+    where sign z = if z then "!" else ""
 -- data PredSign
 --   | PredPOS
 --   | PredNEG
@@ -62,7 +82,7 @@ instance Syntax Dst where
       DstB r -> format r
 
 data Src =
-    --    neg    abs   reuse  
+    --    neg    abs   reuse
     SrcR  !Bool !Bool  !Bool  !R   -- register
   | SrcC  !Bool !Bool  !Int   !Int -- constant direct
   | SrcCX !Bool !Bool  !UR    !Int -- constant indirect
@@ -74,12 +94,12 @@ data Src =
 instance Syntax Src where
   format s =
       case s of
-        SrcR neg abs reuse reg -> 
+        SrcR neg abs reuse reg ->
             negAbs neg abs (format reg) ++ reuses
           where reuses = maybeS reuse ".reuse"
-        SrcC neg abs six soff -> 
+        SrcC neg abs six soff ->
           negAbs neg abs ("c[" ++ show six ++ "][" ++ show soff ++ "]")
-        SrcCX neg abs sur soff -> 
+        SrcCX neg abs sur soff ->
           negAbs neg abs ("cx[" ++ format sur ++ "][" ++ show soff ++ "]")
         SrcU ur -> format ur
         SrcP neg pr -> maybeS neg "!" ++ format pr
@@ -87,12 +107,12 @@ instance Syntax Src where
         SrcI i -> printf "0x%08X" (fromIntegral i :: Word32)
     where maybeS z s = if z then s else ""
           negAbs neg abs reg = negs ++ abss ++ reg ++ abss
-            where negs = maybeS neg "!" 
+            where negs = maybeS neg "!"
                   abss = maybeS abs "|"
 
 
 sNegated :: Src -> Bool
-sNegated s = 
+sNegated s =
   case s of
     SrcR a _ _ _ -> a
     SrcC a _ _ _ -> a
@@ -101,7 +121,7 @@ sNegated s =
     _ -> False
 
 sAbs :: Src -> Bool
-sAbs s = 
+sAbs s =
   case s of
     SrcR _ n _ _ -> n
     SrcC _ n _ _ -> n
@@ -145,7 +165,7 @@ data R =
   | R232 | R233 | R234 | R235 | R236 | R237 | R238 | R239
   | R240 | R241 | R242 | R243 | R244 | R245 | R246 | R247
   | R248 | R249 | R250 | R251 | R252 | R253 | R254 | RZ
-  deriving (Show,Eq,Enum,Read) 
+  deriving (Show,Eq,Enum,Read)
 
 data UR =
     UR0   | UR1   | UR2   | UR3   | UR4   | UR5   | UR6   | UR7
@@ -156,40 +176,39 @@ data UR =
   | UR40  | UR41  | UR42  | UR43  | UR44  | UR45  | UR46  | UR47
   | UR48  | UR49  | UR50  | UR51  | UR52  | UR53  | UR54  | UR55
   | UR56  | UR57  | UR58  | UR59  | UR60  | UR61  | UR62  | URZ
-  deriving (Show,Eq,Enum,Read) 
+  deriving (Show,Eq,Enum,Read)
 
 data UP =
     -- there is no UPT (true), but the non-negated use
     -- of UP7 appears to be treated that way in uniform ops
     -- (shows no predication on the instruction)
     UP0 | UP1 | UP2 | UP3 | UP4 | UP5 | UP6 | UP7
-  deriving (Show,Eq,Enum,Read) 
+  deriving (Show,Eq,Enum,Read)
 
 data BR =
     B0  | B1  | B2  | B3  | B4  | B5  | B6  | B7
   | B8  | B9  | B10 | B11 | B12 | B13 | B14 | B15
-  deriving (Show,Eq,Enum,Read) 
+  deriving (Show,Eq,Enum,Read)
 
--- omits src reuse info as we couple that with 
--- the operands
+-- this type omits src reuse info as we couple that with the operands
 data DepInfo =
   DepInfo {
     diStalls :: !Int
   , diYield :: !Bool
-  , diWaitSet :: !Word32
-  , diAllocRd :: !(Maybe Int)
   , diAllocWr :: !(Maybe Int)
-  } deriving (Show,Eq) 
+  , diAllocRd :: !(Maybe Int)
+  , diWaitSet :: !Word32
+  } deriving (Show,Eq)
 instance Syntax DepInfo where
-  format di = 
+  format di =
       "{" ++ intercalate "," (filter (not . null) tks) ++ "}"
-    where tks = 
+    where tks =
             waits ++ [
               alloc "R" diAllocRd
             , alloc "W" diAllocRd
             , stalls
             , yield
-            ] 
+            ]
           waits = map tryBit [0..7]
             where tryBit  i
                     | testBit (diWaitSet di) i = "^" ++ show (i+1)
@@ -197,7 +216,7 @@ instance Syntax DepInfo where
           stalls = if diStalls di == 0 then "" else ("!" ++ show (diStalls di))
           yield = if diYield di then "Y" else ""
 
-          alloc what f = 
+          alloc what f =
             case f di of
               Nothing -> ""
               Just b -> "+" ++ show b ++ "." ++ what
@@ -232,23 +251,23 @@ instance Syntax BR where format = show
 data InstOpt =
     -- ISETP/UISETP
     InstOptEQ
-  | InstOptNE 
-  | InstOptLT 
+  | InstOptNE
+  | InstOptLT
   | InstOptLE
   | InstOptGE
   | InstOptGT
   -- FSETP/HSETP
-  | InstOptEQU 
+  | InstOptEQU
   | InstOptNEU
-  | InstOptLTU 
+  | InstOptLTU
   | InstOptLEU
-  | InstOptGEU 
+  | InstOptGEU
   | InstOptGTU
   -- DSETP
   | InstOptMAX
   --
   | InstOptEX -- ISETP
-  -- 
+  --
   | InstOptAND
   | InstOptOR
   --
@@ -259,7 +278,7 @@ data InstOpt =
   | InstOptRM -- round to minus inf
   --
   | InstOptU32
-  -- 
+  --
   | InstOptL -- SHF.R
   | InstOptR
   --
@@ -286,11 +305,11 @@ all_inst_opts = [toEnum 0 ..]
 
 
 fmtInst :: Inst -> String
-fmtInst i = 
+fmtInst i =
     pred ++ opstr ++ optsstr ++ " " ++ opndsstr ++ depinfostr ++ ";"
   where pred = padR 5 (format (iPredication i))
         opstr = padR 5 (format (iOp i))
-        optsstr = padR 10 $ concatMap (\io -> "." ++ format io) (iOptions i) 
+        optsstr = padR 10 $ concatMap (\io -> "." ++ format io) (iOptions i)
         opndsstr = intercalate ", " (dsts ++ srcs)
           where dsts = map format (iDsts i)
                 srcs = map format (iSrcs i)

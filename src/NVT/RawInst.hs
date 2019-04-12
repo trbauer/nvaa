@@ -6,6 +6,7 @@ import NVT.Lop3
 import NVT.Opts
 -- import NVT.Parsers.Parser
 
+-- import Control.Applicative
 import Data.Bits
 import Data.Char
 import Data.List
@@ -75,17 +76,15 @@ fmtRawInst = fmtRawInstG False
 fmtRawInstG :: Bool -> RawInst -> String
 fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
   where prefix = pred ++ " " ++ padR 16 mne ++ opnds
-        --
-        pred = printf "%-5s" (riPredication ri)
+          where pred = printf "%-5s" (riPredication ri)
         --
         opnds
           | null (riOperands ri) = ""
           | otherwise  = " " ++ intercalate ", " (riOperands ri)
-        --        
+        --
         mne
-          | trace (show raw) False = undefined
           | raw = riMnemonic ri
-          | "LOP3.LUT" `isInfixOf` riMnemonic ri = lop ++ "." ++ lop_func            
+          | "LOP3.LUT" `isInfixOf` riMnemonic ri = lop ++ "." ++ lop_func
           | otherwise = riMnemonic ri
           where lop :: String
                 lop = takeWhile (/='.') (riMnemonic ri)
@@ -98,7 +97,7 @@ fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
                 lop_func :: String
                 lop_func =
                   case reads (riOperands ri !! lut_ix) of
-                    [(x,"")] -> "(" ++ fmtLop3 x ++ ")"
+                    [(x,"")] | x <= 255 -> "(" ++ fmtLop3 x ++ ")"
                     _ -> "LUT"
         --
         dep_info
@@ -116,6 +115,11 @@ fmtSampleInst si =
         bits :: String
         bits = printf "  /* %016X`%016X */" (wHi64 (siBits si)) (wLo64 (siBits si))
 
+fmtSampleInstPrefixed :: SampleInst -> String
+fmtSampleInstPrefixed si =
+    bits ++ padR 64 (fmtRawInst (siRawInst si))
+  where bits :: String
+        bits = printf "%016X`%016X:  " (wHi64 (siBits si)) (wLo64 (siBits si))
 
 
 decodeDepInfo :: Word128 -> [String]
@@ -205,7 +209,7 @@ parseRawInst' = parseSyntax . skipWs
                               ',':sfx -> parseOperands ri1 sfx
                               ';':sfx -> return (ri1,dropWhile isSpace sfx)
                               -- skip control info
-                              '{':sfx -> 
+                              '{':sfx ->
                                 case span (/='}') sfx of
                                   (opts,'}':s) -> parseOperands (ri1 {riDepInfo = ws}) (skipWs s)
                                     where ws = words (map (\c -> if c == ',' then ' ' else c) opts)
@@ -216,10 +220,32 @@ parseRawInst' = parseSyntax . skipWs
                               "" -> Left "expected ;"
                           where ri1 = ri{riOperands = riOperands ri ++ [trimWs op]}
 
+-- tryEncodingPrefix :: String -> Maybe (Word128,String)
+-- tryEncodingPrefix s
 
 parseSampleInst :: String -> Either String SampleInst
-parseSampleInst = parseOffsetOpt . dropWhile isSpace
-  where parseOffsetOpt :: String -> Either String SampleInst
+parseSampleInst s = -- parseLongForm s <|> parseShortForm s
+    case tryParsePrefixBits s of
+        -- format that accepts
+        --   000FE40000000F00`0000001E000A7202: ... syntax
+      Just (w128,raw_syn) ->
+        case parseRawInst raw_syn of
+          Left err -> Left err
+          Right ri -> Right $ SampleInst ri w128
+      -- the form that has the bits in a suffix comment
+      Nothing -> parseLongForm s
+  where
+        tryParsePrefixBits s =
+            case (reads ("0x"++his),reads ("0x"++drop 1 tick_los)) of
+              ([(hi64,"")],[(lo64,"")]) ->
+                Just (Word128 hi64 lo64,drop 1 raw_syntax)
+              _ -> Nothing
+          where (bits,raw_syntax) = span (/=':') s
+                (his,tick_los) = span (/='`') bits
+
+        parseLongForm = parseOffsetOpt . dropWhile isSpace
+
+        parseOffsetOpt :: String -> Either String SampleInst
         parseOffsetOpt s =
           case s of
             -- /*0020*/ <- no 0x prefix
@@ -248,7 +274,7 @@ parseSampleInst = parseOffsetOpt . dropWhile isSpace
             Just (w128,_) -> completeInstruction si{siBits = w128}
 
         completeInstruction :: SampleInst -> Either String SampleInst
-        completeInstruction si = return $ 
+        completeInstruction si = return $
           si{siRawInst = (siRawInst si){riDepInfo = decodeDepInfo (siBits si)}}
 
 -- /* F123...`AFD0... */

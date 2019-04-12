@@ -117,8 +117,20 @@ fLDST_DSTPRED :: Field -- weirdly in reverse order 1->P6,...7->P0
 fLDST_DSTPRED = f "DstPredicate" 81 3 $ \_ v -> if v == 7 then "" else ("P" ++ show v)
 fLDST_CACHING :: Field
 fLDST_CACHING = fl "Access" 84 3 [".EF","",".EL",".LU",".EU",".NA"] -- .INVALID6, .INVLAID7
+
+-- [127:126] = 0's
+-- [125]     = Src2.Reuse
+-- [124]     = Src1.Reuse
+-- [123]     = Src0.Reuse
+-- [122]     = ???
+-- [121:116] = wt mask
+-- [115:112] = rd alloc
+-- [111:109] = wr alloc
+-- [108]     = yield
+-- [107:105] = stall
 fSCHEDULING :: Field
 fSCHEDULING = f "Dependencies" 105 21 $ \_ v -> printf "TODO: 0x%X" v
+
 
 -- often bit 91 can be considered an extra bit here
 -- [11:9] [91]
@@ -266,7 +278,6 @@ format_FFMA =
         src1IsCon = fREGFILE == 3
         src1IsImm = fREGFILE == 2
         src1IsReg = fREGFILE == 1
-
 
 
 
