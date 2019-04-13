@@ -18,41 +18,71 @@ import Debug.Trace
 import Text.Parsec((<|>),(<?>))
 import qualified Text.Parsec           as P
 
-data LblExpr =
-    LblExprDiff !LblExpr !LblExpr -- (.L_18 - micro)
-  | LblExprLit  !Int64
-  deriving Show
+-- data LblExpr =
+--    LblExprDiff !LblExpr !LblExpr -- (.L_18 - micro)
+--  | LblExprLit  !Int64
+--  deriving Show
 
+type LabelIndex = [(String,Int64)]
+type LabelCompletion a = LabelIndex -> Either Diagnostic a
+type InstCompletion = LabelCompletion Inst
 
-parseInst :: PC -> FilePath -> String -> Either Diagnostic (Inst,[LblExpr],[Diagnostic])
-parseInst pc = runPI (pInst pc)
+parseInst ::
+  PC ->
+  FilePath ->
+  Int ->
+  String ->
+  Either Diagnostic (Inst,[Diagnostic])
+parseInst pc fp lno syntax =
+  case parseInstCompletion pc fp lno syntax of
+    Left err -> Left err
+    Right (ci,ws) ->
+      case ci [] of
+        Left err -> Left err
+        Right i -> Right (i,ws)
 
-runPI :: PI a -> FilePath -> String -> Either Diagnostic (a,[LblExpr],[Diagnostic])
-runPI pa fp inp =
-    case runPID p1 (PISt []) fp inp of
+parseInstCompletion ::
+  PC ->
+  FilePath ->
+  Int ->
+  String ->
+  Either Diagnostic (InstCompletion,[Diagnostic])
+parseInstCompletion pc = runPI (pInst pc)
+
+runPI ::
+  PI a ->
+  FilePath ->
+  Int ->
+  String ->
+  Either Diagnostic (a,[Diagnostic])
+runPI pa fp lno inp =
+    case runPID p1 init_pst fp inp of
       Left err -> Left err
-      Right ((a,lbls),ws) -> Right (a,lbls,ws)
+      Right (a,ws) -> Right (a,ws)
   where p1 = do
-          a <- pa
-          lbls <- pGets pisLabels
-          return (a,lbls)
+          sp <- P.getPosition
+          P.setPosition (P.setSourceLine sp lno)
+          pa
 
 
 testPI :: Show a => PI a -> String -> IO ()
 testPI pa inp =
-  case runPI (pa <* P.eof) "<interactive>" inp of
+  case runPI (pa <* P.eof) "<interactive>" 1 inp of
     Left d -> putStrLn $ dFormat d
-    Right (a,_,_) -> print a
+    Right (a,_) -> print a
 
 type PI a = PID PISt a
 
+init_pst :: PISt
+init_pst = PISt ()
 
 data PISt =
   PISt {
-    pisLabels :: [LblExpr]
+    pisLabels :: ()
+  -- pisLabels :: [LblExpr]
   } deriving Show
 
-pInst :: PC -> PI Inst
+pInst :: PC -> PI InstCompletion
 pInst pc = body
   where body = pWithLoc $ \loc -> do
           pWhiteSpace
@@ -60,23 +90,24 @@ pInst pc = body
           op <- pOp
           opts <- pInstOpts
           dsts <- pDsts op
-          -- unless (null dsts || not (oHasSrcs op)) $
           P.try $ pSymbol ","
-          srcs <- pSrcs op
+          complete_srcs <- pSrcs pc op
           dep_info <- pDepInfo
-          let i =
-                Inst {
-                  iLoc = loc
-                , iPc = pc
-                , iPredication = prd
-                , iOp = op
-                , iOptions = opts
-                , iDsts = dsts
-                , iSrcs = srcs
-                , iDepInfo = dep_info
-                }
           P.try $ pSymbol ";"
-          return i
+          return $ \lbls -> do
+            srcs <- sequence (map ($lbls) complete_srcs)
+            return $
+              Inst {
+                iLoc = loc
+              , iPc = pc
+              , iPredication = prd
+              , iOp = op
+              , iOptions = opts
+              , iDsts = dsts
+              , iSrcs = srcs
+              , iDepInfo = dep_info
+              }
+
 
 pPred :: PI Pred
 pPred = P.option PredNONE $ do
@@ -144,36 +175,32 @@ pDstPred :: PI Dst
 pDstPred = DstP <$> pSyntax
 
 
-pSrcs :: Op -> PI [Src]
-pSrcs op = P.sepBy (pSrc op) (pSymbol ",")
-pSrc :: Op -> PI Src
-pSrc op =
-    P.try pSrcConstInd <|>
-      P.try pSrcConstDir <|>
-        pSrcReg <|>
-        pSrcRegU <|>
-        pSrcRegP <|>
-        pSrcRegB <|>
-        pSrcImm
-  where pWithNegAbs :: PI a -> PI (a,Bool,Bool)
-        pWithNegAbs pBody = do
-          neg <- P.option False $ pSymbol "-" >> return True
-          let pWithAbs = do
-                  pSymbol "|"
-                  r <- pBody
-                  pSymbol "|"
-                  return (r,True)
-          (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
-          return (r,neg,abs)
+pSrcs :: PC -> Op -> PI [LabelCompletion Src]
+pSrcs pc op = P.sepBy (pSrc pc op) (pSymbol ",")
+pSrc :: PC -> Op -> PI (LabelCompletion Src)
+pSrc pc op = P.try pNonLabel <|> pImmLbl
+  where pNonLabel :: PI (LabelCompletion Src)
+        pNonLabel = alwaysSucceeds <$> pCases
+          where pCases =
+                  P.try pImm <|>
+                  P.try pConstInd <|>
+                  P.try pConstDir <|>
+                  pReg <|>
+                  pRegUR <|>
+                  pRegP <|>
+                  pRegB
 
-        pSrcReg :: PI Src
-        pSrcReg = do
+        alwaysSucceeds :: Src -> LabelCompletion Src
+        alwaysSucceeds src _ = Right src
+
+        pReg :: PI Src
+        pReg = do
           (r,neg,abs) <- pWithNegAbs pSyntax
           reuse <- P.option False $ P.try (pSymbol ".reuse" >> return True)
           return $ SrcR neg abs reuse r
 
-        pSrcConstDir :: PI Src
-        pSrcConstDir = do
+        pConstDir :: PI Src
+        pConstDir = do
           let pCon = do
                 pSymbol "c"
                 pSymbol "["
@@ -186,8 +213,8 @@ pSrc op =
           ((s,o),neg,abs) <- pWithNegAbs pCon
           return $ SrcC neg abs s o
 
-        pSrcConstInd :: PI Src
-        pSrcConstInd = do
+        pConstInd :: PI Src
+        pConstInd = do
           ((u,o),neg,abs) <-
             pWithNegAbs $ do
               pSymbol "cx"
@@ -200,41 +227,171 @@ pSrc op =
               return (u,o)
           return $ SrcCX neg abs u o
 
-        pSrcRegU :: PI Src
-        pSrcRegU = SrcU <$> pSyntax
+        pWithNegAbs :: PI a -> PI (a,Bool,Bool)
+        pWithNegAbs pBody = do
+          neg <- P.option False $ pSymbol "-" >> return True
+          let pWithAbs = do
+                  pSymbol "|"
+                  r <- pBody
+                  pSymbol "|"
+                  return (r,True)
+          (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
+          return (r,neg,abs)
 
-        pSrcRegP :: PI Src
-        pSrcRegP = do
+        pRegUR :: PI Src
+        pRegUR = SrcUR <$> pSyntax
+
+        pRegP :: PI Src
+        pRegP = do
           neg <- P.option False (pSymbol "!" >> return True)
           SrcP neg <$> pSyntax
 
-        pSrcRegB :: PI Src
-        pSrcRegB = SrcB <$> pSyntax
+        pRegB :: PI Src
+        pRegB = SrcB <$> pSyntax
 
-        pSrcImm :: PI Src
-        pSrcImm
-          | "F"`isPrefixOf`(oMnemonic op) = SrcI <$> (pFltImm <|> pIntImm)
-          | otherwise = SrcI <$> pIntImm
+        -- rejects 32@hi... and 32@lo...
+        pImm :: PI Src
+        pImm = do
+            imm <- pVal
+            P.notFollowedBy (P.char '@')
+            pWhiteSpace
+            return $ SrcI imm
+          where pVal
+                  | oOpIsFP op = pFltImm <|> pIntImm
+                  | otherwise = pIntImm
+
+        pImmLbl :: PI (LabelCompletion Src)
+        pImmLbl = do
+          e <- pLExpr pc
+          return $ \lix -> SrcI <$> evalLExpr lix e
 
 
-oHasDstPred :: Op -> Bool
-oHasDstPred (Op op) =
-  op `elem` ["LOP3","PLOP3","DSETP","FSETP","ISET","HSETP2"]
+pLExpr :: PC -> PI LExpr
+pLExpr pc = pBitExpr
+  where pBitExpr = pAddExpr
+        pAddExpr = P.chainl1 pMulExpr pAddOp
+          where pAddOp = pOp "+" LExprAdd <|> pOp "-" LExprSub
+        pMulExpr = P.chainl1 pUnrExpr pMulOp
+          where pMulOp = pOp "*" LExprMul <|> pOp "/" LExprDiv <|> pOp "/" LExprMod
+        pOp sym cons = pWithLoc $ \loc -> pSymbol sym >> return (cons loc)
 
-oOpIsFP :: Op -> Bool
-oOpIsFP (Op op) =
-  op `elem` ["FADD","FFMA","FCHK","FMNMX","FMUL","FSEL","FSET","FSETP"] ||
-  op `elem` ["DADD","DFMA","DMUL","DSETP"]
+        pUnrExpr = pUnOp "-" LExprNeg <|> pUnOp "~" LExprCompl <|> pPrimExpr
+          where pUnOp sym cons = pWithLoc $ \loc -> do
+                  pSymbol sym
+                  e <- pUnrExpr
+                  return $ cons loc e
+        pPrimExpr = pWithLoc pPrimExprBody
+        pPrimExprBody loc =
+            P.try pLo32 <|>
+            P.try pHi32 <|>
+            P.try pTickExpr <|> -- `(...)
+            P.try pLabel <|>
+            pGroup <|>
+            pLit
+          where pLabel = do
+                  ident <- pLabelChars
+                  when (ident `elem` ["c","cx"]) $
+                    P.notFollowedBy (P.char '[')
+                  cons <-
+                    P.option id $ pWithLoc $ \loc -> do
+                      pSymbol "@srel"
+                      return (LExprSRel loc)
+                  pWhiteSpace
+                  return $ cons $ LExprLabel loc ident
+                pGroup = do
+                  pSymbol "("
+                  e <- pBitExpr
+                  pSymbol ")"
+                  return e
+                pLit = LExprImm loc <$> (pImmA <* pWhiteSpace)
+                pLo32 = pSymbol "32@lo" >> LExprLo32 loc <$> pPrimExpr
+                pHi32 = pSymbol "32@hi" >> LExprHi32 loc <$> pPrimExpr
+                pTickExpr = pSymbol "`" >> pPrimExpr
+
+
+pLabelChars :: PI String
+pLabelChars = pDotLabel <|> pNonDotLabel
+  where pDotLabel = do
+          pfx <- P.option "" (P.char '.' >> return ".")
+          (pfx++) <$> pNonDotLabel
+
+        pNonDotLabel = do
+          let pOtherIdentChar = P.oneOf "_$"
+          c0 <- P.letter <|> pOtherIdentChar
+          sfx <- P.many $ P.alphaNum <|> pOtherIdentChar
+          return (c0:sfx)
+
+evalLExpr :: LabelIndex -> LExpr -> Either Diagnostic Word64
+evalLExpr lix = (fromIntegral <$>) . eval
+  where eval :: LExpr -> Either Diagnostic Int64
+        eval le =
+          case le of
+            LExprAdd loc ll l2 -> applyBin loc ll l2 (+)
+            LExprSub loc ll l2 -> applyBin loc ll l2 (-)
+            LExprMul loc ll l2 -> applyBin loc ll l2 (*)
+            LExprDiv loc ll l2 -> applyBinDiv loc ll l2 div
+            LExprMod loc ll l2 -> applyBinDiv loc ll l2 mod
+            LExprNeg _ l -> applyUnr l negate
+            LExprCompl _ l -> applyUnr l complement
+            LExprImm _ val -> return val
+            LExprLo32 _ le -> applyUnr le (.&.0xFFFFFFFF)
+            LExprHi32 _ le -> applyUnr le ((.&.0xFFFFFFFF) . (`shiftR`32))
+            --
+            LExprLabel loc sym ->
+              case sym `lookup` lix of
+                Nothing -> err loc "unbound symbol"
+                Just val -> return val
+
+        applyBin = applyBinG False
+        applyBinDiv = applyBinG True
+
+        applyBinG ::
+          Bool ->
+          Loc ->
+          LExpr -> LExpr -> (Int64 -> Int64 -> Int64) ->
+          Either Diagnostic Int64
+        applyBinG div loc e1 e2 f = do
+          v1 <- eval e1
+          v2 <- eval e2
+          if div && v2 == 0 then err loc "division by 0"
+            else return (f v1 v2)
+
+        applyUnr :: LExpr -> (Int64 -> Int64) -> Either Diagnostic Int64
+        applyUnr le f = f <$> eval le
+
+        err :: Loc -> String -> Either Diagnostic a
+        err loc = Left . dCons loc
+
+
+data LExpr =
+  -- binary additive
+    LExprAdd !Loc !LExpr !LExpr
+  | LExprSub !Loc !LExpr !LExpr
+  -- binary multiplicative
+  | LExprMul !Loc !LExpr !LExpr
+  | LExprDiv !Loc !LExpr !LExpr
+  | LExprMod !Loc !LExpr !LExpr
+  -- unary expressions
+  | LExprNeg !Loc !LExpr -- -E
+  | LExprCompl !Loc !LExpr -- ~E
+  -- primary expressions
+  | LExprImm !Loc !Int64
+  | LExprLo32 !Loc !LExpr -- 32@lo(...)
+  | LExprHi32 !Loc !LExpr -- 32@hi(...)
+  | LExprSRel !Loc !LExpr -- label@srel
+  | LExprLabel !Loc !String -- e.g. ".L_15"
+  deriving Show
+
 
 -- oHasSrcs :: Op -> Bool
 -- oHasSrcs op =
 
-pIntImm :: PI Int64
+pIntImm :: PI Word64
 pIntImm = do
     maybeNegate <- P.option id (pSymbol "-" >> return negate)
-    maybeNegate <$> pImmA
+    fromIntegral . maybeNegate <$> pImmA
 
-pFltImm :: PI Int64
+pFltImm :: PI Word64
 pFltImm = do
     maybeNegate <- P.option id $ pSymbol "-" >> return (flip complementBit 31)
     maybeNegate <$> (pInf <|> pNonInf)

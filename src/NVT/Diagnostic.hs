@@ -3,10 +3,10 @@ module NVT.Diagnostic where
 import NVT.Loc
 
 -------------------------------------------------------------------------------
-data Diagnostic = 
+data Diagnostic =
   Diagnostic {
     dLoc :: !Loc
-  , dMessage :: !String    
+  , dMessage :: !String
   } deriving (Show,Eq,Ord)
 
 dCons :: Loc -> String -> Diagnostic
@@ -16,12 +16,12 @@ dFormat :: Diagnostic -> String
 dFormat d = lFormat (dLoc d) ++ ": " ++ dMessage d
 
 dFormatWithLines :: [String] -> Diagnostic -> String
-dFormatWithLines lns d = 
+dFormatWithLines lns d =
     lFormat (dLoc d) ++ ": " ++ dMessage d ++ context
   where context
           | ln - 1 < 0 || ln - 1 >= length lns || cl == 0 = ""
           | otherwise = "\n" ++
             lns !! (ln - 1) ++ "\n" ++
-            replicate cl ' ' ++ "^"
+            replicate (cl - 1) ' ' ++ "^"
         ln = lLine (dLoc d)
         cl = lColumn (dLoc d)

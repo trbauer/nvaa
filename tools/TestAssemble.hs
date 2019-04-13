@@ -12,14 +12,27 @@ import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 import Control.Applicative
 import Control.Exception
 import Control.Monad
+import Data.Char
 import Data.List
 import Data.Word
 import Debug.Trace
 import System.IO
 import Text.Printf
 
+t = testInst "000FE20000000F00`C200000000247802:  MOV R36, 0xc2000000 {!1} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2235"
 
-movIt = testFile "examples\\sm_75\\ops\\MOV.sass"
+testInst :: String -> IO ()
+testInst syntax =
+  case parseSampleInst syntax of
+    Left err ->
+      putStrLn $ show 1 ++ ". " ++ err ++ ": malformed sample instruction\n"
+    Right si -> do
+      let syntax_x = stripPrefixBits syntax
+      testSampleInst True si ("<interactive>",1) syntax_x
+      return ()
+
+testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
+testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
 
 main :: IO ()
 main = do
@@ -38,14 +51,36 @@ parseLines (ln0:ln1:lns) =
 s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
 s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
 
+stripPrefixBits :: String -> String
+stripPrefixBits ln =
+  case span (/=':') ln of
+    (pfx,':':sfx) ->
+      case span (/='`') pfx of
+        (hi_str,'`':lo_str)
+          | length hi_str == 16 && length lo_str == 16 && all isHexDigit (lo_str++hi_str) -> sfx
+          | otherwise -> ln
+        _ -> ln
+    _ -> ln
+
 
 testFile :: FilePath -> IO Bool
 testFile fp = do
   let testLoop [] = return True
       testLoop ((lno,ln):lns)
-        | any (`isInfixOf`ln) ["32@lo(","32@hi("] = do
-          putStrLn $ "SKIPPING LABEL CASE: " ++ ln
-          testLoop lns
+        | instHasLabels ln = do
+          -- should be able to parse it
+          let syntax = stripPrefixBits ln
+          case parseInstCompletion 0 fp 1 syntax of
+            Left err -> do
+              -- putStrLn $ "==> " ++ show ln
+              let fmtDiag = dFormatWithLines (lines syntax)
+              putStrLn "ERROR: parsed SampleInst, but InstParser failed"
+              putStrLn $ fmtDiag err
+              return False
+            Right _ -> do
+              --
+              -- putStrLn $ "SKIPPING LABEL CASE: " ++ ln
+              testLoop lns
         | otherwise = do
           -- 0001E80000100000`0000042908007387:        STL.U8 [R8+0x4], R41 {!4,+1.R} ;       // examples/sm_75/samples\cdpSimplePrint.sass:1519
           case parseSampleInst ln of
@@ -53,45 +88,40 @@ testFile fp = do
               putStrLn $ "SKIPPING: " ++ ln
               testLoop lns
             Right si -> do
-              z <- testSampleInst False si (fp,lno) (fmtRawInst (siRawInst si)) -- ln
+              putStrLn ln
+              z <- testSampleInst False si (fp,lno) (stripPrefixBits ln)
               if not z then return False
                 else do
-                  putStrLn ln
                   testLoop lns
   flns <- lines <$> readFile fp
   testLoop $ zip [1..] flns
 
-
-testInst :: Int -> String -> IO ()
-testInst lno syntax =
-  case parseSampleInst syntax of
-    Left err ->
-      putStrLn $ show lno ++ ". " ++ err ++ ": malformed sample instruction\n"
-    Right si -> do
-      testSampleInst True si ("<interactive>",1) syntax
-      return ()
+-- 000FE40000000F00`0000000000147802:        MOV R20, 32@lo((_Z21computeBezierLinesCDPP10BezierLinei + .L_4@srel)) {!2} ; // examples/sm_75/samples\BezierLineCDP.sass:1526
+-- 000FD00000000F00`0000000000157802:        MOV R21, 32@hi((_Z21computeBezierLinesCDPP10BezierLinei + .L_4@srel)) {!8,Y} ; // examples/sm_75/samples\BezierLineCDP.sass:1527
+-- 000FC40000000F00`0000000000257802:        MOV R37, `(smem) {!2,Y} ;              // examples/sm_75/samples\cdpQuadtree.sass:6842
+-- 000FD00000000F00`0000000000037802:        MOV R3, `($___ZZ10cdp_kerneliiiiE5s_uid__349) {!8,Y} ; // examples/sm_75/samples\cdpSimplePrint.sass:1663
+instHasLabels :: String -> Bool
+instHasLabels ln = any (`isInfixOf`ln) ["32@lo(","32@hi(","`(","@srel"]
 
 testSampleInst :: Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool
 testSampleInst verbose si (fp,lno) syntax = do
   let fmtDiag = dFormatWithLines (lines syntax)
-  case parseInst lno fp syntax of
+  case parseInst 0 fp lno syntax of
     Left err -> do
       putStrLn "ERROR: parsed SampleInst, but InstParser failed"
       putStrLn $ fmtDiag err
       return False
-    Right (i,lbls,ws) -> do
-      unless (null lbls) $
-        fail "TestAssemble: labels not supported yet"
+    Right (i,ws) -> do
       mapM_ (putStrLn . fmtDiag) ws
       let i_formatted = format i
-      case parseInst lno fp i_formatted of
+      case parseInst 0 fp lno i_formatted of
         Left err -> do
           putStrLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
           putStrLn $ "formatted as ==> " ++ i_formatted
           putStrLn $ "but failed to re-parse"
           putStrLn $ fmtDiag err
           return False
-        Right (i2,_,_)
+        Right (i2,_)
           | i /= i2 -> do
             putStrLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
             putStrLn $ "formatted as ==> " ++ i_formatted

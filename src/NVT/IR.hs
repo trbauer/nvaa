@@ -16,7 +16,14 @@ data Op = Op {oMnemonic :: !String}
   deriving (Show,Eq,Ord)
 instance Syntax Op where
   format = oMnemonic
+oHasDstPred :: Op -> Bool
+oHasDstPred (Op op) =
+  op `elem` ["LOP3","PLOP3","DSETP","FSETP","ISET","HSETP2"]
 
+oOpIsFP :: Op -> Bool
+oOpIsFP (Op op) =
+  op `elem` ["FADD","FFMA","FCHK","FMNMX","FMUL","FSEL","FSET","FSETP"] ||
+  op `elem` ["DADD","DFMA","DMUL","DSETP"]
 
 data Inst =
   Inst {
@@ -86,10 +93,11 @@ data Src =
     SrcR  !Bool !Bool  !Bool  !R   -- register
   | SrcC  !Bool !Bool  !Int   !Int -- constant direct
   | SrcCX !Bool !Bool  !UR    !Int -- constant indirect
-  | SrcU                      !UR  -- uniform reg
+  | SrcUR                     !UR  -- uniform reg
   | SrcP  !Bool  !PR               -- predication
   | SrcB  !BR                      -- barrier register
-  | SrcI  !Int64                   -- immediate (f32 is in the low 32 in binary)
+--  | SrcI  !Int64                   -- immediate (f32 is in the low 32 in binary)
+  | SrcI  !Word64                  -- immediate (f32 is in the low 32 in binary)
   deriving (Show,Eq)
 instance Syntax Src where
   format s =
@@ -101,7 +109,7 @@ instance Syntax Src where
           negAbs neg abs ("c[" ++ show six ++ "][" ++ show soff ++ "]")
         SrcCX neg abs sur soff ->
           negAbs neg abs ("cx[" ++ format sur ++ "][" ++ show soff ++ "]")
-        SrcU ur -> format ur
+        SrcUR ur -> format ur
         SrcP neg pr -> maybeS neg "!" ++ format pr
         SrcB br -> format br
         SrcI i -> printf "0x%08X" (fromIntegral i :: Word32)
@@ -167,6 +175,139 @@ data R =
   | R248 | R249 | R250 | R251 | R252 | R253 | R254 | RZ
   deriving (Show,Eq,Enum,Read)
 
+data SR =
+    SR_LANEID
+  | SR_CLOCK
+  | SR_VIRTCFG
+  | SR_VIRTID
+  --
+  | SR4 | SR5 | SR6 | SR7 | SR8 | SR9 | SR10 | SR11 | SR12 | SR13 | SR14
+  --
+  | SR_ORDERING_TICKET
+  | SR_PRIM_TYPE
+  | SR_INVOCATION_ID
+  | SR_Y_DIRECTION
+  | SR_THREAD_KILL
+  | SM_SHADER_TYPE
+  | SR_DIRECTCBEWRITEADDRESSL
+  | SR_DIRECTCBEWRITEADDRESSH
+  | SR_DIRECTCBEWRITEENABLED
+  | SR_MACHINE_ID_0
+  | SR_MACHINE_ID_1
+  | SR_MACHINE_ID_2
+  | SR_MACHINE_ID_3
+  | SR_AFFINITY
+  | SR_INVOCATION_INFO
+  | SR_WSCALEFACTOR_XY
+  | SR_WSCALEFACTOR_Z
+  | SR_TID
+  | SR_TID_X -- SR_TID.X
+  | SR_TID_Y
+  | SR_TID_Z
+  | SR36
+  | SR_CTAID_X -- SR_CTAID.X
+  | SR_CTAID_Y
+  | SR_CTAID_Z
+  | SR_NTID
+  | SR_CirQueueIncrMinusOne
+  | SR_NLATC
+  | SR43
+  | SR_SM_SPA_VERSION
+  | SR_MULTIPASSSHADERINFO
+  | SR_LWINHI
+  | SR_SWINHI
+  | SR_SWINLO
+  | SR_SWINSZ
+  | SR_SMEMSZ
+  | SR_SMEMBANKS
+  | SR_LWINLO
+  | SR_LWINSZ
+  | SR_LMEMLOSZ
+  | SR_LMEMHIOFF
+  | SR_EQMASK
+  | SR_LTMASK
+  | SR_LEMASK
+  | SR_GTMASK
+  | SR_GEMASK
+  | SR_REGALLOC
+  | SR_BARRIERALLOC
+  | SR63
+  | SR_GLOBALERRORSTATUS
+  | SR65
+  | SR_WARPERRORSTATUS
+  | SR_VIRTUALSMID
+  | SR_VIRTUALENGINEID
+  --
+  | SR69 | SR70 | SR71 | SR72 | SR73 | SR74 | SR75 | SR76 | SR77 | SR78 | SR79
+  --
+  | SR_CLOCKLO
+  | SR_CLOCKHI
+  | SR_GLOBALTIMERLO
+  | SR_GLOBALTIMERHI
+  | SR_ESR_PC
+  | SR_ESR_PC_HI
+  --
+  | SR86 | SR87 | SR88 | SR89 | SR90 | SR91 | SR92 | SR93 | SR94 | SR95
+  --
+  | SR_HWTASKID
+  | SR_CIRCULARQUEUEENTRYINDE
+  | SR_CIRCULARQUEUEENTRYADDR
+  | SR_CIRCULARQUEUEENTRYADDR
+  | SR_PM0
+  | SR_PM_HI0
+  | SR_PM1
+  | SR_PM_HI1
+  | SR_PM2
+  | SR_PM_HI2
+  | SR_PM3
+  | SR_PM_HI3
+  | SR_PM4
+  | SR_PM_HI4
+  | SR_PM5
+  | SR_PM_HI5
+  | SR_PM6
+  | SR_PM_HI6
+  | SR_PM7
+  | SR_PM_HI7
+  | SR_SNAP_PM0
+  | SR_SNAP_PM_HI0
+  | SR_SNAP_PM1
+  | SR_SNAP_PM_HI1
+  | SR_SNAP_PM2
+  | SR_SNAP_PM_HI2
+  | SR_SNAP_PM3
+  | SR_SNAP_PM_HI3
+  | SR_SNAP_PM4
+  | SR_SNAP_PM_HI4
+  | SR_SNAP_PM5
+  | SR_SNAP_PM_HI5
+  | SR_SNAP_PM6
+  | SR_SNAP_PM_HI6
+  | SR_SNAP_PM7
+  | SR_SNAP_PM_HI7
+  | SR_VARIABLE_RATE
+  | SR_TTU_TICKET_INFO
+  --
+  | SR134 | SR135 | SR136 | SR137
+  | SR138 | SR139 | SR140 | SR141 | SR142 | SR143 | SR144 | SR145
+  | SR146 | SR147 | SR148 | SR149 | SR150 | SR151 | SR152 | SR153
+  | SR154 | SR155 | SR156 | SR157 | SR158 | SR159 | SR160 | SR161
+  | SR162 | SR163 | SR164 | SR165 | SR166 | SR167 | SR168 | SR169
+  | SR170 | SR171 | SR172 | SR173 | SR174 | SR175 | SR176 | SR177
+  | SR178 | SR179 | SR180 | SR181 | SR182 | SR183 | SR184 | SR185
+  | SR186 | SR187 | SR188 | SR189 | SR190 | SR191 | SR192 | SR193
+  | SR194 | SR195 | SR196 | SR197 | SR198 | SR199 | SR200 | SR201
+  | SR202 | SR203 | SR204 | SR205 | SR206 | SR207 | SR208 | SR209
+  | SR210 | SR211 | SR212 | SR213 | SR214 | SR215 | SR216 | SR217
+  | SR218 | SR219 | SR220 | SR221 | SR222 | SR223 | SR224 | SR225
+  | SR226 | SR227 | SR228 | SR229 | SR230 | SR231 | SR232 | SR233
+  | SR234 | SR235 | SR236 | SR237 | SR238 | SR239 | SR240 | SR241
+  | SR242 | SR243 | SR244 | SR245 | SR246 | SR247 | SR248 | SR249
+  | SR250 | SR251 | SR252 | SR253 | SR254
+  --
+  | SRZ
+  deriving (Eq,Show,Ord,Enum)
+
 data UR =
     UR0   | UR1   | UR2   | UR3   | UR4   | UR5   | UR6   | UR7
   | UR8   | UR9   | UR10  | UR11  | UR12  | UR13  | UR14  | UR15
@@ -230,6 +371,15 @@ instance Codeable R where
   encode = encodeEnum
   decode = decodeEnum R0 RZ
 instance Syntax R where format = show
+
+instance Syntax SR where
+  format sr
+    | "SR_TID_" `isPrefixOf` str = "SR_TID." ++ drop (length "SR_TID_") str
+    | "SR_CTAID_" `isPrefixOf` str = "SR_CTAID." ++ drop (length "SR_CTAID_") str
+    where str = show sr
+instance Codeable SR where
+  encode = encodeEnum
+  decode = decodeEnum SR_LANE_ID RZ
 
 instance Codeable UR where
   encode = encodeEnum

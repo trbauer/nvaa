@@ -19,16 +19,6 @@ import qualified Control.Monad.State as CMS
 import qualified Control.Monad.Trans.Except as CME
 import Data.Functor.Identity
 
-type Field = (String,Int,Int)
-
-fName :: Field -> String
-fName (s,_,_) = s
-
-fOffset :: Field -> Int
-fOffset (_,off,_) = off
-
-fLength :: Field -> Int
-fLength (_,_,len) = len
 
 
 data ESt =
@@ -99,13 +89,19 @@ eFieldE f e =
 eEncode :: Codeable e => Field -> e -> E ()
 eEncode f = eFieldE f . encode
 
+eFieldU32 :: Field -> Word64 -> E ()
+eFieldU32 = eFieldUnsignedImm 32
+eFieldUnsignedImm :: Int -> Field -> Word64 -> E ()
+eFieldUnsignedImm bits f val
+  | val <= 2^bits - 1 = eField f val
+  | otherwise = eFatalF f "value out of bounds"
 eFieldS32 :: Field -> Int64 -> E ()
 eFieldS32 = eFieldSignedImm 32
 eFieldSignedImm :: Int -> Field -> Int64 -> E ()
 eFieldSignedImm bits f val
   | val >= -2^(bits-1) && val < 2^(bits-1) = eField f (field_mask .&. w_val)
 --  | high_bits /= 0 && high_bits /= 0xFFFFFFFF00000000 = eField f (field_mask .&. w_val)
-  | otherwise = eFatalF f "value is out of bounds"
+  | otherwise = eFatalF f "value out of bounds"
   where w_val = fromIntegral val :: Word64
         field_mask
           | fLength f == 64 = 0xFFFFFFFFFFFFFFFF
@@ -162,7 +158,7 @@ eInst i = enc
         eDstRegR :: E ()
         eDstRegR =
           case iDsts i of
-            [DstR r] -> eEncode fDSTREG r
+            [DstR r] -> eEncode fDST_REG r
             [_] -> eFatal "wrong kind of destination operand"
             _ -> eFatal "wrong number of destination operands"
 
@@ -179,9 +175,9 @@ eInst i = enc
           case srcs of
             [SrcR neg abs reu reg] -> do
               eField fREGFILE 1
-              eEncode fSRCREG reg
+              eEncode fSRC1_REG reg -- src goes in [39:32]
               ensureNoNegAbs neg abs
-              eEncode fSRC0_REUSE reu
+              eEncode fSRC1_REUSE reu -- use Src1.Reuse
             [SrcC neg abs six soff] -> do
               eField fREGFILE 5
               eField fSRCCIX  (fromIntegral six)
@@ -189,9 +185,13 @@ eInst i = enc
               ensureNoNegAbs neg abs
             [SrcI imm] -> do
               eField fREGFILE 4
-              eFieldS32 fSRCIMM imm
-            [_] -> eFatal "wrong kind of destination operand"
-            _ -> eFatal "wrong number of destination operands"
+              eFieldU32 fSRCIMM imm
+            [SrcUR ur] -> do
+              eEncode fSRC1_UREG ur
+              eField fREGFILE 6
+              eEncode fUNIFORMREG True
+            [_] -> eFatal "wrong kind of source operand"
+            _ -> eFatal "wrong number of source operands"
 
         ----------------------------------------------
         eMov :: E ()
@@ -202,82 +202,150 @@ eInst i = enc
           case iSrcs i of
             [src,SrcI imm] -> do
               eUnrSrcs [src]
-              eField fMOV_SRC1_IMM4 (fromIntegral imm)
+              eField fMOV_SRC2_IMM4 (fromIntegral imm)
             srcs -> do
               -- MOV without the imm encodes as 0xF
               eUnrSrcs srcs
-              eField fMOV_SRC1_IMM4 0xF
+              eField fMOV_SRC2_IMM4 0xF
           return ()
 
 
-
 -------------------------------------------------------------------------------
+data Field =
+  Field {
+    fName :: !String
+  , fOffset :: !Int
+  , fLength :: !Int
+  , fFormat :: !(Word128 -> Word64 -> String)
+  }
+instance Show Field where
+  show f =
+    "Field {\n" ++
+    "  fName = " ++ show (fName f) ++ "\n" ++
+    "  fOffset = " ++ show (fOffset f) ++ "\n" ++
+    "  fLength = " ++ show (fLength f) ++ "\n" ++
+    "  fFormat = ...function...\n" ++
+    "}"
+
+f :: String -> Int -> Int -> (Word128 -> Word64 -> String) -> Field
+f = Field
+fi :: String -> Int -> Int -> Field
+fi nm off len = f nm off len $ const show
+fb :: String -> Int -> Int -> String -> Field
+fb nm off len true = fl nm off len ["",true]
+fl :: String -> Int -> Int -> [String] -> Field
+fl nm off len vs = f nm off len fmt
+  where fmt _ v
+          | fromIntegral v >= length vs = show v ++ "?"
+          | otherwise = vs !! fromIntegral v
+fC :: (Codeable c,Syntax c) => c -> String -> Int -> Int -> Field
+fC c_dummy nm off len = f nm off len fmt
+  where fmt _ val =
+          case decode val of
+            Left err -> err
+            Right c -> areSame c c_dummy $ format c
+
+        areSame :: a -> a -> b -> b
+        areSame _ _ b = b
+
+after :: Field -> String -> Int -> (Word64 -> String) -> Field
+after f nm len fmt = afterG f nm len $ const fmt
+afterI :: Field -> String -> Int -> Field
+afterI f nm len = after f nm len show
+afterG :: Field -> String -> Int -> (Word128 -> Word64 -> String) -> Field
+afterG fBEFORE nm len fmt = f nm (fOffset fBEFORE + fLength fBEFORE) len fmt
+
 fReserved :: Int -> Int -> Field
-fReserved off len = (rESERVED_NAME,off,len)
+fReserved off len = f rESERVED_NAME off len $ \_ v ->
+  if v /= 0 then "should be zeros" else ""
 
 rESERVED_NAME :: String
 rESERVED_NAME = "*Reserved*"
 
 fIsReserved :: Field -> Bool
-fIsReserved (nm,_,_) = nm == rESERVED_NAME
+fIsReserved = (==rESERVED_NAME) . fName
+-------------------------------------------------------------------------------
 
-after :: Field -> String -> Int -> Field
-after f nm len = (nm,fOffset f + fLength f,len)
 
 fOPCODE :: Field
-fOPCODE = ("Opcode",0,9)
+fOPCODE = fi "Opcode" 0 9
 
 fREGFILE :: Field
-fREGFILE = ("RegFile",9,3)
+fREGFILE = fi "RegFile" 9 3
 
 fPREDICATION :: Field
-fPREDICATION = ("Predication",12,4)
+fPREDICATION = fi "Predication" 12 4
 
-fDSTREG :: Field
-fDSTREG = ("Dst.Reg",16,8)
-fSRC0REG :: Field
-fSRC0REG = ("Src0.Reg",24,8)
+fDST_REG :: Field
+fDST_REG = fi "Dst.Reg" 16 8
+fSRC0_REG :: Field
+fSRC0_REG = fi "Src0.Reg" 24 8
 fSRC0_ABS :: Field
-fSRC0_ABS = ("Src0.AbsVal",72,1)
+fSRC0_ABS = fi "Src0.AbsVal" 72 1
 fSRC0_NEG :: Field
-fSRC0_NEG = ("Src0.Negated",73,1)
+fSRC0_NEG = fi "Src0.Negated" 73 1
 
-fSRCREG :: Field
-fSRCREG = ("Src.Reg",32,8)
+fSRC1_REG :: Field
+fSRC1_REG = fi "Src1.Reg" 32 8
+fSRC1_UREG :: Field
+fSRC1_UREG = fi "Src1.Reg" 32 6
 fSRC1_ABS :: Field
-fSRC1_ABS = ("Src1.AbsVal",62,1)
+fSRC1_ABS = fb "Src1.AbsVal" 62 1 "|..|"
 fSRC1_NEG :: Field
-fSRC1_NEG = ("Src1.Negated",63,1)
+fSRC1_NEG = fb "Src1.Negated" 63 1 "-(..)"
 
 fSRCIMM :: Field
-fSRCIMM = ("Src.Imm",32,32)
+fSRCIMM = fi "Src.Imm" 32 32
 fSRCCOFF :: Field
-fSRCCOFF = ("Src.ConstOffset",40,14)
+fSRCCOFF = f "Src.ConstOffset" 40 14 fmt
+  where fmt w128 off =
+            c_or_cx ++ "[..][" ++ show (4*off) ++ "]"
+          where c_or_cx = if testBit w128 91 then "cx" else "c"
 fSRCCIX :: Field
-fSRCCIX = ("Src.ConstIndex",54,5)
+fSRCCIX = f "Src.ConstIndex" 54 5 fmt
+  where fmt w128 val = "c[" ++ show val ++ "][..]"
+fSRCCUIX :: Field
+fSRCCUIX = f "Src.ConstIndex" 32 6 $ \_ val ->
+  let ureg = if val == 63 then "URZ" else ("UR" ++show val)
+    in "cx[" ++ ureg ++ "][..]"
+
+fUNIFORMREG :: Field
+fUNIFORMREG = fb "EnableUniformReg" 91 1 "uniform registers enabled"
 
 fDEPINFO_STALLS :: Field
-fDEPINFO_STALLS = ("DepInfo.Stalls",105,4) -- [108:105]
+fDEPINFO_STALLS = f "DepInfo.Stalls" 105 4 $ \_ val -> -- [108:105]
+  if val == 0 then "" else ("!" ++ show val)
+
 fDEPINFO_YIELD :: Field
-fDEPINFO_YIELD = after fDEPINFO_STALLS "DepInfo.NoYield" 1 -- [109]
+fDEPINFO_YIELD = after fDEPINFO_STALLS "DepInfo.NoYield" 1 $ -- [109]
+  \val ->
+    if val == 1
+      then "no yield: prefer same warp"
+      else "yield: prefer another warp"
 fDEPINFO_WRBAR :: Field
-fDEPINFO_WRBAR = after fDEPINFO_YIELD "DepInfo.WrBar" 3 -- [112:110]
+fDEPINFO_WRBAR = fRWBAR fDEPINFO_YIELD "DepInfo.WrBar" -- [112:110]
 fDEPINFO_RDBAR :: Field
-fDEPINFO_RDBAR = after fDEPINFO_WRBAR "DepInfo.RdBar" 3 -- [115:113]
+fDEPINFO_RDBAR = fRWBAR fDEPINFO_WRBAR "DepInfo.RdBar" -- [115:113]
+fRWBAR :: Field -> String -> Field
+fRWBAR fAFT name = after fAFT name 3 fmt
+  where fmt val = "+" ++ show "." ++ which
+        which = take 1 name
+
 fDEPINFO_WMASK :: Field
-fDEPINFO_WMASK = after fDEPINFO_RDBAR "DepInfo.WtMask" 6 -- [121:116]
+fDEPINFO_WMASK = afterI fDEPINFO_RDBAR "DepInfo.WtMask" 6 -- [121:116]
 fUNK_REUSE :: Field
-fUNK_REUSE = after fUNK_REUSE "???.Reuse" 1 -- [122]
+fUNK_REUSE = afterI fUNK_REUSE "???.Reuse" 1 -- [122]
 fSRC0_REUSE :: Field
-fSRC0_REUSE = after fDEPINFO_WMASK "Src0.Reuse" 1 -- [123]
+fSRC0_REUSE = afterI fDEPINFO_WMASK "Src0.Reuse" 1 -- [123]
 fSRC1_REUSE :: Field
-fSRC1_REUSE = after fSRC0_REUSE "Src1.Reuse" 1 -- [124]
+fSRC1_REUSE = afterI fSRC0_REUSE "Src1.Reuse" 1 -- [124]
 fSRC2_REUSE :: Field
-fSRC2_REUSE = after fSRC1_REUSE "Src2.Reuse" 1 -- [125]
+fSRC2_REUSE = afterI fSRC1_REUSE "Src2.Reuse" 1 -- [125]
 -- zeros [127:126]
+
 
 -------------------------------------------------------------------------------
 -- special per-instruction fields with unknown behavior
 --
-fMOV_SRC1_IMM4 :: Field
-fMOV_SRC1_IMM4 = ("Mov.Src1.Imm4",72,4)
+fMOV_SRC2_IMM4 :: Field
+fMOV_SRC2_IMM4 = fi "Mov.Src2.Imm4" 72 4
