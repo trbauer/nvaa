@@ -23,9 +23,19 @@ import qualified Text.Parsec           as P
 --  | LblExprLit  !Int64
 --  deriving Show
 
-type LabelIndex = [(String,Int64)]
-type LabelCompletion a = LabelIndex -> Either Diagnostic a
-type InstCompletion = LabelCompletion Inst
+type LabelIndex = [(String,PC)]
+type Unresolved a = LabelIndex -> Either Diagnostic a
+
+sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
+sequenceUnresolved as lbl_ix =  sequence (map ($lbl_ix) as)
+-- sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
+-- sequenceUnresolved as lbl_ix = resolve as []
+--   where resolve [] ras = reverse ras
+--         resolve (ua:uas) ras =
+--           case ua lbl_ix of
+--             Left err -> Left err
+--             Right a -> resolve uas (a:ras)
+
 
 parseInst ::
   PC ->
@@ -34,20 +44,57 @@ parseInst ::
   String ->
   Either Diagnostic (Inst,[Diagnostic])
 parseInst pc fp lno syntax =
-  case parseInstCompletion pc fp lno syntax of
+  case parseUnresolvedInst pc fp lno syntax of
     Left err -> Left err
     Right (ci,ws) ->
       case ci [] of
         Left err -> Left err
         Right i -> Right (i,ws)
 
-parseInstCompletion ::
+parseUnresolvedInst ::
   PC ->
   FilePath ->
   Int ->
   String ->
-  Either Diagnostic (InstCompletion,[Diagnostic])
-parseInstCompletion pc = runPI (pInst pc)
+  Either Diagnostic (Unresolved Inst,[Diagnostic])
+parseUnresolvedInst pc = runPI (pInst pc)
+
+
+parseInstsUnresolved ::
+  LabelIndex ->
+  PC ->
+  FilePath ->
+  Int ->
+  String ->
+  Either Diagnostic ((Unresolved [Inst],LabelIndex),[Diagnostic])
+parseInstsUnresolved lbl_ix0 pc fp lno inp = do
+  ((uis,lbl_ix),ws) <- runPI (pBlocks pc lbl_ix0) fp lno inp
+  return ((sequenceUnresolved uis,lbl_ix),ws)
+
+
+
+pBlocks ::
+  PC ->
+  LabelIndex ->
+  PI ([Unresolved Inst],LabelIndex)
+pBlocks = pInstOrLabel []
+  where pInstOrLabel :: [Unresolved Inst] -> PC -> LabelIndex -> PI ([Unresolved Inst],LabelIndex)
+        pInstOrLabel ruis pc lbl_ix = pTryInst <|> pLabel <|> pEof
+          where pTryInst = P.try $ do
+                  ui <- pInst pc
+                  pInstOrLabel (ui:ruis) (pc+16) lbl_ix
+                pLabel = pWithLoc $ \loc -> do
+                  lbl <- pLabelChars
+                  case lbl`lookup`lbl_ix of
+                    Just x ->
+                      pSemanticError loc "label already defined"
+                    Nothing -> do
+                      pSymbol ":"
+                      pInstOrLabel ruis pc ((lbl,pc):lbl_ix)
+                pEof = do
+                  P.eof
+                  return (reverse ruis,lbl_ix)
+
 
 runPI ::
   PI a ->
@@ -82,7 +129,7 @@ data PISt =
   -- pisLabels :: [LblExpr]
   } deriving Show
 
-pInst :: PC -> PI InstCompletion
+pInst :: PC -> PI (Unresolved Inst)
 pInst pc = body
   where body = pWithLoc $ \loc -> do
           pWhiteSpace
@@ -175,11 +222,11 @@ pDstPred :: PI Dst
 pDstPred = DstP <$> pSyntax
 
 
-pSrcs :: PC -> Op -> PI [LabelCompletion Src]
+pSrcs :: PC -> Op -> PI [Unresolved Src]
 pSrcs pc op = P.sepBy (pSrc pc op) (pSymbol ",")
-pSrc :: PC -> Op -> PI (LabelCompletion Src)
+pSrc :: PC -> Op -> PI (Unresolved Src)
 pSrc pc op = P.try pNonLabel <|> pImmLbl
-  where pNonLabel :: PI (LabelCompletion Src)
+  where pNonLabel :: PI (Unresolved Src)
         pNonLabel = alwaysSucceeds <$> pCases
           where pCases =
                   P.try pImm <|>
@@ -190,7 +237,7 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
                   pRegP <|>
                   pRegB
 
-        alwaysSucceeds :: Src -> LabelCompletion Src
+        alwaysSucceeds :: Src -> Unresolved Src
         alwaysSucceeds src _ = Right src
 
         pReg :: PI Src
@@ -260,7 +307,7 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
                   | oOpIsFP op = pFltImm <|> pIntImm
                   | otherwise = pIntImm
 
-        pImmLbl :: PI (LabelCompletion Src)
+        pImmLbl :: PI (Unresolved Src)
         pImmLbl = do
           e <- pLExpr pc
           return $ \lix -> SrcI <$> evalLExpr lix e
@@ -340,7 +387,7 @@ evalLExpr lix = (fromIntegral <$>) . eval
             LExprLabel loc sym ->
               case sym `lookup` lix of
                 Nothing -> err loc "unbound symbol"
-                Just val -> return val
+                Just val -> return (fromIntegral val)
 
         applyBin = applyBinG False
         applyBinDiv = applyBinG True

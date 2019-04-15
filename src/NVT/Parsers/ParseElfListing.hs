@@ -64,6 +64,27 @@ data ElfSymbolBinding =
     | ESB_UNKNOWN !Word8
   deriving (Show,Eq)
 
+
+parseSassListing :: FilePath -> String -> IO (Either Diagnostic Bits)
+parseSassListing fp asm = do
+  xe <- runP pSassListing (initSt fp)
+  case xe of
+    Left excp -> return excp
+    Right ioedb -> ioedb
+
+pSassListing :: P Bits
+pSassListing = do
+  pSpaces
+  --  .headerflags  @"EF_CUDA_TEXMODE_UNIFIED EF_CUDA_64BIT_ADDRESS EF_CUDA_SM75 EF_CUDA_VIRTUAL_SM(EF_CUDA_SM75)"
+  hdr_flags <- pHeaderDirective ".headerflags"
+
+-- .foo @"bar baz"
+pHeaderDirective :: String -> P [String]
+pHeaderDirective dir = do
+  pSymbol dir
+  P.char '@'
+  words <$> pString
+
 -- functional approach would construct the binary in place
 -- start the elf
 --

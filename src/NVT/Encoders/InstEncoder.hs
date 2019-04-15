@@ -19,7 +19,17 @@ import qualified Control.Monad.State as CMS
 import qualified Control.Monad.Trans.Except as CME
 import Data.Functor.Identity
 
+runInstEncoders :: [Inst] -> Either Diagnostic ([Word128],[Diagnostic])
+runInstEncoders is = do
+  (ws,dss) <- unzip <$> sequence (map runInstEncoder is)
+  return (ws,concat dss)
 
+runInstEncoder :: Inst -> Either Diagnostic (Word128,[Diagnostic])
+runInstEncoder i = runE (iLoc i) (eInst i)
+runInstDbgEncoder :: Inst -> Either Diagnostic (Word128,[Diagnostic],[(Field,Word64)])
+runInstDbgEncoder i = runDbgE (iLoc i) (eInst i)
+
+-------------------------------------------------------------------------------
 
 data ESt =
   ESt {
@@ -35,6 +45,7 @@ mkESt :: Loc -> ESt
 mkESt loc = ESt loc (Word128 0 0) (Word128 0 0) [] []
 
 type E = CMS.StateT ESt (CME.Except Diagnostic)
+
 
 runE :: Loc -> E () -> Either Diagnostic (Word128,[Diagnostic])
 runE loc encode =  (\(x,y,_) -> (x,y)) <$> runDbgE loc encode
@@ -112,10 +123,6 @@ eFieldSignedImm bits f val
 
 -------------------------------------------------------------------------------
 
-runInstEncoder :: Inst -> Either Diagnostic (Word128,[Diagnostic])
-runInstEncoder i = runE (iLoc i) (eInst i)
-runInstDbgEncoder :: Inst -> Either Diagnostic (Word128,[Diagnostic],[(Field,Word64)])
-runInstDbgEncoder i = runDbgE (iLoc i) (eInst i)
 
 eInst :: Inst -> E ()
 eInst i = enc

@@ -95,13 +95,19 @@ putField64 off len v w
   where shifted_value = v `shiftL` off
         mask = (1 `shiftL` len) - 1
 
+-- TODO: deprecate
 toByteStringW128 :: Word128 -> BS.ByteString
-toByteStringW128 w128 =
+toByteStringW128 = toByteStringU128LE
+fromByteStringW128 :: BS.ByteString -> Word128
+fromByteStringW128 = fromByteStringU128LE
+
+toByteStringU128LE :: Word128 -> BS.ByteString
+toByteStringU128LE w128 =
   toByteStringLE (wLo64 w128) `BS.append`
     toByteStringLE (wHi64 w128)
-fromByteStringW128 :: BS.ByteString -> Word128
-fromByteStringW128 bs
-  | BS.length bs_hi8 < 8 = error "fromByteStringW128: insufficient bytes"
+fromByteStringU128LE :: BS.ByteString -> Word128
+fromByteStringU128LE bs
+  | BS.length bs_hi8 < 8 = error "fromByteStringU128LE: insufficient bytes"
   | otherwise = Word128 (fromByteStringLE bs_hi8) (fromByteStringLE bs_lo8)
   where (bs_lo8,bs_hi8sfx) = BS.splitAt 8 bs
         bs_hi8 = BS.take 8 bs_hi8sfx

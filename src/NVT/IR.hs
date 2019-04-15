@@ -252,7 +252,6 @@ data SR =
   | SR_HWTASKID
   | SR_CIRCULARQUEUEENTRYINDE
   | SR_CIRCULARQUEUEENTRYADDR
-  | SR_CIRCULARQUEUEENTRYADDR
   | SR_PM0
   | SR_PM_HI0
   | SR_PM1
@@ -379,7 +378,7 @@ instance Syntax SR where
     where str = show sr
 instance Codeable SR where
   encode = encodeEnum
-  decode = decodeEnum SR_LANE_ID RZ
+  decode = decodeEnum SR_LANEID SRZ
 
 instance Codeable UR where
   encode = encodeEnum
