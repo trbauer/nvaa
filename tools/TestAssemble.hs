@@ -20,6 +20,9 @@ import System.IO
 import Text.Printf
 
 t = testInst "000FE20000000F00`C200000000247802:  MOV R36, 0xc2000000 {!1} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2235"
+s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
+s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
+ia3 = "000FC80007F1E0FF`00005A0000027A10:        IADD3 R2, P0, R0, c[0x0][0x168], RZ {!4,Y} ; // examples/sm_75/samples\alignedTypes.sass:3122"
 
 testInst :: String -> IO ()
 testInst syntax =
@@ -31,8 +34,9 @@ testInst syntax =
       testSampleInst True si ("<interactive>",1) syntax_x
       return ()
 
-testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
+testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
 testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
+testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
 
 main :: IO ()
 main = do
@@ -48,8 +52,6 @@ parseLines (ln0:ln1:lns) =
     Right si ->
       fmtSampleInst si ++ "\n" ++ parseLines lns
 
-s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
-s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
 
 stripPrefixBits :: String -> String
 stripPrefixBits ln =
@@ -70,7 +72,7 @@ testFile fp = do
         | instHasLabels ln = do
           -- should be able to parse it
           let syntax = stripPrefixBits ln
-          case parseInstCompletion 0 fp 1 syntax of
+          case parseUnresolvedInst 0 fp 1 syntax of
             Left err -> do
               -- putStrLn $ "==> " ++ show ln
               let fmtDiag = dFormatWithLines (lines syntax)
@@ -147,8 +149,10 @@ testSampleInst verbose si (fp,lno) syntax = do
                                 | otherwise = putStr
                           if encd /= f_val then putStr " ==> " else putStr "     "
                           putStrFunc $
-                            printf "    %-24s   %24s  %24s\n"
-                            (fmtField f) (fHexField f ref) (fHexField f encd)
+                            printf "    %-24s   %49s  %49s\n"
+                              (fmtField f)
+                              (fHexFieldWithMeaning f (siBits si))
+                              (fHexFieldWithMeaning f w_enc)
                     return (ref==encd,diag)
                 let (oks,diags) = unzip oks_diags
                     all_ok = and oks
@@ -161,7 +165,7 @@ testSampleInst verbose si (fp,lno) syntax = do
                   putStrLn $ fmtInstIr i
                   putStrLn ""
                   putStrLn "=== encoded fields ==="
-                  putStrLn $ "     " ++ printf "    %-24s   %24s  %24s" "FIELD" "REFERENCE" "ENCODED"
+                  putStrLn $ "     " ++ printf "    %-24s   %16s %32s  %16s %32s" "FIELD" "REFERENCE" "" "ENCODED" ""
                   sequence diags
                   putStrLn ""
                   putStrLn "== bit by bit ==="
@@ -202,6 +206,11 @@ compareBits w_ref w_sut = cmpBits [0 .. 127]
               cmpBits ixs_sfx
 
         ixDiffers ix = getField128 ix 1 w_ref /= getField128 ix 1 w_sut
+
+fHexFieldWithMeaning :: Field -> Word128 -> String
+fHexFieldWithMeaning f w128 =
+    printf "%16s %-32s" (fHexField f val) ("(" ++ fFormat f w128 val ++ ")")
+  where val = getField128 (fOffset f) (fLength f) w128
 
 fHexField :: Field -> Word64 -> String
 fHexField f =

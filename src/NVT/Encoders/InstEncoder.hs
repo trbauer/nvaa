@@ -61,11 +61,11 @@ runDbgE loc encode =
         )
 
 -- eFatal :: (MonadTrans t, Monad m) => Diagnostic -> t (CME.ExceptT Diagnostic m) a
-eFatal :: String -> E ()
+eFatal :: String -> E a
 eFatal msg = do
   loc <- CMS.gets esLoc
   lift (CME.throwE (Diagnostic loc msg)) -- we patch in the location later
-eFatalF :: Field -> String -> E ()
+eFatalF :: Field -> String -> E a
 eFatalF f msg = eFatal (fName f ++ ": " ++ msg)
 
 eWarning :: String -> E ()
@@ -130,7 +130,9 @@ eInst i = enc
 
         enc = do
           case oMnemonic op of
-            "MOV" -> eMov
+            "MOV" -> eMOV
+            "S2R" -> eS2R
+            "IADD3" -> eIADD3
             s -> eFatal $ "unsupported operation"
           eDepInfo (iDepInfo i)
 
@@ -176,6 +178,12 @@ eInst i = enc
           when abs $
             eFatal "unary instructions don't support src aboslute-value modifier"
 
+        eConstOffDiv4 :: Field -> Int -> E ()
+        eConstOffDiv4 f soff = do
+          when ((soff`mod`4)/=0) $
+            eFatalF f "constant offset must be a multiple of 4"
+          eField fSRCCOFF (fromIntegral soff `div` 4)
+
         -- 1 = R, 4 = IMM, 5 = const
         eUnrSrcs :: [Src] -> E ()
         eUnrSrcs srcs =
@@ -188,21 +196,22 @@ eInst i = enc
             [SrcC neg abs six soff] -> do
               eField fREGFILE 5
               eField fSRCCIX  (fromIntegral six)
-              eField fSRCCOFF (fromIntegral soff `div` 4)
+              eConstOffDiv4 fSRCCOFF soff
               ensureNoNegAbs neg abs
             [SrcI imm] -> do
               eField fREGFILE 4
               eFieldU32 fSRCIMM imm
-            [SrcUR ur] -> do
+            [SrcUR neg ur] -> do
               eEncode fSRC1_UREG ur
+              eEncode fSRC1_NEG neg
               eField fREGFILE 6
               eEncode fUNIFORMREG True
             [_] -> eFatal "wrong kind of source operand"
             _ -> eFatal "wrong number of source operands"
 
         ----------------------------------------------
-        eMov :: E ()
-        eMov = do
+        eMOV :: E ()
+        eMOV = do
           eField fOPCODE 0x002
           ePredication
           eDstRegR
@@ -216,6 +225,118 @@ eInst i = enc
               eField fMOV_SRC2_IMM4 0xF
           return ()
 
+        eS2R :: E ()
+        eS2R = do
+          eField fOPCODE 0x119
+          ePredication
+          eDstRegR
+          eField fREGFILE 0x4
+          case iSrcs i of
+            [SrcSR sr] ->
+              eEncode fS2R_SRC0 sr
+            _ -> eFatal "S2R requires SR* register source"
+
+        eIADD3 :: E ()
+        eIADD3 = do
+          eField fOPCODE 0x010
+          ePredication
+          eDstRegR
+          eEncode fIADD3_X (iHasInstOpt InstOptX i)
+          -- the first two operands may be predicate sources,
+          -- if they are omitted, we encode PT (0x7); neither has a sign
+          (p0,p1,srcs) <-
+                case iSrcs i of
+                  (SrcP p0neg p0:SrcP p1neg p1:sfx)
+                    | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
+                    | p1neg -> eFatal "predicate negation not support on extra predicate source (1)"
+                    | otherwise -> return (p0,p1,sfx)
+                  (SrcP p0neg p0:sfx)
+                    | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
+                    | otherwise -> return (p0,PT,sfx)
+                  sfx -> return (PT,PT,sfx)
+          eEncode fIADD3_SRCPRED0 p0
+          eEncode fIADD3_SRCPRED1 p1
+          let encodeSrcR :: Int -> (Field,Maybe Field,Field,Field) -> Src -> E ()
+              encodeSrcR ix (fNEG,mfABS,fREU,fREG) (SrcR neg abs reu r) = do
+                eEncode fNEG neg
+                case mfABS of
+                  Nothing
+                    | abs -> eFatal $ "absolute value not supported on Src"++show ix++" for this instruction type"
+                    | otherwise -> return () -- no abs supported, but they didn't ask for it
+                  Just fABS -> eEncode fABS abs
+                eEncode fREU reu
+                eEncode fREG r
+          let encodeSrc0R :: Src -> E ()
+              encodeSrc0R = encodeSrcR 0 (fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
+          let encodeSrc1R :: Src -> E ()
+              encodeSrc1R = encodeSrcR 1 (fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
+          let encodeSrc2R :: Src -> E ()
+              encodeSrc2R = encodeSrcR 1 (fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
+          case srcs of
+              -- iadd3_noimm__RRR_RRR
+            [s0@(SrcR _ _ _ r0),s1@(SrcR _ _ _ _),s2@(SrcR _ _ _ _)] -> do
+              eField fREGFILE 0x1
+              eEncode fUNIFORMREG False
+              --
+              encodeSrc0R s0
+              encodeSrc1R s1
+              encodeSrc2R s2
+              eEncode fUNIFORMREG False
+              -- iadd3_noimm__RCR_RCR
+            [s0@(SrcR _ _ _ _),s1@(SrcC neg abs six soff),s2@(SrcR _ _ _ _)] -> do
+              eField fREGFILE 0x5
+              eEncode fUNIFORMREG False
+              --
+              encodeSrc0R s0
+              --
+              eEncode fSRC1_NEG neg
+              eEncode fSRC1_ABS abs
+              eEncode fSRC1_CIX six
+              eConstOffDiv4 fSRC1_COFF soff
+              --
+              encodeSrc2R s2
+            -- iadd3_noimm__RCxR_RCxR
+            [s0@(SrcR _ _ _ _),s1@(SrcCX neg abs sur soff),s2@(SrcR _ _ _ _)] -> do
+              eField fREGFILE 0x5
+              eEncode fUNIFORMREG True
+              --
+              encodeSrc0R s0
+              --
+              eEncode fSRC1_NEG neg
+              eEncode fSRC1_ABS abs
+              eEncode fSRC1_UREG sur
+              eConstOffDiv4 fSRC1_COFF soff
+              --
+              encodeSrc2R s2
+            -- iadd3_imm__RsIR_RIR
+            [s0@(SrcR _ _ _ _),s1@(SrcI imm),s2@(SrcR _ _ _ _)] -> do
+              eField fREGFILE 0x4
+              eEncode fUNIFORMREG False
+              --
+              encodeSrc0R s0
+              --
+              eField fSRC1_IMM imm
+              --
+              encodeSrc2R s2
+            -- iadd3_noimm__RUR_RUR
+            [s0@(SrcR _ _ _ _),s1@(SrcUR neg ur),s2@(SrcR _ _ _ _)] -> do
+              eField fREGFILE 0x6
+              eEncode fUNIFORMREG True
+              --
+              encodeSrc0R s0
+              --
+              eEncode fSRC1_UREG ur
+              eEncode fSRC1_NEG neg
+              eEncode fUNIFORMREG True
+              --
+              encodeSrc2R s2
+            [_,_,_] -> eFatal "unsupported operand kinds to IADD3"
+            _ -> eFatal "wrong number of operands to IADD3"
+          -- these are the extra source predicate expressions
+          -- for the .X case
+          eField (fi "IADD.UNKNOWN76_80" 76 5) 0x1E -- probably [80:77] = 0xF !PT
+          eField (fi "IADD.UNKNOWN90_87" 87 4) 0xF
+          return ()
 
 -------------------------------------------------------------------------------
 data Field =
@@ -259,6 +380,8 @@ after :: Field -> String -> Int -> (Word64 -> String) -> Field
 after f nm len fmt = afterG f nm len $ const fmt
 afterI :: Field -> String -> Int -> Field
 afterI f nm len = after f nm len show
+afterB :: Field -> String -> Int -> String -> Field
+afterB f nm len meaning = afterG f nm len (\_ v -> if v /= 0 then meaning else "")
 afterG :: Field -> String -> Int -> (Word128 -> Word64 -> String) -> Field
 afterG fBEFORE nm len fmt = f nm (fOffset fBEFORE + fLength fBEFORE) len fmt
 
@@ -272,6 +395,13 @@ rESERVED_NAME = "*Reserved*"
 fIsReserved :: Field -> Bool
 fIsReserved = (==rESERVED_NAME) . fName
 -------------------------------------------------------------------------------
+-- field constructors for our syntax
+fR :: String -> Int -> Field
+fR nm off = fC (undefined :: R) nm off 8
+fUR :: String -> Int -> Field
+fUR nm off = fC (undefined :: UR) nm off 6
+
+-------------------------------------------------------------------------------
 
 
 fOPCODE :: Field
@@ -283,30 +413,49 @@ fREGFILE = fi "RegFile" 9 3
 fPREDICATION :: Field
 fPREDICATION = fi "Predication" 12 4
 
+fABS :: Int -> Int -> Field
+fABS src_ix off = fb ("Src" ++ show src_ix ++ ".AbsVal") off 1 "|..|"
+fNEG :: Int -> Int -> Field
+fNEG src_ix off = fb ("Src" ++ show src_ix ++ ".Negated") off 1 "-(..)"
+
 fDST_REG :: Field
-fDST_REG = fi "Dst.Reg" 16 8
+fDST_REG = fR "Dst.Reg" 16
 fSRC0_REG :: Field
-fSRC0_REG = fi "Src0.Reg" 24 8
+fSRC0_REG = fR "Src0.Reg" 24
 fSRC0_ABS :: Field
-fSRC0_ABS = fi "Src0.AbsVal" 72 1
+fSRC0_ABS = fABS 1 72
 fSRC0_NEG :: Field
-fSRC0_NEG = fi "Src0.Negated" 73 1
+fSRC0_NEG = fNEG 1 73
 
 fSRC1_REG :: Field
-fSRC1_REG = fi "Src1.Reg" 32 8
+fSRC1_REG = fR "Src1.Reg" 32
 fSRC1_UREG :: Field
-fSRC1_UREG = fi "Src1.Reg" 32 6
+fSRC1_UREG = fUR "Src1.UReg" 32
+fSRC1_IMM :: Field
+fSRC1_IMM = fSRCIMM{fName = "Src1.Imm"} -- more specific name
+fSRC1_CIX :: Field
+fSRC1_CIX = fSRCCIX{fName = "Src1.ConstIndex"}
+fSRC1_COFF :: Field
+fSRC1_COFF = fSRCCOFF{fName = "Src1.ConstOffset"}
+fSRC1_CUIX :: Field
+fSRC1_CUIX = fSRCCOFF{fName = "Src1.ConstIndex"}
 fSRC1_ABS :: Field
-fSRC1_ABS = fb "Src1.AbsVal" 62 1 "|..|"
+fSRC1_ABS = fABS 1 62
 fSRC1_NEG :: Field
-fSRC1_NEG = fb "Src1.Negated" 63 1 "-(..)"
+fSRC1_NEG = fNEG 1 63
+fSRC2_REG :: Field
+fSRC2_REG = fR "Src0.Reg" 64
+fSRC2_ABS :: Field -- (not supported for IADD), [74] is .X
+fSRC2_ABS = fABS 2 74
+fSRC2_NEG :: Field
+fSRC2_NEG = fNEG 2 75
 
 fSRCIMM :: Field
 fSRCIMM = fi "Src.Imm" 32 32
 fSRCCOFF :: Field
 fSRCCOFF = f "Src.ConstOffset" 40 14 fmt
   where fmt w128 off =
-            c_or_cx ++ "[..][" ++ show (4*off) ++ "]"
+            c_or_cx ++ "[..][" ++ printf "0x%X" (4*off) ++ "]"
           where c_or_cx = if testBit w128 91 then "cx" else "c"
 fSRCCIX :: Field
 fSRCCIX = f "Src.ConstIndex" 54 5 fmt
@@ -335,19 +484,20 @@ fDEPINFO_RDBAR :: Field
 fDEPINFO_RDBAR = fRWBAR fDEPINFO_WRBAR "DepInfo.RdBar" -- [115:113]
 fRWBAR :: Field -> String -> Field
 fRWBAR fAFT name = after fAFT name 3 fmt
-  where fmt val = "+" ++ show "." ++ which
-        which = take 1 name
+  where fmt 7 = "no barrier"
+        fmt val = "+" ++ show (val+1) ++ "." ++ which
+        which = take 1 $ drop 1 (dropWhile (/='.') name)
 
 fDEPINFO_WMASK :: Field
 fDEPINFO_WMASK = afterI fDEPINFO_RDBAR "DepInfo.WtMask" 6 -- [121:116]
 fUNK_REUSE :: Field
-fUNK_REUSE = afterI fUNK_REUSE "???.Reuse" 1 -- [122]
+fUNK_REUSE = afterB fUNK_REUSE "???.Reuse" 1 ".reuse" -- [122]
 fSRC0_REUSE :: Field
-fSRC0_REUSE = afterI fDEPINFO_WMASK "Src0.Reuse" 1 -- [123]
+fSRC0_REUSE = afterB fDEPINFO_WMASK "Src0.Reuse" 1 ".reuse" -- [123]
 fSRC1_REUSE :: Field
-fSRC1_REUSE = afterI fSRC0_REUSE "Src1.Reuse" 1 -- [124]
+fSRC1_REUSE = afterB fSRC0_REUSE "Src1.Reuse" 1 ".reuse" -- [124]
 fSRC2_REUSE :: Field
-fSRC2_REUSE = afterI fSRC1_REUSE "Src2.Reuse" 1 -- [125]
+fSRC2_REUSE = afterB fSRC1_REUSE "Src2.Reuse" 1 ".reuse" -- [125]
 -- zeros [127:126]
 
 
@@ -356,3 +506,15 @@ fSRC2_REUSE = afterI fSRC1_REUSE "Src2.Reuse" 1 -- [125]
 --
 fMOV_SRC2_IMM4 :: Field
 fMOV_SRC2_IMM4 = fi "Mov.Src2.Imm4" 72 4
+
+fS2R_SRC0 :: Field
+fS2R_SRC0 = fi "S2R.Src0" 72 8
+
+fIADD3_X :: Field
+fIADD3_X = fi "IADD3.X" 74 1
+
+fIADD3_SRCPRED0 :: Field
+fIADD3_SRCPRED0 = fi "IADD3.SrcPred0" 81 3
+fIADD3_SRCPRED1 :: Field
+fIADD3_SRCPRED1 = fi "IADD3.SrcPred1" 84 3
+-- bit 4

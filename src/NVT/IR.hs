@@ -18,7 +18,19 @@ instance Syntax Op where
   format = oMnemonic
 oHasDstPred :: Op -> Bool
 oHasDstPred (Op op) =
-  op `elem` ["LOP3","PLOP3","DSETP","FSETP","ISET","HSETP2"]
+  -- definitely present
+  -- e.g.
+  --   ISETP.GE.AND P0, PT, R0, c[0x0][0x170], PT {!1} ; // 000FE20003F06270`00005C0000007A0C
+  op `elem` ["PLOP3","DSETP","FSETP","ISET","HSETP2"]
+oHasOptDstPred :: Op -> Bool
+oHasOptDstPred (Op op) =
+  -- I THINK THESE ARE SOURCES (there can be two)
+  --        IADD3 R10,     R24, R19, R10 {!1} ;   // 000FE20007FFE00A`00000013180A7210
+  --  @!P0  IADD3 R12, P1,  R0, R15,  RZ {!5,Y} ; // 000FCA0007F3E0FF`0000000F000C8210
+
+  --   LOP3.LUT R2,     R2,   0x7f800000, RZ, 0xc0, !PT {!4,Y} // 000fc800078ec0ff`7f80000002027812
+  --   LOP3.LUT P1, RZ, R16,     0x20000, RZ, 0xc0, !PT {!12,Y,^4} ;  008fd8000782c0ff`0002000010ff7812
+  op `elem` ["LOP3"]
 
 oOpIsFP :: Op -> Bool
 oOpIsFP (Op op) =
@@ -38,6 +50,9 @@ data Inst =
   } deriving (Show,Eq)
 instance Syntax Inst where
   format = fmtInst
+
+iHasInstOpt :: InstOpt -> Inst -> Bool
+iHasInstOpt io = (io`elem`) . iOptions
 
 fmtInstIr :: Inst -> String
 fmtInstIr i =
@@ -91,13 +106,17 @@ instance Syntax Dst where
 data Src =
     --    neg    abs   reuse
     SrcR  !Bool !Bool  !Bool  !R   -- register
+  --                    surf  off
   | SrcC  !Bool !Bool  !Int   !Int -- constant direct
   | SrcCX !Bool !Bool  !UR    !Int -- constant indirect
-  | SrcUR                     !UR  -- uniform reg
+  | SrcSR                     !SR  -- system register
+  --      negated
+  | SrcUR !Bool               !UR  -- uniform reg (I don't think this can be absval)
   | SrcP  !Bool  !PR               -- predication
   | SrcB  !BR                      -- barrier register
 --  | SrcI  !Int64                   -- immediate (f32 is in the low 32 in binary)
   | SrcI  !Word64                  -- immediate (f32 is in the low 32 in binary)
+                                   -- only branching ops use >32b (49b)
   deriving (Show,Eq)
 instance Syntax Src where
   format s =
@@ -109,7 +128,8 @@ instance Syntax Src where
           negAbs neg abs ("c[" ++ show six ++ "][" ++ show soff ++ "]")
         SrcCX neg abs sur soff ->
           negAbs neg abs ("cx[" ++ format sur ++ "][" ++ show soff ++ "]")
-        SrcUR ur -> format ur
+        SrcUR neg ur -> negAbs neg False (format ur)
+        SrcSR sr -> format sr
         SrcP neg pr -> maybeS neg "!" ++ format pr
         SrcB br -> format br
         SrcI i -> printf "0x%08X" (fromIntegral i :: Word32)
@@ -117,7 +137,6 @@ instance Syntax Src where
           negAbs neg abs reg = negs ++ abss ++ reg ++ abss
             where negs = maybeS neg "!"
                   abss = maybeS abs "|"
-
 
 sNegated :: Src -> Bool
 sNegated s =
@@ -345,7 +364,7 @@ instance Syntax DepInfo where
     where tks =
             waits ++ [
               alloc "R" diAllocRd
-            , alloc "W" diAllocRd
+            , alloc "W" diAllocWr
             , stalls
             , yield
             ]
@@ -375,6 +394,7 @@ instance Syntax SR where
   format sr
     | "SR_TID_" `isPrefixOf` str = "SR_TID." ++ drop (length "SR_TID_") str
     | "SR_CTAID_" `isPrefixOf` str = "SR_CTAID." ++ drop (length "SR_CTAID_") str
+    | otherwise = str
     where str = show sr
 instance Codeable SR where
   encode = encodeEnum
@@ -427,6 +447,8 @@ data InstOpt =
   | InstOptRM -- round to minus inf
   --
   | InstOptU32
+  --
+  | InstOptX -- IADD3
   --
   | InstOptL -- SHF.R
   | InstOptR

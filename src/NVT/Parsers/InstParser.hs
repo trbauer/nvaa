@@ -113,10 +113,18 @@ runPI pa fp lno inp =
 
 
 testPI :: Show a => PI a -> String -> IO ()
-testPI pa inp =
+testPI = testPIF show
+testPIU :: Show a => LabelIndex -> PI (Unresolved a) -> String -> IO ()
+testPIU lix = testPIF fmt
+  where fmt ua =
+          case ua lix of
+            Left err -> show err
+            Right a -> show a
+testPIF :: (a -> String) -> PI a -> String -> IO ()
+testPIF fmt pa inp =
   case runPI (pa <* P.eof) "<interactive>" 1 inp of
     Left d -> putStrLn $ dFormat d
-    Right (a,_) -> print a
+    Right (a,_) -> putStrLn (fmt a)
 
 type PI a = PID PISt a
 
@@ -233,6 +241,7 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
                   P.try pConstInd <|>
                   P.try pConstDir <|>
                   pReg <|>
+                  pRegSR <|>
                   pRegUR <|>
                   pRegP <|>
                   pRegB
@@ -274,9 +283,14 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
               return (u,o)
           return $ SrcCX neg abs u o
 
+        pNegationNumeric :: PI Bool
+        pNegationNumeric = P.option False $ (pSymbol "-" <|> pSymbol "~") >> return True
+        pNegationLogical :: PI Bool
+        pNegationLogical = P.option False (pSymbol "!" >> return True)
+
         pWithNegAbs :: PI a -> PI (a,Bool,Bool)
         pWithNegAbs pBody = do
-          neg <- P.option False $ pSymbol "-" >> return True
+          neg <- pNegationNumeric
           let pWithAbs = do
                   pSymbol "|"
                   r <- pBody
@@ -285,13 +299,27 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
           (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
           return (r,neg,abs)
 
+        pRegSR :: PI Src
+        pRegSR = SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
+          where pUnderbarTidCtaid =
+                  -- normally we accept these with a dot, but we allow
+                  -- the more IR-consistent form here (SR_TID.X)
+                  --
+                  -- the regular form pSyntax will replace the _ with a .
+                  -- to match nvdisasm's output; thus we favor the nvdisasm
+                  -- version in output and whatnot
+                  (pSymbol "SR_TID_X" >> return SR_TID_X) <|>
+                  (pSymbol "SR_TID_Y" >> return SR_TID_Y) <|>
+                  (pSymbol "SR_TID_Z" >> return SR_TID_Z) <|>
+                  (pSymbol "SR_CTAID_X" >> return SR_TID_X) <|>
+                  (pSymbol "SR_CTAID_Y" >> return SR_TID_Y) <|>
+                  (pSymbol "SR_CTAID_Z" >> return SR_TID_Z)
+
         pRegUR :: PI Src
-        pRegUR = SrcUR <$> pSyntax
+        pRegUR = SrcUR <$> pNegationNumeric <*> pSyntax
 
         pRegP :: PI Src
-        pRegP = do
-          neg <- P.option False (pSymbol "!" >> return True)
-          SrcP neg <$> pSyntax
+        pRegP = SrcP <$> pNegationLogical <*> pSyntax
 
         pRegB :: PI Src
         pRegB = SrcB <$> pSyntax
