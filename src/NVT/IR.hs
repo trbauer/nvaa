@@ -46,6 +46,7 @@ data Inst =
   , iOptions :: ![InstOpt] -- the . suffixes
   , iDsts :: ![Dst]
   , iSrcs :: ![Src]
+  , iSrcPreds :: ![Pred] -- e.g. IADD3.X has two extra predicate expressions
   , iDepInfo :: !DepInfo
   } deriving (Show,Eq)
 instance Syntax Inst where
@@ -64,6 +65,7 @@ fmtInstIr i =
     fS "iOptions" iOptions ++
     fS "iDsts" iDsts ++
     fS "iSrcs" iSrcs ++
+    fS "iSrcPreds" iSrcPreds ++
     fS "iDepInfo" iDepInfo ++
     "}"
   where fS :: Show a => String -> (Inst -> a) -> String
@@ -125,9 +127,9 @@ instance Syntax Src where
             negAbs neg abs (format reg) ++ reuses
           where reuses = maybeS reuse ".reuse"
         SrcC neg abs six soff ->
-          negAbs neg abs ("c[" ++ show six ++ "][" ++ show soff ++ "]")
+          negAbs neg abs ("c[" ++ show six ++ "][" ++ printf "0x%X" soff ++ "]")
         SrcCX neg abs sur soff ->
-          negAbs neg abs ("cx[" ++ format sur ++ "][" ++ show soff ++ "]")
+          negAbs neg abs ("cx[" ++ format sur ++ "][" ++ printf "0x%X" soff ++ "]")
         SrcUR neg ur -> negAbs neg False (format ur)
         SrcSR sr -> format sr
         SrcP neg pr -> maybeS neg "!" ++ format pr
@@ -144,6 +146,7 @@ sNegated s =
     SrcR a _ _ _ -> a
     SrcC a _ _ _ -> a
     SrcCX a _ _ _ -> a
+    SrcUR a _ -> a
     SrcP a _ -> a
     _ -> False
 
@@ -481,8 +484,16 @@ fmtInst i =
   where pred = padR 5 (format (iPredication i))
         opstr = padR 5 (format (iOp i))
         optsstr = padR 10 $ concatMap (\io -> "." ++ format io) (iOptions i)
-        opndsstr = intercalate ", " (dsts ++ srcs)
+        opndsstr = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
           where dsts = map format (iDsts i)
-                srcs = map format (iSrcs i)
+                srcs = map format visible_srcs
+                visible_srcs
+                  | iOp i == Op "IADD3" =
+                    case iSrcs i of
+                      (SrcP False PT:SrcP False PT:sfx) -> sfx
+                      (SrcP False PT:sfx) -> sfx
+                      sfx -> sfx
+                  | otherwise = iSrcs i
+                ext_pred_srcs = map (drop 1 . format) (iSrcPreds i) -- drop 1 for the @ format produces
         depinfostr = if null d then "" else (" " ++ d)
           where d = format (iDepInfo i)
