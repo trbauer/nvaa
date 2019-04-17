@@ -334,6 +334,7 @@ eInst i = enc
             _ -> eFatal "wrong number of operands to IADD3"
           -- these are the extra source predicate expressions
           -- for the .X case
+          -- e.g. iadd3_x_noimm__RCR_RCR
           eField (fi "IADD.UNKNOWN76_80" 76 5) 0x1E -- probably [80:77] = 0xF !PT
           eField (fi "IADD.UNKNOWN90_87" 87 4) 0xF
           return ()
