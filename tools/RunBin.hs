@@ -21,6 +21,14 @@ import System.Directory
 import System.Process
 import qualified Data.ByteString as BS
 
+driver_skeleton :: FilePath
+driver_skeleton = "it/micro.exe"
+-- driver_skeleton = "micro_skeleton.cubin"
+
+patched_exe :: FilePath
+patched_exe = "micro_patched.exe"
+-- patched_exe = "patched.cubin"
+
 main :: IO ()
 main = getArgs >>= run
 
@@ -77,9 +85,6 @@ fatal msg = do
   hPutStrLn stderr msg
   exitFailure
 
-driver_skeleton :: FilePath
-driver_skeleton = "it/micro.exe"
--- driver_skeleton = "micro_skeleton.cubin"
 
 runWithOpts :: Opts -> IO ()
 runWithOpts os = do
@@ -88,6 +93,7 @@ runWithOpts os = do
   case ec of
     ExitFailure ec -> fatal ("micro exited " ++ show ec ++ "\n" ++ out ++ err)
     ExitSuccess -> do
+      putStr err
       putStr out
       return ()
 
@@ -142,10 +148,6 @@ assembleExe os = do
           ]
   BS.writeFile patched_exe new_isa
   return patched_exe
-
-patched_exe :: FilePath
-patched_exe = "micro_patched.exe"
--- patched_exe = "patched.cubin"
 
 
 assembleInput :: Opts -> IO [Word128]

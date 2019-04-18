@@ -21,12 +21,43 @@ import System.IO
 import Text.Printf
 
 -- currently:
---   parsing inferring srcs for IADD (use PT since we encode that),
---      fails because format dumps them out
---      need to modify Inst.format
+--   * first SI test passes!!!!!!!!!!!!!!!!!
 
--- 001F`CA00`078E`2603
---     |    |    |
+--   => make nvaa handle .exe and .dll files
+{-
+        code for sm_75
+                Function : micro
+        .headerflags    @"EF_CUDA_SM75 EF_CUDA_PTX_SM(EF_CUDA_SM75)"
+        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;  /* 0x00000a00ff017624 */
+                                                                            /* 0x000fd000078e00ff */
+        /*0010*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;  /* 0x00000a00ff017624 */
+                                                                            /* 0x000fd000078e00ff */
+        /*0020*/                   S2R R0, SR_CTAID.X ;                     /* 0x0000000000007919 */
+                                                                            /* 0x000e220000002500 */
+        /*0030*/                   IMAD.MOV.U32 R37, RZ, RZ, 0x4 ;          /* 0x00000004ff257424 */
+                                                                            /* 0x000fc600078e00ff */
+        /*0040*/                   S2R R3, SR_TID.X ;                       /* 0x0000000000037919 */
+                                                                            /* 0x000e240000002100 */
+        /*0050*/                   IMAD R0, R0, c[0x0][0x0], R3 ;           /* 0x0000000000007a24 */
+                                                                            /* 0x001fc800078e0203 */
+        /*0060*/                   IMAD.WIDE R2, R0, R37, c[0x0][0x160] ;   /* 0x0000580000027625 */
+                                                                            /* 0x000fd400078e0225 */
+        /*0070*/                   MOV R35, 0x24 ;                          /* 0x0000002400237802 */
+                                                                            /* 0x000fd40000000f00 */
+        /*0080*/                   STG.E.SYS [R2], R35 ;                    /* 0x0000002302007386 */
+                                                                            /* 0x000fe2000010e900 */
+        /*0090*/                   EXIT ;                                   /* 0x000000000000794d */
+                                                                            /* 0x000fea0003800000 */
+        /*00a0*/                   BRA 0xa0;                                /* 0xfffffff000007947 */
+                                                                            /* 0x000fc0000383ffff */
+-}
+
+testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
+testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
+testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
+testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
+-- testSTG = testFile "examples\\sm_75\\ops\\STG.sass"
+-- 0041E8000010ED00`0000100402007386:        STG.E.128.SYS [R2+0x10], R4 {!4,+1.R,^3}
 
 t = testInst "000FE20000000F00`C200000000247802:  MOV R36, 0xc2000000 {!1} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2235"
 s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
@@ -39,6 +70,12 @@ imad_mov_u32 = "000FD000078E00FF`00000A00FF017624: IMAD.MOV.U32     R1, RZ, RZ, 
 
 
 imad = testInst "000FE200078E0A06`0000000105067824:        IMAD.IADD R6, R5, 0x1, -R6 {!1};"
+
+testB =
+  testBlocks $
+    "IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};\n" ++
+    "S2R              R0, SR_CTAID.X {!1,+1.W};\n"++
+    ""
 
 
 -- my minimal program to write effects out is:
@@ -76,11 +113,6 @@ testParseInst syntax = do
       putStrLn $ fmtInstIr i
 
 
-
-testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
-testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
-testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
-testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
 
 main :: IO ()
 main = do

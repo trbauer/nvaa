@@ -487,11 +487,44 @@ data InstOpt =
   | InstOptEX2
   | InstOptRSQ
   --
-  | InstOptLUT -- LOP3/PLOP3
+  | InstOptE   -- LD*/ST*
+  | InstOptU   -- .U (part of .U.128)
+  | InstOptU8  -- .U8
+  | InstOptS8  -- .S8
+  | InstOptU16 -- .U16
+  | InstOptS16 -- .S16
+  | InstOpt64  -- .64
+  | InstOpt128 -- .128
+  --
+  | InstOptPRIVATE
+  -- scope
+  | InstOptCTA
+  | InstOptSM
+  | InstOptSYS
+  | InstOptGPU
+  -- memory ordering
+  | InstOptSTRONG -- .STRONG
+  | InstOptMMIO -- .MMIO
+  -- caching
+  | InstOptEF
+  | InstOptEL
+  | InstOptLU
+  | InstOptEU
+  | InstOptNA
+
   deriving (Show,Eq,Ord,Enum)
 instance Syntax InstOpt where
   -- format = ('.':) . drop (length "InstOpt") . show
   format = drop (length "InstOpt") . show
+inst_opt_ldst_types :: [InstOpt]
+inst_opt_ldst_types = [InstOptU,InstOptU8,InstOptS8,InstOptU16,InstOptS16,InstOpt64,InstOpt128]
+inst_opt_ldst_scope :: [InstOpt]
+inst_opt_ldst_scope = [InstOptCTA, InstOptSM, InstOptSYS, InstOptGPU]
+inst_opt_ldst_ordering :: [InstOpt]
+inst_opt_ldst_ordering = [InstOptSTRONG, InstOptMMIO]
+inst_opt_ldst_caching :: [InstOpt]
+inst_opt_ldst_caching = [InstOptEF, InstOptEL, InstOptLU, InstOptEU, InstOptNA]
+
 
 all_inst_opts :: [InstOpt]
 all_inst_opts = [toEnum 0 ..]
@@ -499,7 +532,7 @@ all_inst_opts = [toEnum 0 ..]
 
 fmtInst :: Inst -> String
 fmtInst i =
-    pred ++ op_str ++ " " ++ opnds_str ++ depinfostr ++ ";"
+    pred ++ op_str ++ " " ++ opnds_str ++ depinfo_str ++ ";"
   where pred = padR 5 (format (iPredication i))
         op_str = padR 12 (format (iOp i) ++ inst_opts)
           where inst_opts =
@@ -537,8 +570,16 @@ fmtInst i =
               _ -> ""
           | otherwise = ""
         opnds_str :: String
-        opnds_str = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
-          where dsts = map format (iDsts i)
+        opnds_str
+          | iOp i == Op "STG" = src_addr ++ ", " ++ src_data
+          | otherwise = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
+          where (src_addr,src_data) =
+                  case iSrcs i of
+                    [SrcR _ _ _ r, SrcUR _ _ ur, SrcI imm, SrcR _ _ _ dat] ->
+                        ("[" ++ format r ++ opt_ur ++ opt_imm ++ "]",format dat)
+                      where opt_ur = if ur == URZ then "" else ("+" ++ format ur)
+                            opt_imm = if imm /= 0 then "" else (printf "+0x%X" imm)
+                dsts = map format (iDsts i)
                 srcs = map format visible_srcs
                 visible_srcs
                   | iOp i == Op "IADD3" =
@@ -548,5 +589,5 @@ fmtInst i =
                       sfx -> sfx
                   | otherwise = iSrcs i
                 ext_pred_srcs = map (drop 1 . format) (iSrcPreds i) -- drop 1 for the @ format produces
-        depinfostr = if null d then "" else (" " ++ d)
+        depinfo_str = if null d then "" else (" " ++ d)
           where d = format (iDepInfo i)

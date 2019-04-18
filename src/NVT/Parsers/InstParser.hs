@@ -18,24 +18,9 @@ import Debug.Trace
 import Text.Parsec((<|>),(<?>))
 import qualified Text.Parsec           as P
 
--- data LblExpr =
---    LblExprDiff !LblExpr !LblExpr -- (.L_18 - micro)
---  | LblExprLit  !Int64
---  deriving Show
 
 type LabelIndex = [(String,PC)]
 type Unresolved a = LabelIndex -> Either Diagnostic a
-
-sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
-sequenceUnresolved as lbl_ix =  sequence (map ($lbl_ix) as)
--- sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
--- sequenceUnresolved as lbl_ix = resolve as []
---   where resolve [] ras = reverse ras
---         resolve (ua:uas) ras =
---           case ua lbl_ix of
---             Left err -> Left err
---             Right a -> resolve uas (a:ras)
-
 
 parseInst ::
   PC ->
@@ -67,34 +52,20 @@ parseInstsUnresolved ::
   Int ->
   String ->
   Either Diagnostic ((Unresolved [Inst],LabelIndex),[Diagnostic])
-parseInstsUnresolved lbl_ix0 pc fp lno inp = do
-  ((uis,lbl_ix),ws) <- runPI (pBlocks pc lbl_ix0) fp lno inp
-  return ((sequenceUnresolved uis,lbl_ix),ws)
+parseInstsUnresolved lbl_ix0 pc fp lno inp =
+  runPI (pBlocks pc lbl_ix0) fp lno inp
 
 
-
-pBlocks ::
-  PC ->
-  LabelIndex ->
-  PI ([Unresolved Inst],LabelIndex)
-pBlocks = pInstOrLabel []
-  where pInstOrLabel :: [Unresolved Inst] -> PC -> LabelIndex -> PI ([Unresolved Inst],LabelIndex)
-        pInstOrLabel ruis pc lbl_ix = pTryInst <|> pLabel <|> pEof
-          where pTryInst = P.try $ do
-                  ui <- pInst pc
-                  pInstOrLabel (ui:ruis) (pc+16) lbl_ix
-                pLabel = pWithLoc $ \loc -> do
-                  lbl <- pLabelChars
-                  case lbl`lookup`lbl_ix of
-                    Just x ->
-                      pSemanticError loc "label already defined"
-                    Nothing -> do
-                      pSymbol ":"
-                      pInstOrLabel ruis pc ((lbl,pc):lbl_ix)
-                pEof = do
-                  P.eof
-                  return (reverse ruis,lbl_ix)
-
+-------------------------------------------------------------------------------
+sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
+sequenceUnresolved as lbl_ix =  sequence (map ($lbl_ix) as)
+-- sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
+-- sequenceUnresolved as lbl_ix = resolve as []
+--   where resolve [] ras = reverse ras
+--         resolve (ua:uas) ras =
+--           case ua lbl_ix of
+--             Left err -> Left err
+--             Right a -> resolve uas (a:ras)
 
 runPI ::
   PI a ->
@@ -111,7 +82,6 @@ runPI pa fp lno inp =
           P.setPosition (P.setSourceLine sp lno)
           pa
 
-
 testPI :: Show a => PI a -> String -> IO ()
 testPI = testPIF show
 testPIU :: Show a => LabelIndex -> PI (Unresolved a) -> String -> IO ()
@@ -126,6 +96,14 @@ testPIF fmt pa inp =
     Left d -> putStrLn $ dFormat d
     Right (a,_) -> putStrLn (fmt a)
 
+testBlocks :: String -> IO ()
+testBlocks inp = testPIF fmt (pBlocks 0 []) inp
+  where fmt :: (Unresolved [Inst],LabelIndex) -> String
+        fmt (uis,_) =
+          case uis [] of
+            Left err -> dFormat err
+            Right is -> concatMap (\i -> show i ++ "\n") is
+
 type PI a = PID PISt a
 
 init_pst :: PISt
@@ -138,6 +116,31 @@ data PISt =
   } deriving Show
 
 -------------------------------------------------------------------------------
+pBlocks ::
+  PC ->
+  LabelIndex ->
+  PI (Unresolved [Inst],LabelIndex)
+pBlocks pc0 li0 = seqResult <$> pInstOrLabel [] pc0 li0
+  where seqResult (uis,li) = (sequenceUnresolved uis,li)
+
+        pInstOrLabel :: [Unresolved Inst] -> PC -> LabelIndex -> PI ([Unresolved Inst],LabelIndex)
+        pInstOrLabel ruis pc lbl_ix =
+            pTryInst <|> pLabel <|> pEof
+          where pTryInst = do
+                  ui <- P.try (pInst pc)
+                  pInstOrLabel (ui:ruis) (pc+16) lbl_ix
+                pLabel = pWithLoc $ \loc -> do
+                  lbl <- pLabelChars
+                  case lbl`lookup`lbl_ix of
+                    Just x ->
+                      pSemanticError loc "label already defined"
+                    Nothing -> do
+                      pSymbol ":"
+                      pInstOrLabel ruis pc ((lbl,pc):lbl_ix)
+                pEof = do
+                  P.eof
+                  return (reverse ruis,lbl_ix)
+
 
 pInst :: PC -> PI (Unresolved Inst)
 pInst pc = pWhiteSpace >> body
@@ -154,12 +157,14 @@ pInst pc = pWhiteSpace >> body
                   p0 <- pSymbol "," >> pRegP
                   p1 <- P.option dft_pred (P.try $ pSymbol "," >> pRegP)
                   return (p0,p1)
-              let p01 = [const (Right p0), const (Right p1)]
-              pIntTernary loc prd op opts dsts p01
+              pIntTernary loc prd op opts dsts (resolveds [p0, p1])
             Op "IMAD" -> do
               opts <- pInstOpts op
               dsts <- pDsts op
               pIntTernary loc prd op opts dsts []
+            Op "STG" -> do
+              opts <- pInstOpts op
+              pSTG loc prd op opts
             _ -> do
               opts <- pInstOpts op
               dsts <- pDsts op
@@ -168,6 +173,10 @@ pInst pc = pWhiteSpace >> body
               unresolved_srcs <- pSrcs pc op
               pCompleteInst loc prd op opts dsts unresolved_srcs []
 
+        resolved :: a -> Unresolved a
+        resolved = const . Right
+        resolveds :: [a] -> [Unresolved a]
+        resolveds = map resolved
 
         -- pIntTernary :: PI (Unresolved Inst)
         pIntTernary loc prd op opts dsts src_pfx_preds = do
@@ -185,6 +194,22 @@ pInst pc = pWhiteSpace >> body
             -- else return [PredP True PT,PredP True PT]
           pCompleteInst loc prd op opts dsts (src_pfx_preds++unresolved_srcs) x_pred_srcs
 
+        pSTG :: Loc -> Pred -> Op -> [InstOpt] -> PI (Unresolved Inst)
+        pSTG loc prd op opts = do
+          let pBareSrcR = SrcR False False False <$> pSyntax
+          pSymbol "["
+          r_addr <- pBareSrcR
+          -- TODO: UR# goes in middle
+          let pImmOffs = do
+                ur <- P.option URZ $ P.try (pSymbol "+" >> pSyntax)
+                i <- P.option (SrcI 0) $ P.try (pSymbol "+" >> pSrcI op)
+                return (SrcUR False False ur,i)
+          (ur_off,i_off) <- pImmOffs
+          pSymbol "]"
+          pSymbol ","
+          r_data <- pBareSrcR
+          pCompleteInst loc prd op opts [] (resolveds [r_addr,ur_off,i_off,r_data]) []
+
         -- up to two predicate sources
         pOptPreds = do
           P.option [] $ do
@@ -193,6 +218,7 @@ pInst pc = pWhiteSpace >> body
               p_src1 <- pSymbol "," >> pPredSrcP
               return [p_src0,p_src1]
 
+        pCompleteInst :: Loc -> Pred -> Op -> [InstOpt] -> [Dst] -> [Unresolved Src] -> [Pred] -> PI (Unresolved Inst)
         pCompleteInst loc prd op opts dsts unresolved_srcs src_preds = do
           dep_info <- pDepInfo
           P.try $ pSymbol ";"
@@ -318,7 +344,7 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
   where pNonLabel :: PI (Unresolved Src)
         pNonLabel = alwaysSucceeds <$> pCases
           where pCases =
-                  P.try pImm <|>
+                  P.try (pSrcI op) <|>
                   P.try pConstInd <|>
                   P.try pConstDir <|>
                   pReg <|>
@@ -364,23 +390,23 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
               return (u,o)
           return $ SrcCX neg abs u o
 
-        -- rejects 32@hi... and 32@lo...
-        pImm :: PI Src
-        pImm = pImmNonBranch
-        pImmNonBranch :: PI Src
-        pImmNonBranch = do
-            imm <- pVal
-            P.notFollowedBy (P.char '@')
-            pWhiteSpace
-            return $ SrcI imm
-          where pVal
-                  | oOpIsFP op = pFltImm32 <|> pIntImm32
-                  | otherwise = pIntImm32
-
         pImmLbl :: PI (Unresolved Src)
         pImmLbl = do
           e <- pLExpr pc
           return $ \lix -> SrcI <$> evalLExpr lix e
+
+-- rejects 32@hi... and 32@lo...
+pSrcI :: Op -> PI Src
+pSrcI = pSrcImmNonBranch
+pSrcImmNonBranch :: Op -> PI Src
+pSrcImmNonBranch op = do
+    imm <- pVal
+    P.notFollowedBy (P.char '@')
+    pWhiteSpace
+    return $ SrcI imm
+  where pVal
+          | oOpIsFP op = pFltImm32 <|> pIntImm32
+          | otherwise = pIntImm32
 
 pNegationNumeric :: PI Bool
 pNegationNumeric = P.option False $ (pSymbol "-" <|> pSymbol "~") >> return True
