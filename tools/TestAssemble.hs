@@ -24,6 +24,9 @@ import Text.Printf
 --      fails because format dumps them out
 --      need to modify Inst.format
 
+-- 001F`CA00`078E`2603
+--     |    |    |
+
 t = testInst "000FE20000000F00`C200000000247802:  MOV R36, 0xc2000000 {!1} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2235"
 s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
 s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
@@ -56,6 +59,7 @@ testInst syntax =
       return ()
 
 testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
+testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
 testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
 testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
 

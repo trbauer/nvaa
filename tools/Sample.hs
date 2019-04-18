@@ -76,5 +76,11 @@ infixl 5 +++
       acc s (f,v) = s{sBits = putField128 (fOff f) (fLen f) v (sBits s)}
   return $ map (\s0 -> foldl' acc s0 fvs) ss
 
+infixl 2 ~>
+infixl 3 .=
+
+(.=) :: Field -> Word64 -> (Field,Word64)
+(.=) = (,)
+
 sNorm :: IO [Sample] -> IO [Sample]
 sNorm io_ss = io_ss *~> [((24,8),0),((32,8),0),((64,8),0)]

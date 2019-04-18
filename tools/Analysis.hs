@@ -156,6 +156,7 @@ help = do
   putStr $
     "COMMANDS\n" ++
     "  * listDiffs          => lists the different fields between two samples\n" ++
+    "  * extractFields      => lists the values of a given set of fields\n" ++
     "  * decode             => emits the syntax for a sample\n" ++
     "  * twiddleField[s]    => given fields, test all values and emit syntax\n" ++
     "  * twiddleFields[s]B  => same as above, but emit fields in binary\n" ++
@@ -250,10 +251,17 @@ padR :: Int -> String -> String
 padR k s = s ++ replicate (k - length s) ' '
 
 
-
-
-
-
+{-
+listFields :: [Field] -> IO [Sample] -> IO ()
+listFields fs io_ss = do
+    ss <- io_ss
+    forM_ ss $ \ss -> do
+      decode
+      putStrLn fmtSs ss
+  where
+        fmtSs :: Sample -> IO String
+        fmtSs s = intercalate " " $ map fmtField fs ++ "\n"
+-}
 
 -- type RowDis = (Row,String)
 
@@ -367,11 +375,21 @@ extractFields io_ss fs = body
           --
           let fmtVal f w = " " ++ fmtValue f w
           --
-          forM_ (zip ss strs) $ \(s,str) -> do
-            let fvs = map (\f -> (f,getField128 (fOff f) (fLen f) (sBits s))) fs
-            putStrLn $
-              intercalate "  " (map (uncurry fmtValue) fvs) ++ "  " ++ str
-
+          vs <-
+            forM (zip ss strs) $ \(s,str) -> do
+              let fvs = map (\f -> (f,getField128 (fOff f) (fLen f) (sBits s))) fs
+              putStrLn $
+                intercalate "  " (map (uncurry fmtValue) fvs) ++ "  " ++ str
+              return $ map snd fvs
+          let fv_vals = transpose vs
+              fmtFieldHistogram (f,vs) =
+                  fmtFieldHeader f ++ " =\n" ++
+                  concatMap (\(v,n) -> "  " ++ fmtFieldValueBinary f v ++ " => " ++ printf "%5d" n ++ "\n") h
+                where h = sortOn snd (map (\v -> (v,freq v)) (nub vs))
+                      freq v = length (filter (==v) vs)
+          putStrLn $
+            concatMap fmtFieldHistogram (zip fs fv_vals)
+          return ()
 
 longestCommonFields :: IO [Sample] -> IO ()
 longestCommonFields io_ss = body

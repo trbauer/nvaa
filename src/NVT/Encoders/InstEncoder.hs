@@ -382,6 +382,12 @@ eInst i = enc
               eFatal "TODO: IMAD srcs: RRU"
             [_,_,_] -> eFatal "wrong type of arguments to instruction"
             _ -> eFatal "wrong number of arguments to instruction"
+          eEncode fIADD3_SRCPRED0 PT
+          case iSrcPreds i of
+            [] -> ePredicationSrc fIADD3_X_SRCPRED1 (PredP True PT)
+            [pt]
+              | iHasInstOpt InstOptX i -> ePredicationSrc fIADD3_X_SRCPRED1 pt
+            _ -> eFatal "wrong number of predicate arguments"
 
         eIADD3 :: E ()
         eIADD3 = do
@@ -476,6 +482,8 @@ eInst i = enc
             -- eField (fi "IADD.UNKNOWN76_80" 76 5) 0x1E -- probably [80:77] = 0xF !PT
             -- eField (fi "IADD.UNKNOWN90_87" 87 4) 0xF
           return ()
+
+
 
 -------------------------------------------------------------------------------
 data Field =
