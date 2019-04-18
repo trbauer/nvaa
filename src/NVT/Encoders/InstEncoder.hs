@@ -143,12 +143,13 @@ eInst i = enc
           eDepInfo (iDepInfo i)
 
         ePredication :: E ()
-        ePredication =
-          case iPredication i of
-            PredNONE -> ePredicationAt fPREDICATION False PT
-            PredP sign pr -> ePredicationAt fPREDICATION sign pr
-            PredUP sign pr -> ePredicationAt fPREDICATION sign pr
-
+        ePredication = ePredicationSrc fPREDICATION (iPredication i)
+        ePredicationSrc :: Field -> Pred -> E ()
+        ePredicationSrc fPSRC pred =
+          case pred of
+            PredNONE -> ePredicationAt fPSRC False PT
+            PredP sign pr -> ePredicationAt fPSRC sign pr
+            PredUP sign pr -> ePredicationAt fPSRC sign pr
         ePredicationAt :: Codeable p => Field -> Bool -> p -> E ()
         ePredicationAt f sign pr =
           case encode pr of
@@ -457,9 +458,23 @@ eInst i = enc
             _ -> eFatal "wrong number of operands to IADD3"
           -- these are the extra source predicate expressions
           -- for the .X case
-          -- e.g. iadd3_x_noimm__RCR_RCR
-          eField (fi "IADD.UNKNOWN76_80" 76 5) 0x1E -- probably [80:77] = 0xF !PT
-          eField (fi "IADD.UNKNOWN90_87" 87 4) 0xF
+          (ext_pred0,ext_pred1) <- do
+            if iHasInstOpt InstOptX i then
+              case iSrcPreds i of
+                [sp0,sp1] -> return (sp0,sp1)
+                [] -> return (PredNONE,PredNONE)
+                _ -> eFatal "IADD3.X expects two extra predicate expression parameters"
+            else
+              -- explicit IR version (uses defaults)
+              case iSrcPreds i of
+                [sp0,sp1] -> return (sp0,sp1)
+                _ -> eFatal "IADD3 takes exactly two extra predicates"
+                -- [] -> return (PredNONE,PredNONE)
+                -- _ -> eFatal "IADD3 without .X forbids extra predicates"
+          ePredicationSrc fIADD3_X_SRCPRED0 ext_pred0
+          ePredicationSrc fIADD3_X_SRCPRED1 ext_pred1
+            -- eField (fi "IADD.UNKNOWN76_80" 76 5) 0x1E -- probably [80:77] = 0xF !PT
+            -- eField (fi "IADD.UNKNOWN90_87" 87 4) 0xF
           return ()
 
 -------------------------------------------------------------------------------
@@ -538,6 +553,19 @@ fR :: String -> Int -> Field
 fR nm off = fC (undefined :: R) nm off 8
 fUR :: String -> Int -> Field
 fUR nm off = fC (undefined :: UR) nm off 6
+fPREDSRC :: String -> Int -> Field
+fPREDSRC nm off = f nm off 4 fmt
+  where fmt _ val =
+            case decode (val.&.0x7) :: Either String PR of
+              Left err -> neg ++ err
+              Right a -> neg ++ format a
+          where neg = if testBit val 3 then "!" else ""
+fPREDSRC_UNSIGNED :: String -> Int -> Field
+fPREDSRC_UNSIGNED nm off = f nm off 3 fmt
+  where fmt _ val =
+          case decode val :: Either String PR of
+            Left err -> err
+            Right a -> format a
 
 -------------------------------------------------------------------------------
 fOPCODE :: Field
@@ -547,7 +575,8 @@ fREGFILE :: Field
 fREGFILE = fi "RegFile" 9 3
 
 fPREDICATION :: Field
-fPREDICATION = fi "Predication" 12 4
+fPREDICATION = fPREDSRC "Predication" 12
+
 
 fABS :: Int -> Int -> Field
 fABS src_ix off = fb ("Src" ++ show src_ix ++ ".AbsVal") off 1 "|..|"
@@ -670,11 +699,27 @@ fS2R_SRC0 = fi "S2R.Src0" 72 8
 fINSTOPT_X :: Field
 fINSTOPT_X = fi "IADD3.X" 74 1
 
+-- IADD3 R4, P0, P5, R24, 0x18, RZ   000FE40007D1E0FF`0000001818047810
+--           ^^  ^^ these
+-- nvdisasm has a problem here in that if the second is set (P5 above)
+-- and the first (P0 above) is not (i.e. it's PT) we cannot discern if
+-- the first or second slot should hold the value
+-- one solution is to always print the first (as PT)
+-- if the second is set (not PT)
+--
+-- I am starting to wonder if these are srcs or dests;
+-- since they have no signs and reject PT from syntax (hide),
+-- it's fishy
 fIADD3_SRCPRED0 :: Field
-fIADD3_SRCPRED0 = fi "IADD3.SrcPred0" 81 3
+fIADD3_SRCPRED0 = fPREDSRC_UNSIGNED "IADD3.SrcPred0" 81
 fIADD3_SRCPRED1 :: Field
-fIADD3_SRCPRED1 = fi "IADD3.SrcPred1" 84 3
+fIADD3_SRCPRED1 = fPREDSRC_UNSIGNED "IADD3.SrcPred1" 84
 -- bit 4
+
+fIADD3_X_SRCPRED0 :: Field
+fIADD3_X_SRCPRED0 = fPREDSRC "IADD3.X.SrcPred0" 77
+fIADD3_X_SRCPRED1 :: Field
+fIADD3_X_SRCPRED1 = fPREDSRC "IADD3.X.SrcPred1" 87
 
 fIMAD_SIGNED :: Field
 fIMAD_SIGNED = fl "IMAD.Signed" 73 1 [".U32","(.S32)"]

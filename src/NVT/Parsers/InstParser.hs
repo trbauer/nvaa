@@ -141,16 +141,43 @@ pInst :: PC -> PI (Unresolved Inst)
 pInst pc = body
   where body = pWithLoc $ \loc -> do
           pWhiteSpace
-          prd <- pPred
+          prd <- P.option PredNONE pPred
           op <- pOp
           opts <- pInstOpts op
           dsts <- pDsts op
-          P.try $ pSymbol ","
-          complete_srcs <- pSrcs pc op
+          case op of
+            Op "IADD3" -> do
+              -- TODO: try and parse up to two predicates before the regular
+              -- sources, we can store them separate
+              -- TODO: fix the instruction formatter if I remove these
+              let dft_pred = SrcP False PT
+              (p0,p1) <-
+                P.option (dft_pred,dft_pred) $ P.try $ do
+                  p0 <- pSymbol "," >> pRegP
+                  p1 <- P.option dft_pred (P.try $ pSymbol "," >> pRegP)
+                  return (p0,p1)
+              let p01 = [const (Right p0), const (Right p1)]
+              --
+              pSymbol ","
+              unresolved_srcs <- pSrcsN 3 pc op
+              x_pred_srcs <-
+                if InstOptX`elem`opts then do
+                  p0 <- pSymbol "," >> pPredSrcP
+                  p1 <- pSymbol "," >> pPredSrcP
+                  return [p0,p1]
+                else return [PredP True PT,PredP True PT]
+              pCompleteInst loc prd op opts dsts (p01++unresolved_srcs) x_pred_srcs
+            _ -> do
+              unless (null dsts) $ do
+                pSymbol_ ","
+              unresolved_srcs <- pSrcs pc op
+              pCompleteInst loc prd op opts dsts unresolved_srcs []
+
+        pCompleteInst loc prd op opts dsts unresolved_srcs src_preds = do
           dep_info <- pDepInfo
           P.try $ pSymbol ";"
           return $ \lbls -> do
-            srcs <- sequence (map ($lbls) complete_srcs)
+            srcs <- sequence (map ($lbls) unresolved_srcs)
             return $
               Inst {
                 iLoc = loc
@@ -160,17 +187,25 @@ pInst pc = body
               , iOptions = opts
               , iDsts = dsts
               , iSrcs = srcs
+              , iSrcPreds = src_preds
               , iDepInfo = dep_info
               }
 
 
 pPred :: PI Pred
-pPred = P.option PredNONE $ do
+pPred = do
     pSymbol "@"
     sign <- P.option False $ pSymbol "!" >> return True
     tryP sign <|> tryUP sign
   where tryP sign = PredP sign <$> pSyntax
         tryUP sign = PredUP sign <$> pSyntax
+
+pPredSrcP :: PI Pred
+pPredSrcP = do
+    sign <- P.option False $ pSymbol "!" >> return True
+    tryP sign
+  where tryP sign = PredP sign <$> pSyntax
+
 
 
 pOp :: PI Op
@@ -249,7 +284,12 @@ pDstRegB = DstB <$> pSyntax
 pDstPred :: PI Dst
 pDstPred = DstP <$> pSyntax
 
-
+pSrcsN :: Int -> PC -> Op -> PI [Unresolved Src]
+pSrcsN 0 _  _  = return []
+pSrcsN n pc op = do
+  src0 <- pSrc pc op
+  srcs <- sequence $ replicate (n - 1) (pSymbol "," >> pSrc pc op)
+  return (src0:srcs)
 pSrcs :: PC -> Op -> PI [Unresolved Src]
 pSrcs pc op = P.sepBy (pSrc pc op) (pSymbol ",")
 pSrc :: PC -> Op -> PI (Unresolved Src)
@@ -303,47 +343,6 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
               return (u,o)
           return $ SrcCX neg abs u o
 
-        pNegationNumeric :: PI Bool
-        pNegationNumeric = P.option False $ (pSymbol "-" <|> pSymbol "~") >> return True
-        pNegationLogical :: PI Bool
-        pNegationLogical = P.option False (pSymbol "!" >> return True)
-
-        pWithNegAbs :: PI a -> PI (a,Bool,Bool)
-        pWithNegAbs pBody = do
-          neg <- pNegationNumeric
-          let pWithAbs = do
-                  pSymbol "|"
-                  r <- pBody
-                  pSymbol "|"
-                  return (r,True)
-          (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
-          return (r,neg,abs)
-
-        pRegSR :: PI Src
-        pRegSR = SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
-          where pUnderbarTidCtaid =
-                  -- normally we accept these with a dot, but we allow
-                  -- the more IR-consistent form here (SR_TID.X)
-                  --
-                  -- the regular form pSyntax will replace the _ with a .
-                  -- to match nvdisasm's output; thus we favor the nvdisasm
-                  -- version in output and whatnot
-                  (pSymbol "SR_TID_X" >> return SR_TID_X) <|>
-                  (pSymbol "SR_TID_Y" >> return SR_TID_Y) <|>
-                  (pSymbol "SR_TID_Z" >> return SR_TID_Z) <|>
-                  (pSymbol "SR_CTAID_X" >> return SR_TID_X) <|>
-                  (pSymbol "SR_CTAID_Y" >> return SR_TID_Y) <|>
-                  (pSymbol "SR_CTAID_Z" >> return SR_TID_Z)
-
-        pRegUR :: PI Src
-        pRegUR = SrcUR <$> pNegationNumeric <*> pSyntax
-
-        pRegP :: PI Src
-        pRegP = SrcP <$> pNegationLogical <*> pSyntax
-
-        pRegB :: PI Src
-        pRegB = SrcB <$> pSyntax
-
         -- rejects 32@hi... and 32@lo...
         pImm :: PI Src
         pImm = do
@@ -359,6 +358,48 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
         pImmLbl = do
           e <- pLExpr pc
           return $ \lix -> SrcI <$> evalLExpr lix e
+
+
+pNegationNumeric :: PI Bool
+pNegationNumeric = P.option False $ (pSymbol "-" <|> pSymbol "~") >> return True
+pNegationLogical :: PI Bool
+pNegationLogical = P.option False (pSymbol "!" >> return True)
+
+pWithNegAbs :: PI a -> PI (a,Bool,Bool)
+pWithNegAbs pBody = do
+  neg <- pNegationNumeric
+  let pWithAbs = do
+          pSymbol "|"
+          r <- pBody
+          pSymbol "|"
+          return (r,True)
+  (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
+  return (r,neg,abs)
+
+pRegSR :: PI Src
+pRegSR = SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
+  where pUnderbarTidCtaid =
+          -- normally we accept these with a dot, but we allow
+          -- the more IR-consistent form here (SR_TID.X)
+          --
+          -- the regular form pSyntax will replace the _ with a .
+          -- to match nvdisasm's output; thus we favor the nvdisasm
+          -- version in output and whatnot
+          (pSymbol "SR_TID_X" >> return SR_TID_X) <|>
+          (pSymbol "SR_TID_Y" >> return SR_TID_Y) <|>
+          (pSymbol "SR_TID_Z" >> return SR_TID_Z) <|>
+          (pSymbol "SR_CTAID_X" >> return SR_TID_X) <|>
+          (pSymbol "SR_CTAID_Y" >> return SR_TID_Y) <|>
+          (pSymbol "SR_CTAID_Z" >> return SR_TID_Z)
+
+pRegUR :: PI Src
+pRegUR = SrcUR <$> pNegationNumeric <*> pSyntax
+
+pRegP :: PI Src
+pRegP = SrcP <$> pNegationLogical <*> pSyntax
+
+pRegB :: PI Src
+pRegB = SrcB <$> pSyntax
 
 
 pLExpr :: PC -> PI LExpr
