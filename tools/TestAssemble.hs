@@ -2,6 +2,7 @@ import NVT.RawInst
 
 import NVT.Bits
 import NVT.IR
+import NVT.Loc
 import NVT.Diagnostic
 import NVT.Encoders.Codable
 import NVT.Encoders.InstEncoder
@@ -31,8 +32,13 @@ t = testInst "000FE20000000F00`C200000000247802:  MOV R36, 0xc2000000 {!1} ; // 
 s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
 s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
 ia3 = "000FC80007F1E0FF`00005A0000027A10:        IADD3 R2, P0, R0, c[0x0][0x168], RZ {!4,Y} ; // examples/sm_75/samples\alignedTypes.sass:3122"
-
+---         IADD3 R2, P0, R0, c[0x0][0x168], RZ {!4,Y} ;
+-- |........|........|........|........|........|........
+-- 1        11       21       31       41       51
 imad_mov_u32 = "000FD000078E00FF`00000A00FF017624: IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};"
+
+
+imad = testInst "000FE200078E0A06`0000000105067824:        IMAD.IADD R6, R5, 0x1, -R6 {!1};"
 
 
 -- my minimal program to write effects out is:
@@ -57,6 +63,19 @@ testInst syntax =
       let syntax_x = stripPrefixBits syntax
       testSampleInst True si ("<interactive>",1) syntax_x
       return ()
+
+testParseInst :: String -> IO ()
+testParseInst syntax = do
+  let fmtDiag = dFormatWithLines (lines syntax)
+  case parseInst 0 "" 1 syntax of
+    Left err -> do
+      putStrLn "ERROR: parsed SampleInst, but InstParser failed"
+      putStrLn $ fmtDiag err
+    Right (i,ws) -> do
+      mapM_ (putStrLn . fmtDiag) ws
+      putStrLn $ fmtInstIr i
+
+
 
 testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
 testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
@@ -144,12 +163,13 @@ testSampleInst verbose si (fp,lno) syntax = do
       case parseInst 0 fp lno i_formatted of
         Left err -> do
           putStrLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
+          putStrLn $ fmtInstIr i
           putStrLn $ "formatted as ==> " ++ i_formatted
           putStrLn $ "but failed to re-parse"
-          putStrLn $ fmtDiag err
+          putStrLn $ dFormatWithLines (lines i_formatted) err
           return False
         Right (i2,_)
-          | i /= i2 -> do
+          | i{iLoc=lNONE} /= i2{iLoc=lNONE} -> do
             putStrLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
             putStrLn $ "formatted as ==> " ++ i_formatted
             putStrLn $ "re-parsed differently"
@@ -160,7 +180,8 @@ testSampleInst verbose si (fp,lno) syntax = do
           | otherwise -> do
             case runInstDbgEncoder i of
               Left err -> do
-                putStrLn $ "encode failed: " ++ fmtDiag err
+                putStrLn $ fmtInstIr i
+                putStrRed $ "encode failed: " ++ fmtDiag err ++ "\n"
                 return False
               Right (w_enc,ws_enc,fs_enc) -> do
                 mapM_ (putStrLn . fmtDiag) ws_enc

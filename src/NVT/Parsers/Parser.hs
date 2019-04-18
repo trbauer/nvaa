@@ -16,6 +16,7 @@ import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Trans.Except
 import Data.Functor.Identity
+import Data.Bits
 import Data.Char
 import Data.List
 import Data.Ord
@@ -92,6 +93,13 @@ pTraceLAK k msg = do
   inp <- P.getInput
   pTrace msg
   pTrace ("lookahead: " ++ show (take k inp) ++ " ...")
+
+pDebug :: (Monad m, Show a) => String -> P m u a -> P m u a
+pDebug lbl pa = do
+  pTraceLA $ ">> " ++ lbl
+  a <- pa
+  pTraceLA $ "<< " ++ show a
+  return a
 
 -- pDefineSymbol :: Monad m => Loc -> String -> Int -> P m u ()
 -- pDefineSymbol at name off = do
@@ -191,34 +199,75 @@ pImm32 = pImmA
 pImm64 :: Monad m => P m u Word64
 pImm64 = pImmA
 
-pImmA :: (Monad m, Integral a, Ord a, Num a) => P m u a
+pImmA :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
 pImmA = do
   a <- pImmBody
   -- P.notFollowedBy $ P.char '.' >> P.char '#'
   pWhiteSpace
   return a
 
-pImmBody :: (Monad m, Integral a, Ord a, Num a) => P m u a
-pImmBody = P.try pHexImm <|> P.try pBinImm <|> pDecImm
+pImmBody :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
+pImmBody = pHexImm <|> pBinImm <|> pDecImm
 
 -- 0x[0-9A-Fa-f]+
-pHexImm :: (Monad m, Integral a, Ord a, Num a) => P m u a
-pHexImm = P.char '0' >> P.oneOf "xX" >> pRadix 16 P.hexDigit
+pHexImm :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
+pHexImm = pWithLoc $ \loc -> do
+  P.try (P.char '0' >> P.oneOf "xX");
+  ds <- P.many1 P.hexDigit
+  pImmLoopHexBin 16 loc ds
+
 -- 0b[0-1]+
-pBinImm :: (Monad m, Integral a, Ord a, Num a) => P m u a
-pBinImm = P.char '0' >> P.oneOf "bB" >> pRadix 2 (P.oneOf "01")
+pBinImm :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
+pBinImm = pWithLoc $ \loc -> do
+  P.try (P.char '0' >> P.oneOf "bB");
+  ds <- P.many1 (P.oneOf "01")
+  pImmLoopHexBin 2 loc ds
+
+
+-- For the hex/binary version
+--
+-- This is because the immediates for signed types can fail the
+-- overflow test.  E.g. 0xFFFFFFFF on Int32, the last digit
+-- goes from small positive to negative; hence we just
+-- use a max count here
+pImmLoopHexBin ::
+  (FiniteBits a, Monad m, Integral a, Ord a, Num a) =>
+  a ->
+  Loc ->
+  [Char] ->
+  P m u a
+pImmLoopHexBin r loc = loop 0 0
+  where loop ix v [] = return v
+        loop ix v (d:ds)
+          | ix >= max_chars = pSemanticError loc "integer too large for type"
+          | otherwise = loop (ix+1) n ds
+          where n = r*v + fromIntegral (digitToInt d)
+
+        -- e.g. Int32 allows 32/(8/2) = 8 digits
+        --  binary allows 32/(2/2) = 32 digits
+        max_chars :: Int
+        max_chars = finiteBitSize r`div`bits_per_digit
+          where bits_per_digit
+                  | r == 16 = 4
+                  | r == 8 = 3
+                  | r == 2 = 1
+--        max_chars = (finiteBitSize r)`div`(fromIntegral r`div`2)
+
 -- [0-9]+
+--
+-- This progressively multiplies the old value by 10
+-- and adds the new digit (the usual trick), and throws a fit
+-- if the new value is smaller (indicating overflow)
 pDecImm :: (Monad m, Integral a, Ord a, Num a) => P m u a
-pDecImm = pRadix 10 P.digit
--- generalized helper
-pRadix :: (Monad m, Integral a, Ord a, Num a) => a -> P m u Char -> P m u a
-pRadix r pDigit = P.many1 pDigit >>= mulAdd r 0
-mulAdd :: (Monad m, Integral a, Ord a, Num a) => a -> a -> [Char] -> P m u a
-mulAdd r v [] = return v
-mulAdd r v (c:cs)
-  | n < v     = fail "integer too large" -- overflow
-  | otherwise = mulAdd r n cs
-  where n = v*r + fromIntegral (digitToInt c)
+pDecImm = pWithLoc $ \loc -> do
+    ds <- P.many1 P.digit
+    mulAddLoop loc 0 ds
+  where mulAddLoop loc v [] = return v
+        mulAddLoop loc v (d:ds)
+          | n < v     = pSemanticError loc "integer too large" -- overflow
+          | otherwise = mulAddLoop loc n ds
+          where n = 10*v + fromIntegral (digitToInt d)
+
 
 pInt :: Monad m => P m u Int
 pInt = pImmA

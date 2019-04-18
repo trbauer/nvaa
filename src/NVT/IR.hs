@@ -7,7 +7,20 @@ import Data.Bits
 import Data.Int
 import Data.List
 import Data.Word
+import Debug.Trace
 import Text.Printf
+
+-- TODO: consider more specific IR
+--
+-- data Srcs =
+--     SrcRRR !SrcR !SrcR !SrcR
+--   | SrcRCR !SrcR !SrcC !SrcR
+--   | SrcRIR !SrcR !SrcI !SrcR
+--   | SrcRIR !SrcR !SrcU !SrcR
+--   ...
+-- (store extra predicates separate)
+--
+
 
 type PC = Int
 
@@ -28,7 +41,7 @@ oHasOptDstPred (Op op) =
   --        IADD3 R10,     R24, R19, R10 {!1} ;   // 000FE20007FFE00A`00000013180A7210
   --  @!P0  IADD3 R12, P1,  R0, R15,  RZ {!5,Y} ; // 000FCA0007F3E0FF`0000000F000C8210
 
-  --   LOP3.LUT R2,     R2,   0x7f800000, RZ, 0xc0, !PT {!4,Y} // 000fc800078ec0ff`7f80000002027812
+  --   LOP3.LUT     R2, R2,   0x7f800000, RZ, 0xc0, !PT {!4,Y} ;      000fc800078ec0ff`7f80000002027812
   --   LOP3.LUT P1, RZ, R16,     0x20000, RZ, 0xc0, !PT {!12,Y,^4} ;  008fd8000782c0ff`0002000010ff7812
   op `elem` ["LOP3"]
 
@@ -51,6 +64,9 @@ data Inst =
   } deriving (Show,Eq)
 instance Syntax Inst where
   format = fmtInst
+-- iLogicallyEqual :: Inst -> Inst -> Bool
+-- iLogicallyEqual i0 i1 = i0{iLoc=lNONE} == i1{iLoc=lNONE}
+
 
 iHasInstOpt :: InstOpt -> Inst -> Bool
 iHasInstOpt io = (io`elem`) . iOptions
@@ -112,8 +128,8 @@ data Src =
   | SrcC  !Bool !Bool  !Int   !Int -- constant direct
   | SrcCX !Bool !Bool  !UR    !Int -- constant indirect
   | SrcSR                     !SR  -- system register
-  --      negated
-  | SrcUR !Bool               !UR  -- uniform reg (I don't think this can be absval)
+  --      nega   abs
+  | SrcUR !Bool !Bool         !UR  -- uniform reg (I don't think this can be absval)
   | SrcP  !Bool  !PR               -- predication
   | SrcB  !BR                      -- barrier register
 --  | SrcI  !Int64                   -- immediate (f32 is in the low 32 in binary)
@@ -130,33 +146,34 @@ instance Syntax Src where
           negAbs neg abs ("c[" ++ show six ++ "][" ++ printf "0x%X" soff ++ "]")
         SrcCX neg abs sur soff ->
           negAbs neg abs ("cx[" ++ format sur ++ "][" ++ printf "0x%X" soff ++ "]")
-        SrcUR neg ur -> negAbs neg False (format ur)
+        SrcUR neg abs ur -> negAbs neg abs (format ur)
         SrcSR sr -> format sr
         SrcP neg pr -> maybeS neg "!" ++ format pr
         SrcB br -> format br
         SrcI i -> printf "0x%08X" (fromIntegral i :: Word32)
     where maybeS z s = if z then s else ""
           negAbs neg abs reg = negs ++ abss ++ reg ++ abss
-            where negs = maybeS neg "!"
+            where negs = maybeS neg "-"
                   abss = maybeS abs "|"
 
 sNegated :: Src -> Bool
 sNegated s =
   case s of
-    SrcR a _ _ _ -> a
-    SrcC a _ _ _ -> a
-    SrcCX a _ _ _ -> a
-    SrcUR a _ -> a
-    SrcP a _ -> a
+    SrcR n _ _ _ -> n
+    SrcC n _ _ _ -> n
+    SrcCX n _ _ _ -> n
+    SrcUR n _ _ -> n
+    SrcP n _ -> n
     _ -> False
 
 sAbs :: Src -> Bool
 sAbs s =
   case s of
-    SrcR _ n _ _ -> n
-    SrcC _ n _ _ -> n
-    SrcCX _ n _ _ -> n
-    SrcP   n _   -> n
+    SrcR _ a _ _ -> a
+    SrcC _ a _ _ -> a
+    SrcCX _ a _ _ -> a
+    SrcUR _ a _ -> a
+    SrcP   a _   -> a
     _ -> False
 
 data PR = P0 | P1 | P2 | P3 | P4 | P5 | P6 | PT
@@ -453,10 +470,10 @@ data InstOpt =
   --
   | InstOptWIDE -- IMAD
   --
-  | InstOptX -- IADD3
+  | InstOptX -- IADD3.X
   --
-  | InstOptL -- SHF.R
-  | InstOptR
+  | InstOptL -- SHF.L
+  | InstOptR -- SHF.R
   --
   | InstOptHI -- SHF, IADD3, ...
   --
@@ -482,11 +499,45 @@ all_inst_opts = [toEnum 0 ..]
 
 fmtInst :: Inst -> String
 fmtInst i =
-    pred ++ opstr ++ optsstr ++ " " ++ opndsstr ++ depinfostr ++ ";"
+    pred ++ op_str ++ " " ++ opnds_str ++ depinfostr ++ ";"
   where pred = padR 5 (format (iPredication i))
-        opstr = padR 5 (format (iOp i))
-        optsstr = padR 10 $ concatMap (\io -> "." ++ format io) (iOptions i)
-        opndsstr = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
+        op_str = padR 12 (format (iOp i) ++ inst_opts)
+          where inst_opts =
+                  imad_hints ++
+                  concatMap (\io -> "." ++ format io) (iOptions i)
+
+        -- This is annoying, but for exact matching of nvdisasm, we have to
+        -- print helpful hints on IMADs that are used for identity operations.
+        -- Personally, I think the SHL is particularly distracting since the
+        -- shift value isn't represented explicitly.
+        --  * .MOV  .. X            <-  RZ*Y + X
+        --                          or   X*1 + RZ
+        --                          or   1*X + RZ
+        --  * .IADD .. X, Y         <-  X*1 + Y
+        --  * .SHL  K, X            <-  X*(2^K) + RZ
+        imad_hints :: String
+        imad_hints
+          | iOp i == Op "IMAD" =
+            case iSrcs i of
+              (src0:src1:src2:_)
+                | isRZ src0 || isRZ src1 -> ".MOV"   -- RZ*X + Y = MOV Y
+                | isEqI 1 src1 && isRZ src2 -> ".MOV" -- X*1 + 0 = MOV X
+                | isR src0 && isEqI 1 src1 -> ".IADD"
+                | isPow2Gt1 src1 && isRZ src2 -> ".SHL"
+                where isRZ (SrcR False False False RZ) = True
+                      isRZ _ = False
+                      isR (SrcR _ _ _ _) = True
+                      isR _ = False
+                      isEqI k (SrcI x) = x == k
+                      isEqI _ _ = False
+                      isPow2Gt1 (SrcI imm) =
+                        imm > 1 && (imm .&. (imm - 1)) == 0
+                      isPow2Gt1 _ = False
+
+              _ -> ""
+          | otherwise = ""
+        opnds_str :: String
+        opnds_str = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
           where dsts = map format (iDsts i)
                 srcs = map format visible_srcs
                 visible_srcs

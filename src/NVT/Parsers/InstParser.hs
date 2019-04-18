@@ -137,19 +137,17 @@ data PISt =
   -- pisLabels :: [LblExpr]
   } deriving Show
 
+-------------------------------------------------------------------------------
+
 pInst :: PC -> PI (Unresolved Inst)
-pInst pc = body
+pInst pc = pWhiteSpace >> body
   where body = pWithLoc $ \loc -> do
-          pWhiteSpace
           prd <- P.option PredNONE pPred
           op <- pOp
-          opts <- pInstOpts op
-          dsts <- pDsts op
           case op of
             Op "IADD3" -> do
-              -- TODO: try and parse up to two predicates before the regular
-              -- sources, we can store them separate
-              -- TODO: fix the instruction formatter if I remove these
+              opts <- pInstOpts op
+              dsts <- pDsts op
               let dft_pred = SrcP False PT
               (p0,p1) <-
                 P.option (dft_pred,dft_pred) $ P.try $ do
@@ -157,21 +155,43 @@ pInst pc = body
                   p1 <- P.option dft_pred (P.try $ pSymbol "," >> pRegP)
                   return (p0,p1)
               let p01 = [const (Right p0), const (Right p1)]
-              --
-              pSymbol ","
-              unresolved_srcs <- pSrcsN 3 pc op
-              x_pred_srcs <-
-                if InstOptX`elem`opts then do
-                  p0 <- pSymbol "," >> pPredSrcP
-                  p1 <- pSymbol "," >> pPredSrcP
-                  return [p0,p1]
-                else return [PredP True PT,PredP True PT]
-              pCompleteInst loc prd op opts dsts (p01++unresolved_srcs) x_pred_srcs
+              pIntTernary loc prd op opts dsts p01
+            Op "IMAD" -> do
+              opts <- pInstOpts op
+              dsts <- pDsts op
+              pIntTernary loc prd op opts dsts []
             _ -> do
+              opts <- pInstOpts op
+              dsts <- pDsts op
               unless (null dsts) $ do
                 pSymbol_ ","
               unresolved_srcs <- pSrcs pc op
               pCompleteInst loc prd op opts dsts unresolved_srcs []
+
+
+        -- pIntTernary :: PI (Unresolved Inst)
+        pIntTernary loc prd op opts dsts src_pfx_preds = do
+          -- TODO: try and parse up to two predicates before the regular
+          -- sources, we can store them separate
+          -- TODO: fix the instruction formatter if I remove these
+          --
+          pSymbol ","
+          unresolved_srcs <- pSrcsN 3 pc op
+          x_pred_srcs <- pOptPreds
+            -- if InstOptX`elem`opts then do
+            --   p0 <- pSymbol "," >> pPredSrcP
+            --   p1 <- pSymbol "," >> pPredSrcP
+            --   return [p0,p1]
+            -- else return [PredP True PT,PredP True PT]
+          pCompleteInst loc prd op opts dsts (src_pfx_preds++unresolved_srcs) x_pred_srcs
+
+        -- up to two predicate sources
+        pOptPreds = do
+          P.option [] $ do
+            p_src0 <- pSymbol "," >> pPredSrcP
+            P.option [p_src0] $ do
+              p_src1 <- pSymbol "," >> pPredSrcP
+              return [p_src0,p_src1]
 
         pCompleteInst loc prd op opts dsts unresolved_srcs src_preds = do
           dep_info <- pDepInfo
@@ -235,7 +255,8 @@ pInstOpts op
 
         pIgnore :: PI [InstOpt]
         pIgnore
-          | op == Op "IMAD" = pSymbols ["MOV"] >> return []
+          | op == Op "IMAD" = pSymbols ["MOV","SHL","IADD"] >> return []
+          -- | op == Op "IMAD" = pSymbols [] >> return []
           | is_lop3 = pSymbols ["LUT"] >> return []
           | otherwise = fail "nothing to ignore"
 
@@ -345,25 +366,29 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
 
         -- rejects 32@hi... and 32@lo...
         pImm :: PI Src
-        pImm = do
+        pImm = pImmNonBranch
+        pImmNonBranch :: PI Src
+        pImmNonBranch = do
             imm <- pVal
             P.notFollowedBy (P.char '@')
             pWhiteSpace
             return $ SrcI imm
           where pVal
-                  | oOpIsFP op = pFltImm <|> pIntImm
-                  | otherwise = pIntImm
+                  | oOpIsFP op = pFltImm32 <|> pIntImm32
+                  | otherwise = pIntImm32
 
         pImmLbl :: PI (Unresolved Src)
         pImmLbl = do
           e <- pLExpr pc
           return $ \lix -> SrcI <$> evalLExpr lix e
 
-
 pNegationNumeric :: PI Bool
 pNegationNumeric = P.option False $ (pSymbol "-" <|> pSymbol "~") >> return True
 pNegationLogical :: PI Bool
 pNegationLogical = P.option False (pSymbol "!" >> return True)
+
+-- how to make this work with <$>...<*>...<*>...
+-- pWithNegAbsC :: PI a -> PI (Bool -> Bool -> PI a)
 
 pWithNegAbs :: PI a -> PI (a,Bool,Bool)
 pWithNegAbs pBody = do
@@ -379,7 +404,7 @@ pWithNegAbs pBody = do
 pRegSR :: PI Src
 pRegSR = SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
   where pUnderbarTidCtaid =
-          -- normally we accept these with a dot, but we allow
+          -- we accept these with a dot, but we also allow
           -- the more IR-consistent form here (SR_TID.X)
           --
           -- the regular form pSyntax will replace the _ with a .
@@ -393,7 +418,9 @@ pRegSR = SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
           (pSymbol "SR_CTAID_Z" >> return SR_TID_Z)
 
 pRegUR :: PI Src
-pRegUR = SrcUR <$> pNegationNumeric <*> pSyntax
+pRegUR = do
+  (ur,neg,abs) <- pWithNegAbs pSyntax
+  return (SrcUR neg abs ur)
 
 pRegP :: PI Src
 pRegP = SrcP <$> pNegationLogical <*> pSyntax
@@ -508,7 +535,7 @@ data LExpr =
   | LExprDiv !Loc !LExpr !LExpr
   | LExprMod !Loc !LExpr !LExpr
   -- unary expressions
-  | LExprNeg !Loc !LExpr -- -E
+  | LExprNeg   !Loc !LExpr -- -E
   | LExprCompl !Loc !LExpr -- ~E
   -- primary expressions
   | LExprImm !Loc !Int64
@@ -522,13 +549,18 @@ data LExpr =
 -- oHasSrcs :: Op -> Bool
 -- oHasSrcs op =
 
-pIntImm :: PI Word64
-pIntImm = do
-    maybeNegate <- P.option id (pSymbol "-" >> return negate)
-    fromIntegral . maybeNegate <$> pImmA
+pIntImm32 :: PI Word64
+pIntImm32 = do
+  -- Were we to use Int32, then fromIntegral to Word64 would sign extend
+  -- and create a value that won't fit in encoding.
+  --
+  -- The function negate :: Word32 -> Word32 is still two's-complement
+  let pImmS32 = pImmA :: PI Word32
+  maybeNegate <- P.option id (pSymbol "-" >> return negate)
+  fromIntegral . maybeNegate <$> pImmS32
 
-pFltImm :: PI Word64
-pFltImm = do
+pFltImm32 :: PI Word64
+pFltImm32 = do
     maybeNegate <- P.option id $ pSymbol "-" >> return (flip complementBit 31)
     maybeNegate <$> (pInf <|> pNonInf)
   where pInf = pSymbol "INF" >> return 0x7FF00000
@@ -542,7 +574,7 @@ pDepInfo = (pSymbol "{" >> pTokenLoop 0 di0 ) <|> return di0
         pTokenLoop :: Int -> DepInfo -> PI DepInfo
         pTokenLoop ix di = pEnd <|> (pMaybeSep >> pToken)
           where pEnd = do pSymbol "}" >> return di
-                pMaybeSep = if ix == 0 then return () else pSymbol_ ","
+                pMaybeSep = unless (ix == 0) $ pSymbol_ ","
                 pToken =
                   pDist <|>
                     pWait <|>

@@ -205,12 +205,15 @@ eInst i = enc
               eField fSRCCIX  (fromIntegral six)
               eConstOffDiv4 fSRCCOFF soff
               ensureNoNegAbs neg abs
+            [SrcCX neg abs ur_six soff] -> do
+              eFatal "eUnrSrcs: TODO: cx[UR#][...] src"
             [SrcI imm] -> do
               eField fREGFILE 4
               eFieldU32 fSRCIMM imm
-            [SrcUR neg ur] -> do
+            [SrcUR neg abs ur] -> do
               eEncode fSRC1_UREG ur
               eEncode fSRC1_NEG neg
+              eEncode fSRC1_ABS abs
               eField fREGFILE 6
               eEncode fUNIFORMREG True
             [_] -> eFatal "wrong kind of source operand"
@@ -264,27 +267,40 @@ eInst i = enc
               eConstOffDiv4 fSRC_COFF soff
 
         eSrcR :: Int -> (Maybe Field,Maybe Field,Field,Field) -> Src -> E ()
-        eSrcR ix (mfNEG,mfABS,fREU,fREG) (SrcR neg abs reu r) = do
-            let eMaybe what mf z =
-                  case mf of
-                    Nothing
-                      | z -> eFatal $ what ++ " not supported on Src"++show ix++" for this instruction type"
-                      | otherwise -> return ()
-                    Just fF -> eEncode fF abs
-            eMaybe "absolute value source modifier " mfABS abs
-            eMaybe "negation source modifier " mfNEG neg
-            eEncode fREU reu
-            eEncode fREG r
+        eSrcR src_ix (mfNEG,mfABS,fREU,fREG) (SrcR neg abs reu r) = do
+          eMaybeNegAbs src_ix (mfNEG,mfABS) neg abs
+          eEncode fREU reu
+          eEncode fREG r
+
+        eMaybeNegAbs :: Int -> (Maybe Field,Maybe Field) -> Bool -> Bool -> E ()
+        eMaybeNegAbs src_ix (mfNEG,mfABS) neg abs = do
+          let eMaybe what mf z =
+                case mf of
+                  Nothing
+                    | z -> eFatal $ what ++ " not supported on Src"++show src_ix++" for this instruction type"
+                    | otherwise -> return ()
+                  Just fF -> eEncode fF z
+          eMaybe "absolute value source modifier " mfABS abs
+          eMaybe "negation source modifier " mfNEG neg
 
         eSrc0R :: Src -> E ()
         eSrc0R = eSrcR 0 (Just fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
-        -- e.g. .U32 of MAD overlaps Src0.Negated
+        -- e.g. .U32 of IMAD overlaps Src0.Negated
         eSrc0R_NN :: Src -> E ()
         eSrc0R_NN = eSrcR 0 (Nothing,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
         eSrc1R :: Src -> E ()
         eSrc1R = eSrcR 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
         eSrc2R :: Src -> E ()
         eSrc2R = eSrcR 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
+
+        eSrcUR :: Int -> (Field,Maybe Field,Maybe Field) -> Src -> E ()
+        eSrcUR src_ix (fSRC_UREG,mfSRC_NEG,mfSRC_ABS) (SrcUR neg abs ur) = do
+          eMaybeNegAbs src_ix (Nothing,Nothing) neg abs
+          eEncode fSRC_UREG ur
+        eSrc1UR_NN :: Src -> E ()
+        eSrc1UR_NN = eSrcUR 1 (fSRC1_UREG,Nothing,Nothing)
+        eSrc2UR_NN :: Src -> E ()
+        eSrc2UR_NN = eSrcUR 2 (fSRC2_UREG,Nothing,Nothing) -- still targets [37:32] (just changes fName)
 
         eIMAD :: E ()
         eIMAD = do
@@ -364,22 +380,26 @@ eInst i = enc
               eSrc1C s1
               --
               eSrc2R s2
-            [s0@(SrcR _ _ _ _),s1@(SrcUR _ _),s2@(SrcR _ _ _ _)] -> do
+            [s0@(SrcR _ _ _ _),s1@(SrcUR _ _ _),s2@(SrcR _ _ _ _)] -> do
               -- imad__RUR_RUR
               eField fREGFILE 0x6
               eEncode fUNIFORMREG True
               --
               eSrc0R_NN s0
               --
-              eFatal "TODO: IMAD srcs: RUR"
-            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcUR _ _)] -> do
+              eSrc1UR_NN s1
+              --
+              eSrc2R s2
+            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcUR _ _ _)] -> do
               -- imad__RRU_RRU
               eField fREGFILE 0x7
               eEncode fUNIFORMREG True
               --
               eSrc0R_NN s0
               --
-              eFatal "TODO: IMAD srcs: RRU"
+              eSrc2R s1
+              --
+              eSrc2UR_NN s2
             [_,_,_] -> eFatal "wrong type of arguments to instruction"
             _ -> eFatal "wrong number of arguments to instruction"
           eEncode fIADD3_SRCPRED0 PT
@@ -449,15 +469,13 @@ eInst i = enc
               --
               eSrc2R s2
             -- iadd3_noimm__RUR_RUR
-            [s0@(SrcR _ _ _ _),s1@(SrcUR neg ur),s2@(SrcR _ _ _ _)] -> do
+            [s0@(SrcR _ _ _ _),s1@(SrcUR _ _ _),s2@(SrcR _ _ _ _)] -> do
               eField fREGFILE 0x6
               eEncode fUNIFORMREG True
               --
               eSrc0R s0
               --
-              eEncode fSRC1_UREG ur
-              eEncode fSRC1_NEG neg
-              eEncode fUNIFORMREG True
+              eSrc1UR_NN s1
               --
               eSrc2R s2
             [_,_,_] -> eFatal "unsupported operand kinds to IADD3"
@@ -474,8 +492,8 @@ eInst i = enc
               -- explicit IR version (uses defaults)
               case iSrcPreds i of
                 [sp0,sp1] -> return (sp0,sp1)
-                _ -> eFatal "IADD3 takes exactly two extra predicates"
-                -- [] -> return (PredNONE,PredNONE)
+                -- _ -> eFatal "IADD3 takes exactly two extra predicates"
+                [] -> return (PredP True PT,PredP True PT)
                 -- _ -> eFatal "IADD3 without .X forbids extra predicates"
           ePredicationSrc fIADD3_X_SRCPRED0 ext_pred0
           ePredicationSrc fIADD3_X_SRCPRED1 ext_pred1
