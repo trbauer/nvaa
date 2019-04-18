@@ -446,7 +446,9 @@ data InstOpt =
   | InstOptRP -- round to plus inf
   | InstOptRM -- round to minus inf
   --
-  | InstOptU32
+  | InstOptU32 -- IMAD
+  --
+  | InstOptWIDE -- IMAD
   --
   | InstOptX -- IADD3
   --

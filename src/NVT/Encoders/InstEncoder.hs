@@ -79,10 +79,15 @@ eField f val = do
         | fLength f == 64 = 0xFFFFFFFFFFFFFFFF
         | otherwise = (1`shiftL`fLength f) - 1
   unless (val <= mask) $
-    eFatal $ "field value overflows " ++ fName f
+    eFatal $ fName f ++ ": value overflows field"
   let mask_val = getField128 (fOffset f) (fLength f) (esMask es)
-  when ((mask_val .&. mask) /= 0) $
-    eFatal $ "field overlaps another field already set" -- TODO: find it
+  when ((mask_val .&. mask) /= 0) $ do
+    let overlaps =
+          case filter (fOverlaps f . fst) (esFields es) of
+            ((f1,_):_) -> fFormatName f1
+            _ -> "?"
+    eFatal $ fFormatName f ++ ": field overlaps another field already set (" ++ overlaps ++ ")"
+  --
   let new_mask = putField128 (fOffset f) (fLength f) mask (esMask es)
   let new_inst = putField128 (fOffset f) (fLength f) val  (esInst es)
   CMS.modify $ \es -> es{esInst = new_inst, esMask = new_mask, esFields = (f,val):esFields es}
@@ -133,6 +138,7 @@ eInst i = enc
             "MOV" -> eMOV
             "S2R" -> eS2R
             "IADD3" -> eIADD3
+            "IMAD" -> eIMAD
             s -> eFatal $ "unsupported operation"
           eDepInfo (iDepInfo i)
 
@@ -236,12 +242,152 @@ eInst i = enc
               eEncode fS2R_SRC0 sr
             _ -> eFatal "S2R requires SR* register source"
 
+        eSrc1C :: Src -> E ()
+        eSrc1C = eSrcXC (fSRC1_NEG,fSRC1_ABS,fSRC1_CIX,fSRC1_UREG,fSRC1_COFF)
+        eSrc2C :: Src -> E ()
+        eSrc2C = eSrcXC (fSRC2_NEG,fSRC2_ABS,fSRC2_CIX,fSRC2_UREG,fSRC2_COFF)
+        -- eSrc2C_IMAD :: Src -> E ()
+        -- eSrc2C_IMAD = eSrcXC (Nothing,fSRC2_ABS,fSRC2_CIX,fSRC2_UREG,fSRC2_COFF)
+        eSrcXC :: (Field,Field,Field,Field,Field) -> Src -> E ()
+        eSrcXC  (fSRC_NEG,fSRC_ABS,fSRC_CIX,fSRC_UREG,fSRC_COFF) src = do
+          case src of
+            SrcC neg abs six soff -> do
+              eEncode fSRC_NEG neg
+              eEncode fSRC_ABS abs
+              eEncode fSRC_CIX six
+              eConstOffDiv4 fSRC_COFF soff
+            SrcCX neg abs sur soff -> do
+              eEncode fSRC_NEG neg
+              eEncode fSRC_ABS abs
+              eEncode fSRC_UREG sur
+              eConstOffDiv4 fSRC_COFF soff
+
+        eSrcR :: Int -> (Maybe Field,Maybe Field,Field,Field) -> Src -> E ()
+        eSrcR ix (mfNEG,mfABS,fREU,fREG) (SrcR neg abs reu r) = do
+            let eMaybe what mf z =
+                  case mf of
+                    Nothing
+                      | z -> eFatal $ what ++ " not supported on Src"++show ix++" for this instruction type"
+                      | otherwise -> return ()
+                    Just fF -> eEncode fF abs
+            eMaybe "absolute value source modifier " mfABS abs
+            eMaybe "negation source modifier " mfNEG neg
+            eEncode fREU reu
+            eEncode fREG r
+
+        eSrc0R :: Src -> E ()
+        eSrc0R = eSrcR 0 (Just fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
+        -- e.g. .U32 of MAD overlaps Src0.Negated
+        eSrc0R_NN :: Src -> E ()
+        eSrc0R_NN = eSrcR 0 (Nothing,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
+        eSrc1R :: Src -> E ()
+        eSrc1R = eSrcR 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
+        eSrc2R :: Src -> E ()
+        eSrc2R = eSrcR 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
+
+        eIMAD :: E ()
+        eIMAD = do
+          eField fOPCODE (if iHasInstOpt InstOptWIDE i then 0x025 else 0x024)
+          ePredication
+          eEncode fINSTOPT_X (iHasInstOpt InstOptX i)
+          eDstRegR
+          eEncode fIMAD_SIGNED (not (iHasInstOpt InstOptU32 i))
+          case iSrcs i of
+            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcR _ _ _ _)] -> do
+              -- imad__RRR_RRR
+              eField fREGFILE 0x1
+              eEncode fUNIFORMREG False
+              --
+              eSrc0R_NN s0
+              --
+              eSrc1R s1
+              --
+              eSrc2R s2
+            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),SrcI imm] -> do
+              -- imad__RRsI_RRI
+              eField fREGFILE 0x2
+              eEncode fUNIFORMREG False
+              --
+              eSrc0R_NN s0
+              --
+              eField fSRC1_IMM imm
+              --
+              eSrc2R s1
+            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcC _ _ _ _)] -> do
+              -- imad__RRC_RRC
+              eField fREGFILE 0x3
+              eEncode fUNIFORMREG False
+              --
+              eSrc0R_NN s0
+              --
+              eSrc1C s2
+              --
+              eSrc2R s1
+            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcCX _ _ _ _)] -> do
+              -- imad__RRCx_RRCx
+              eField fREGFILE 0x3
+              eEncode fUNIFORMREG True
+              --
+              eSrc0R_NN s0
+              --
+              eSrc1C s2
+              --
+              eSrc2R s1
+            [s0@(SrcR _ _ _ _),SrcI imm,s2@(SrcR _ _ _ _)] -> do
+              -- imad__RsIR_RIR
+              eField fREGFILE 0x4
+              eEncode fUNIFORMREG False
+              --
+              eSrc0R_NN s0
+              --
+              eField fSRC1_IMM imm
+              --
+              eSrc2R s2
+            [s0@(SrcR _ _ _ _),s1@(SrcC _ _ _ _),s2@(SrcR _ _ _ _)] -> do
+              -- imad__RCR_RCR
+              eField fREGFILE 0x5
+              eEncode fUNIFORMREG False
+              --
+              eSrc0R_NN s0
+              --
+              eSrc1C s1
+              --
+              eSrc2R s2
+            [s0@(SrcR _ _ _ _),s1@(SrcCX _ _ _ _),s2@(SrcR _ _ _ _)] -> do
+              -- imad__RCxR_RCxR
+              eField fREGFILE 0x5
+              eEncode fUNIFORMREG True
+              --
+              eSrc0R_NN s0
+              --
+              eSrc1C s1
+              --
+              eSrc2R s2
+            [s0@(SrcR _ _ _ _),s1@(SrcUR _ _),s2@(SrcR _ _ _ _)] -> do
+              -- imad__RUR_RUR
+              eField fREGFILE 0x6
+              eEncode fUNIFORMREG True
+              --
+              eSrc0R_NN s0
+              --
+              eFatal "TODO: IMAD srcs: RUR"
+            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcUR _ _)] -> do
+              -- imad__RRU_RRU
+              eField fREGFILE 0x7
+              eEncode fUNIFORMREG True
+              --
+              eSrc0R_NN s0
+              --
+              eFatal "TODO: IMAD srcs: RRU"
+            [_,_,_] -> eFatal "wrong type of arguments to instruction"
+            _ -> eFatal "wrong number of arguments to instruction"
+
         eIADD3 :: E ()
         eIADD3 = do
           eField fOPCODE 0x010
           ePredication
           eDstRegR
-          eEncode fIADD3_X (iHasInstOpt InstOptX i)
+          eEncode fINSTOPT_X (iHasInstOpt InstOptX i)
           -- the first two operands may be predicate sources,
           -- if they are omitted, we encode PT (0x7); neither has a sign
           (p0,p1,srcs) <-
@@ -256,80 +402,57 @@ eInst i = enc
                   sfx -> return (PT,PT,sfx)
           eEncode fIADD3_SRCPRED0 p0
           eEncode fIADD3_SRCPRED1 p1
-          let encodeSrcR :: Int -> (Field,Maybe Field,Field,Field) -> Src -> E ()
-              encodeSrcR ix (fNEG,mfABS,fREU,fREG) (SrcR neg abs reu r) = do
-                eEncode fNEG neg
-                case mfABS of
-                  Nothing
-                    | abs -> eFatal $ "absolute value not supported on Src"++show ix++" for this instruction type"
-                    | otherwise -> return () -- no abs supported, but they didn't ask for it
-                  Just fABS -> eEncode fABS abs
-                eEncode fREU reu
-                eEncode fREG r
-          let encodeSrc0R :: Src -> E ()
-              encodeSrc0R = encodeSrcR 0 (fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
-          let encodeSrc1R :: Src -> E ()
-              encodeSrc1R = encodeSrcR 1 (fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
-          let encodeSrc2R :: Src -> E ()
-              encodeSrc2R = encodeSrcR 1 (fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
           case srcs of
               -- iadd3_noimm__RRR_RRR
-            [s0@(SrcR _ _ _ r0),s1@(SrcR _ _ _ _),s2@(SrcR _ _ _ _)] -> do
+            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcR _ _ _ _)] -> do
               eField fREGFILE 0x1
               eEncode fUNIFORMREG False
               --
-              encodeSrc0R s0
-              encodeSrc1R s1
-              encodeSrc2R s2
-              eEncode fUNIFORMREG False
+              eSrc0R s0
+              eSrc1R s1
+              eSrc2R s2
               -- iadd3_noimm__RCR_RCR
-            [s0@(SrcR _ _ _ _),s1@(SrcC neg abs six soff),s2@(SrcR _ _ _ _)] -> do
+            [s0@(SrcR _ _ _ _),s1@(SrcC _ _ _ _),s2@(SrcR _ _ _ _)] -> do
               eField fREGFILE 0x5
               eEncode fUNIFORMREG False
               --
-              encodeSrc0R s0
+              eSrc0R s0
               --
-              eEncode fSRC1_NEG neg
-              eEncode fSRC1_ABS abs
-              eEncode fSRC1_CIX six
-              eConstOffDiv4 fSRC1_COFF soff
+              eSrc1C s1
               --
-              encodeSrc2R s2
+              eSrc2R s2
             -- iadd3_noimm__RCxR_RCxR
-            [s0@(SrcR _ _ _ _),s1@(SrcCX neg abs sur soff),s2@(SrcR _ _ _ _)] -> do
+            [s0@(SrcR _ _ _ _),s1@(SrcCX _ _ _ _),s2@(SrcR _ _ _ _)] -> do
               eField fREGFILE 0x5
               eEncode fUNIFORMREG True
               --
-              encodeSrc0R s0
+              eSrc0R s0
               --
-              eEncode fSRC1_NEG neg
-              eEncode fSRC1_ABS abs
-              eEncode fSRC1_UREG sur
-              eConstOffDiv4 fSRC1_COFF soff
+              eSrc1C s1
               --
-              encodeSrc2R s2
+              eSrc2R s2
             -- iadd3_imm__RsIR_RIR
-            [s0@(SrcR _ _ _ _),s1@(SrcI imm),s2@(SrcR _ _ _ _)] -> do
+            [s0@(SrcR _ _ _ _),SrcI imm,s2@(SrcR _ _ _ _)] -> do
               eField fREGFILE 0x4
               eEncode fUNIFORMREG False
               --
-              encodeSrc0R s0
+              eSrc0R s0
               --
               eField fSRC1_IMM imm
               --
-              encodeSrc2R s2
+              eSrc2R s2
             -- iadd3_noimm__RUR_RUR
             [s0@(SrcR _ _ _ _),s1@(SrcUR neg ur),s2@(SrcR _ _ _ _)] -> do
               eField fREGFILE 0x6
               eEncode fUNIFORMREG True
               --
-              encodeSrc0R s0
+              eSrc0R s0
               --
               eEncode fSRC1_UREG ur
               eEncode fSRC1_NEG neg
               eEncode fUNIFORMREG True
               --
-              encodeSrc2R s2
+              eSrc2R s2
             [_,_,_] -> eFatal "unsupported operand kinds to IADD3"
             _ -> eFatal "wrong number of operands to IADD3"
           -- these are the extra source predicate expressions
@@ -355,6 +478,20 @@ instance Show Field where
     "  fLength = " ++ show (fLength f) ++ "\n" ++
     "  fFormat = ...function...\n" ++
     "}"
+fFormatName :: Field -> String
+fFormatName f  = fName f ++ "[" ++ body ++ "]"
+  where body
+          | fLength f == 1 = show (fOffset f)
+          | otherwise = show (fOffset f + fLength f - 1) ++ ":" ++ show (fOffset f)
+fOverlaps :: Field -> Field -> Bool
+fOverlaps f0 f1 =
+  -- [.....] f0
+  --      [.....] f1
+  fOffset f1 >= fOffset f0 && fOffset f1 < fOffset f0 + fLength f0 ||
+  --     [.....] f0
+  --  [.....] f1
+  fOffset f0 >= fOffset f1 && fOffset f0 < fOffset f1 + fLength f1
+
 
 f :: String -> Int -> Int -> (Word128 -> Word64 -> String) -> Field
 f = Field
@@ -403,8 +540,6 @@ fUR :: String -> Int -> Field
 fUR nm off = fC (undefined :: UR) nm off 6
 
 -------------------------------------------------------------------------------
-
-
 fOPCODE :: Field
 fOPCODE = fi "Opcode" 0 9
 
@@ -421,6 +556,8 @@ fNEG src_ix off = fb ("Src" ++ show src_ix ++ ".Negated") off 1 "-(..)"
 
 fDST_REG :: Field
 fDST_REG = fR "Dst.Reg" 16
+
+
 fSRC0_REG :: Field
 fSRC0_REG = fR "Src0.Reg" 24
 fSRC0_ABS :: Field
@@ -428,28 +565,47 @@ fSRC0_ABS = fABS 1 72
 fSRC0_NEG :: Field
 fSRC0_NEG = fNEG 1 73
 
+
 fSRC1_REG :: Field
 fSRC1_REG = fR "Src1.Reg" 32
 fSRC1_UREG :: Field
 fSRC1_UREG = fUR "Src1.UReg" 32
-fSRC1_IMM :: Field
-fSRC1_IMM = fSRCIMM{fName = "Src1.Imm"} -- more specific name
 fSRC1_CIX :: Field
 fSRC1_CIX = fSRCCIX{fName = "Src1.ConstIndex"}
 fSRC1_COFF :: Field
 fSRC1_COFF = fSRCCOFF{fName = "Src1.ConstOffset"}
 fSRC1_CUIX :: Field
 fSRC1_CUIX = fSRCCOFF{fName = "Src1.ConstIndex"}
+--
+fSRC1_IMM :: Field
+fSRC1_IMM = fSRCIMM{fName = "Src1.Imm"}
+--
 fSRC1_ABS :: Field
 fSRC1_ABS = fABS 1 62
 fSRC1_NEG :: Field
 fSRC1_NEG = fNEG 1 63
+
+
 fSRC2_REG :: Field
 fSRC2_REG = fR "Src0.Reg" 64
+fSRC2_UREG :: Field
+fSRC2_UREG = fSRC1_UREG{fName = "Src2.UReg"}
+--
+fSRC2_CIX :: Field
+fSRC2_CIX = fSRCCIX{fName = "Src2.ConstIndex"}
+fSRC2_COFF :: Field
+fSRC2_COFF = fSRCCOFF{fName = "Src2.ConstOffset"}
+fSRC2_CUIX :: Field
+fSRC2_CUIX = fSRCCOFF{fName = "Src2.ConstIndex"}
+--
+fSRC2_IMM :: Field
+fSRC2_IMM = fSRCIMM{fName = "Src2.Imm"}
+--
 fSRC2_ABS :: Field -- (not supported for IADD), [74] is .X
 fSRC2_ABS = fABS 2 74
 fSRC2_NEG :: Field
 fSRC2_NEG = fNEG 2 75
+
 
 fSRCIMM :: Field
 fSRCIMM = fi "Src.Imm" 32 32
@@ -511,11 +667,14 @@ fMOV_SRC2_IMM4 = fi "Mov.Src2.Imm4" 72 4
 fS2R_SRC0 :: Field
 fS2R_SRC0 = fi "S2R.Src0" 72 8
 
-fIADD3_X :: Field
-fIADD3_X = fi "IADD3.X" 74 1
+fINSTOPT_X :: Field
+fINSTOPT_X = fi "IADD3.X" 74 1
 
 fIADD3_SRCPRED0 :: Field
 fIADD3_SRCPRED0 = fi "IADD3.SrcPred0" 81 3
 fIADD3_SRCPRED1 :: Field
 fIADD3_SRCPRED1 = fi "IADD3.SrcPred1" 84 3
 -- bit 4
+
+fIMAD_SIGNED :: Field
+fIMAD_SIGNED = fl "IMAD.Signed" 73 1 [".U32","(.S32)"]

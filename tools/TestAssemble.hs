@@ -24,6 +24,22 @@ s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                  
 s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
 ia3 = "000FC80007F1E0FF`00005A0000027A10:        IADD3 R2, P0, R0, c[0x0][0x168], RZ {!4,Y} ; // examples/sm_75/samples\alignedTypes.sass:3122"
 
+imad_mov_u32 = "000FD000078E00FF`00000A00FF017624: IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};"
+
+
+-- my minimal program to write effects out is:
+--   IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};      000FD000078E00FF`00000A00FF017624
+--   S2R              R0, SR_CTAID.X {!1,+1.W};
+--   IMAD.MOV.U32     R37, RZ, RZ, 0x4 {!3,Y};              000FC600078E00FF`00000004FF257424
+--   S2R              R3, SR_TID.X {!2,+1.W};
+--   IMAD             R0, R0, c[0x0][0x0], R3 {!4,Y,^1}     001FC800078E0203`0000000000007A24
+--   IMAD.WIDE        R2, R0, R37, c[0x0][0x160] {!10,Y};   000FD400078E0225`0000580000027625
+--
+-- TO READ:
+--   LDG.E.SYS        R4, [R2] {!4,+3.W,+1.R}
+--
+-- TO WRITE:
+--   STG.E.SYS        [R2], R35 {!1};
 testInst :: String -> IO ()
 testInst syntax =
   case parseSampleInst syntax of
@@ -168,6 +184,9 @@ testSampleInst verbose si (fp,lno) syntax = do
                   putStrLn $ "     " ++ printf "    %-24s   %16s %32s  %16s %32s" "FIELD" "REFERENCE" "" "ENCODED" ""
                   sequence diags
                   putStrLn ""
+                  when verbose $
+                    if all_ok then putStrGreen "fields match\n" else putStrRed "fields mismatch\n"
+
                   putStrLn "== bit by bit ==="
                   compareBits (siBits si) w_enc
                 return all_ok

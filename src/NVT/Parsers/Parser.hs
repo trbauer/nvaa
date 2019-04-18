@@ -36,20 +36,20 @@ initPSt u = PSt 1 [] u
 
 type PID u a = P Identity u a
 
-runPID :: 
-    PID u a -> 
-    u -> 
-    FilePath -> 
-    String -> 
+runPID ::
+    PID u a ->
+    u ->
+    FilePath ->
+    String ->
     Either Diagnostic (a,[Diagnostic])
-runPID pma u file inp = 
+runPID pma u file inp =
   runIdentity $ runP pma u file inp
 
 
 runP :: Monad m
     => P m u a
     -> u
-    -> FilePath 
+    -> FilePath
     -> String
     -> m (Either Diagnostic (a,[Diagnostic]))
 runP pma u file inp = body
@@ -228,3 +228,6 @@ pOneOf :: Monad m => [(String,a)] -> P m u a
 pOneOf opts = loop (sortOn (Down . fst) opts)
   where loop [] = fail "unexpected token"
         loop ((s,a):sas) = P.try (pSymbol s >> return a) <|> loop sas
+
+pSymbols :: Monad m => [String] -> P m u String
+pSymbols  = pOneOf . map (\s -> (s,s))

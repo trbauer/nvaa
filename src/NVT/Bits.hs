@@ -69,16 +69,21 @@ getField128 off len w128
   -- TODO: enable splits
   where shifted_value = w `shiftR` (off `mod` 64)
           where w = if off < 64 then wLo64 w128 else wHi64 w128
-        mask = (1 `shiftL` len) - 1
+        mask =  getMask64 len
+
+
 
 getField64 :: Int -> Int -> Word64 -> Word64
 getField64 off len w
   | off + len > 64 = error "NVT.Bits.getField64: offsets out of bounds"
   | otherwise = shifted_value .&. mask
   where shifted_value = w `shiftR` off
-        mask
-          | len == 64 = 0xFFFFFFFFFFFFFFFF
-          | otherwise = (1 `shiftL` len) - 1
+        mask = getMask64 len
+
+getMask64 :: Int -> Word64
+getMask64 len
+  | len == 64 = 0xFFFFFFFFFFFFFFFF
+  | otherwise = (1 `shiftL` len) - 1
 
 putField128 :: Int -> Int -> Word64 -> Word128 -> Word128
 putField128 off len v w
@@ -93,7 +98,7 @@ putField64 off len v w
   | v > mask = error "NVT.Bits.putField64: value too large for field"
   | otherwise = (w .&. complement (mask`shiftL`off)) .|. shifted_value
   where shifted_value = v `shiftL` off
-        mask = (1 `shiftL` len) - 1
+        mask = getMask64 len
 
 -- TODO: deprecate
 toByteStringW128 :: Word128 -> BS.ByteString

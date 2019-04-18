@@ -143,7 +143,7 @@ pInst pc = body
           pWhiteSpace
           prd <- pPred
           op <- pOp
-          opts <- pInstOpts
+          opts <- pInstOpts op
           dsts <- pDsts op
           P.try $ pSymbol ","
           complete_srcs <- pSrcs pc op
@@ -179,13 +179,34 @@ pOp = do
   -- stuff
   return $ Op op
 
-pInstOpts :: PI [InstOpt]
-pInstOpts = P.try pLop3Code <|> P.many (pSymbol "." >> pSyntax)
-  where pLop3Code :: PI [InstOpt]
+
+pInstOpts :: Op -> PI [InstOpt]
+pInstOpts op
+  | is_lop3 = P.try pLop3Code <|> pOptSeq
+  | otherwise = pOptSeq
+  where is_lop3 = op `elem` [Op "LOP3",Op "ULOP3"]
+
+        pLop3Code :: PI [InstOpt]
         pLop3Code = do
           pSymbol "."
           _ <- pLop3Expr
           return []
+
+        pOptSeq :: PI [InstOpt]
+        pOptSeq = concat <$> P.many pToken
+          where pToken = do
+                  pSymbol "."
+                  P.try pIgnore <|> pInstOpt
+
+        pIgnore :: PI [InstOpt]
+        pIgnore
+          | op == Op "IMAD" = pSymbols ["MOV"] >> return []
+          | is_lop3 = pSymbols ["LUT"] >> return []
+          | otherwise = fail "nothing to ignore"
+
+        pInstOpt :: PI [InstOpt]
+        pInstOpt = do {t<-pSyntax; return [t]}
+
 
 pLop3Expr :: PI Word8
 pLop3Expr = pOrExpr
@@ -205,8 +226,6 @@ pLop3Expr = pOrExpr
                 pW8 = pHexImm <* pWhiteSpace
 
 
-
-
 pDsts :: Op -> PI [Dst]
 pDsts op = do
     dst_pred_opt <- pDstPredOpt
@@ -218,6 +237,7 @@ pDsts op = do
               pSymbol ","
               return [dp]
           | otherwise = return []
+
 
 
 pDst :: PI Dst
