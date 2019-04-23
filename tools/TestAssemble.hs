@@ -56,10 +56,20 @@ testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
 testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
 testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
 testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
+testISETP = testFile "examples\\sm_75\\ops\\ISETP.sass"
 -- testSTG = testFile "examples\\sm_75\\ops\\STG.sass"
 -- 0041E8000010ED00`0000100402007386:        STG.E.128.SYS [R2+0x10], R4 {!4,+1.R,^3}
 
-t = testInst "000FE20000000F00`C200000000247802:  MOV R36, 0xc2000000 {!1} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2235"
+-- 000FD80003F04070`727FFFFF0000780C
+-- 000F`D800`03F0`4070
+--        96|  80|
+-- t = testInst "000FD80003F04070`727FFFFF0000780C:        ISETP.GT.U32.AND P0, PT, R0, 0x727fffff, PT {!12,Y} ;"
+t = testInst "000FC00000000000`0000000000007918:        NOP  {Y} ;"
+
+tld = testInst "000EA800001EE900`0000040004087381:        LDG.E.SYS R8, [R4+0x4] {!4,+3.W} ;"
+
+
+
 s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
 s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
 ia3 = "000FC80007F1E0FF`00005A0000027A10:        IADD3 R2, P0, R0, c[0x0][0x168], RZ {!4,Y} ; // examples/sm_75/samples\alignedTypes.sass:3122"
@@ -227,7 +237,7 @@ testSampleInst verbose si (fp,lno) syntax = do
                                 | otherwise = putStr
                           if encd /= f_val then putStr " ==> " else putStr "     "
                           putStrFunc $
-                            printf "    %-24s   %49s  %49s\n"
+                            printf "    %-32s   %49s  %49s\n"
                               (fmtField f)
                               (fHexFieldWithMeaning f (siBits si))
                               (fHexFieldWithMeaning f w_enc)
@@ -243,7 +253,7 @@ testSampleInst verbose si (fp,lno) syntax = do
                   putStrLn $ fmtInstIr i
                   putStrLn ""
                   putStrLn "=== encoded fields ==="
-                  putStrLn $ "     " ++ printf "    %-24s   %16s %32s  %16s %32s" "FIELD" "REFERENCE" "" "ENCODED" ""
+                  putStrLn $ "     " ++ printf "    %-32s   %16s %32s  %16s %32s" "FIELD" "REFERENCE" "" "ENCODED" ""
                   sequence diags
                   putStrLn ""
                   when verbose $

@@ -101,6 +101,9 @@ pDebug lbl pa = do
   pTraceLA $ "<< " ++ show a
   return a
 
+pLabel :: Monad m => String -> P m u a -> P m u a
+pLabel = flip P.label
+
 -- pDefineSymbol :: Monad m => Loc -> String -> Int -> P m u ()
 -- pDefineSymbol at name off = do
 --   ps <- P.getState

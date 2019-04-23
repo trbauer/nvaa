@@ -139,9 +139,20 @@ eInst i = enc
             "S2R" -> eS2R
             "IADD3" -> eIADD3
             "IMAD" -> eIMAD
+            "ISETP" -> eISETP
             "STG" -> eSTG
+            "NOP" -> do
+              eField fOPCODE 0x118
+              eRegFile False 0x4
+              ePredication
+              return ()
             s -> eFatal $ "unsupported operation"
           eDepInfo (iDepInfo i)
+
+        eRegFile :: Bool -> Word64 -> E ()
+        eRegFile unif val = do
+          eEncode fUNIFORMREG unif
+          eField fREGFILE val
 
         ePredication :: E ()
         ePredication = ePredicationSrc fPREDICATION (iPredication i)
@@ -220,33 +231,6 @@ eInst i = enc
             [_] -> eFatal "wrong kind of source operand"
             _ -> eFatal "wrong number of source operands"
 
-        ----------------------------------------------
-        eMOV :: E ()
-        eMOV = do
-          eField fOPCODE 0x002
-          ePredication
-          eDstRegR
-          case iSrcs i of
-            [src,SrcI imm] -> do
-              eUnrSrcs [src]
-              eField fMOV_SRC2_IMM4 (fromIntegral imm)
-            srcs -> do
-              -- MOV without the imm encodes as 0xF
-              eUnrSrcs srcs
-              eField fMOV_SRC2_IMM4 0xF
-          return ()
-
-        eS2R :: E ()
-        eS2R = do
-          eField fOPCODE 0x119
-          ePredication
-          eDstRegR
-          eField fREGFILE 0x4
-          case iSrcs i of
-            [SrcSR sr] ->
-              eEncode fS2R_SRC0 sr
-            _ -> eFatal "S2R requires SR* register source"
-
         eSrc1C :: Src -> E ()
         eSrc1C = eSrcXC (fSRC1_NEG,fSRC1_ABS,fSRC1_CIX,fSRC1_UREG,fSRC1_COFF)
         eSrc2C :: Src -> E ()
@@ -266,6 +250,7 @@ eInst i = enc
               eEncode fSRC_ABS abs
               eEncode fSRC_UREG sur
               eConstOffDiv4 fSRC_COFF soff
+            _ -> eFatal "INTERNAL ERROR: eSrcXC: wrong source type"
 
         eSrcR :: Int -> (Maybe Field,Maybe Field,Field,Field) -> Src -> E ()
         eSrcR src_ix (mfNEG,mfABS,fREU,fREG) (SrcR neg abs reu r) = do
@@ -287,8 +272,11 @@ eInst i = enc
         eSrc0R :: Src -> E ()
         eSrc0R = eSrcR 0 (Just fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
         -- e.g. .U32 of IMAD overlaps Src0.Negated
+        -- "NN" means no negation
         eSrc0R_NN :: Src -> E ()
         eSrc0R_NN = eSrcR 0 (Nothing,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
+        eSrc0R_NNA :: Src -> E ()
+        eSrc0R_NNA = eSrcR 0 (Nothing,Nothing,fSRC0_REUSE,fSRC0_REG)
         eSrc1R :: Src -> E ()
         eSrc1R = eSrcR 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
         eSrc2R :: Src -> E ()
@@ -303,6 +291,36 @@ eInst i = enc
         eSrc2UR_NN :: Src -> E ()
         eSrc2UR_NN = eSrcUR 2 (fSRC2_UREG,Nothing,Nothing) -- still targets [37:32] (just changes fName)
 
+        -----------------------------------------------------------------------
+        -----------------------------------------------------------------------
+        eMOV :: E ()
+        eMOV = do
+          eField fOPCODE 0x002
+          ePredication
+          eDstRegR
+          case iSrcs i of
+            [src,SrcI imm] -> do
+              eUnrSrcs [src]
+              eField fMOV_SRC_CHEN4 (fromIntegral imm)
+            srcs -> do
+              -- MOV without the imm encodes as 0xF
+              eUnrSrcs srcs
+              eField fMOV_SRC_CHEN4 0xF
+          return ()
+
+        -----------------------------------------------------------------------
+        eS2R :: E ()
+        eS2R = do
+          eField fOPCODE 0x119
+          ePredication
+          eDstRegR
+          eField fREGFILE 0x4
+          case iSrcs i of
+            [SrcSR sr] ->
+              eEncode fS2R_SRC0 sr
+            _ -> eFatal "S2R requires SR* register source"
+
+        -----------------------------------------------------------------------
         eIMAD :: E ()
         eIMAD = do
           eField fOPCODE (if iHasInstOpt InstOptWIDE i then 0x025 else 0x024)
@@ -313,8 +331,7 @@ eInst i = enc
           case iSrcs i of
             [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcR _ _ _ _)] -> do
               -- imad__RRR_RRR
-              eField fREGFILE 0x1
-              eEncode fUNIFORMREG False
+              eRegFile False 0x1
               --
               eSrc0R_NN s0
               --
@@ -323,8 +340,7 @@ eInst i = enc
               eSrc2R s2
             [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),SrcI imm] -> do
               -- imad__RRsI_RRI
-              eField fREGFILE 0x2
-              eEncode fUNIFORMREG False
+              eRegFile False 0x2
               --
               eSrc0R_NN s0
               --
@@ -333,8 +349,7 @@ eInst i = enc
               eSrc2R s1
             [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcC _ _ _ _)] -> do
               -- imad__RRC_RRC
-              eField fREGFILE 0x3
-              eEncode fUNIFORMREG False
+              eRegFile False 0x3
               --
               eSrc0R_NN s0
               --
@@ -343,8 +358,7 @@ eInst i = enc
               eSrc2R s1
             [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcCX _ _ _ _)] -> do
               -- imad__RRCx_RRCx
-              eField fREGFILE 0x3
-              eEncode fUNIFORMREG True
+              eRegFile True 0x3
               --
               eSrc0R_NN s0
               --
@@ -353,8 +367,7 @@ eInst i = enc
               eSrc2R s1
             [s0@(SrcR _ _ _ _),SrcI imm,s2@(SrcR _ _ _ _)] -> do
               -- imad__RsIR_RIR
-              eField fREGFILE 0x4
-              eEncode fUNIFORMREG False
+              eRegFile False 0x4
               --
               eSrc0R_NN s0
               --
@@ -363,8 +376,7 @@ eInst i = enc
               eSrc2R s2
             [s0@(SrcR _ _ _ _),s1@(SrcC _ _ _ _),s2@(SrcR _ _ _ _)] -> do
               -- imad__RCR_RCR
-              eField fREGFILE 0x5
-              eEncode fUNIFORMREG False
+              eRegFile False 0x5
               --
               eSrc0R_NN s0
               --
@@ -373,8 +385,7 @@ eInst i = enc
               eSrc2R s2
             [s0@(SrcR _ _ _ _),s1@(SrcCX _ _ _ _),s2@(SrcR _ _ _ _)] -> do
               -- imad__RCxR_RCxR
-              eField fREGFILE 0x5
-              eEncode fUNIFORMREG True
+              eRegFile True 0x5
               --
               eSrc0R_NN s0
               --
@@ -383,8 +394,7 @@ eInst i = enc
               eSrc2R s2
             [s0@(SrcR _ _ _ _),s1@(SrcUR _ _ _),s2@(SrcR _ _ _ _)] -> do
               -- imad__RUR_RUR
-              eField fREGFILE 0x6
-              eEncode fUNIFORMREG True
+              eRegFile True 0x6
               --
               eSrc0R_NN s0
               --
@@ -393,8 +403,7 @@ eInst i = enc
               eSrc2R s2
             [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcUR _ _ _)] -> do
               -- imad__RRU_RRU
-              eField fREGFILE 0x7
-              eEncode fUNIFORMREG True
+              eRegFile True 0x7
               --
               eSrc0R_NN s0
               --
@@ -410,6 +419,7 @@ eInst i = enc
               | iHasInstOpt InstOptX i -> ePredicationSrc fIADD3_X_SRCPRED1 pt
             _ -> eFatal "wrong number of predicate arguments"
 
+        -----------------------------------------------------------------------
         eIADD3 :: E ()
         eIADD3 = do
           eField fOPCODE 0x010
@@ -419,15 +429,15 @@ eInst i = enc
           -- the first two operands may be predicate sources,
           -- if they are omitted, we encode PT (0x7); neither has a sign
           (p0,p1,srcs) <-
-                case iSrcs i of
-                  (SrcP p0neg p0:SrcP p1neg p1:sfx)
-                    | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
-                    | p1neg -> eFatal "predicate negation not support on extra predicate source (1)"
-                    | otherwise -> return (p0,p1,sfx)
-                  (SrcP p0neg p0:sfx)
-                    | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
-                    | otherwise -> return (p0,PT,sfx)
-                  sfx -> return (PT,PT,sfx)
+            case iSrcs i of
+              (SrcP p0neg p0:SrcP p1neg p1:sfx)
+                | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
+                | p1neg -> eFatal "predicate negation not support on extra predicate source (1)"
+                | otherwise -> return (p0,p1,sfx)
+              (SrcP p0neg p0:sfx)
+                | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
+                | otherwise -> return (p0,PT,sfx)
+              sfx -> return (PT,PT,sfx)
           eEncode fIADD3_SRCPRED0 p0
           eEncode fIADD3_SRCPRED1 p1
           case srcs of
@@ -502,6 +512,73 @@ eInst i = enc
             -- eField (fi "IADD.UNKNOWN90_87" 87 4) 0xF
           return ()
 
+        -----------------------------------------------------------------------
+        eISETP :: E ()
+        eISETP = do
+          eField fOPCODE 0x00C
+          --
+          ePredication
+          --
+          let iOptsSubset xs = filter (`elem`xs) (iOptions i)
+          -- .EX
+          eEncode fISETP_EX (iHasInstOpt InstOptEX i)
+          -- .U32
+          eEncode fISETP_U32 (not (iHasInstOpt InstOptU32 i))
+          -- .{AND,OR,XOR}
+          case iOptsSubset [InstOptAND,InstOptOR,InstOptXOR] of
+            [InstOptAND] -> eField fISETP_COMBINING_FUNCTION 0x0
+            [InstOptOR]  -> eField fISETP_COMBINING_FUNCTION 0x1
+            [InstOptXOR] -> eField fISETP_COMBINING_FUNCTION 0x2
+            _ -> eFatal "exactly one combining function required (.AND,.OR,.XOR)"
+          -- .{F,LT,EQ,...}
+          case iOptsSubset inst_opt_isetp_functions of
+            [InstOptF]  -> eField fISETP_FUNCTION 0x0
+            [InstOptLT] -> eField fISETP_FUNCTION 0x1
+            [InstOptEQ] -> eField fISETP_FUNCTION 0x2
+            [InstOptLE] -> eField fISETP_FUNCTION 0x3
+            [InstOptGT] -> eField fISETP_FUNCTION 0x4
+            [InstOptNE] -> eField fISETP_FUNCTION 0x5
+            [InstOptGE] -> eField fISETP_FUNCTION 0x6
+            [InstOptT]  -> eField fISETP_FUNCTION 0x7
+            _ -> eFatal "exactly one comparison function required"
+          case iDsts i of
+            [DstP p] -> eEncode fISETP_DST_PRED p
+            _ ->  eFatal "malformed destination"
+          case iSrcs i of
+            [SrcP c_neg c_pr, src0@(SrcR _ _ _ _), src1] -> do
+              when c_neg $
+                eFatalF fISETP_SRC0_PRED "src0 predicate cannot be negated"
+              ePredicationSrc fISETP_SRC0_PRED (PredP c_neg c_pr)
+              eSrc0R_NNA src0
+              case src1 of
+                SrcR _ _ _ _ -> eRegFile False 0x1 >> eSrc1R src1
+                SrcC _ _ _ _ -> eRegFile False 0x5 >> eSrc1C src1
+                SrcCX _ _ _ _ -> eRegFile True 0x5 >> eSrc1C src1
+                SrcI imm -> eRegFile False 0x4 >> eField fSRC1_IMM imm
+                SrcUR _ _ _ -> eRegFile True 0x6 >> eSrc1UR_NN src1
+                _ -> eFatal "source 1 must be R, I, or C"
+            _ -> eFatal "wrong number of sources (expects P, R, R|I|C, P(, P?))"
+          case iSrcPreds i of
+            [] -> eFatal "extra source predicate expected (src3)"
+            -- not sure how to get ISETP to use a different symbol for src3
+            -- or where the bits actually go?
+            (src3:sfx) -> do
+              ePredicationSrc fISETP_SRC3_PRED src3
+              case sfx of
+                [] -> ePredicationSrc fISETP_SRC4_PRED (PredP False PT)
+                [psrc] -> ePredicationSrc fISETP_SRC4_PRED psrc
+                _ -> eFatal "wrong number of extra source predicates (src4)"
+
+
+        -----------------------------------------------------------------------
+        eLDG :: E ()
+        eLDG = do
+          eField fOPCODE 0x181
+          ePredication
+          -- case iSrcs i of
+          --  []
+
+        -----------------------------------------------------------------------
         eSTG :: E ()
         eSTG = do
           eField fOPCODE 0x186
@@ -695,9 +772,9 @@ fDST_REG = fR "Dst.Reg" 16
 fSRC0_REG :: Field
 fSRC0_REG = fR "Src0.Reg" 24
 fSRC0_ABS :: Field
-fSRC0_ABS = fABS 1 72
+fSRC0_ABS = fABS 0 72
 fSRC0_NEG :: Field
-fSRC0_NEG = fNEG 1 73
+fSRC0_NEG = fNEG 0 73
 
 
 fSRC1_REG :: Field
@@ -793,10 +870,23 @@ fSRC2_REUSE = afterB fSRC1_REUSE "Src2.Reuse" ".reuse" -- [125]
 
 
 -------------------------------------------------------------------------------
--- special per-instruction fields with unknown behavior
+-- special per-instruction fields
 --
-fMOV_SRC2_IMM4 :: Field
-fMOV_SRC2_IMM4 = fi "Mov.Src2.Imm4" 72 4
+fMOV_SRC_CHEN4 :: Field
+fMOV_SRC_CHEN4 = f "Mov.ChEn4" 72 4 fmt
+  where fmt _ v =
+          -- bit 0 enables X (0,4,..)
+          -- bit 1 enables Y (1,5,..)
+          -- bit 2 enables Z (2,6,..)
+          -- bit 3 enables W (3,7,..)
+          case v of
+            0xF -> ".XYZW: all channels enabled"
+            0x0 -> "all channels disabled"
+            x ->
+              case filter (testBit x) [0,1,2,3] of
+                chs -> "." ++ map ("XYZW"!!) chs
+
+-- this is a channel
 
 fS2R_SRC0 :: Field
 fS2R_SRC0 = fi "S2R.Src0" 72 8
@@ -875,4 +965,33 @@ fLDST_CACHING = f "LDST.Caching" 84 3 $ \_ val ->
     6 -> ".INVALID6"
     7 -> ".INVALID7"
 
+fISETP_DST_PRED :: Field
+fISETP_DST_PRED = fPREDSRC_UNSIGNED "ISETP.Dst.Reg" 81
 
+fISETP_SRC0_PRED :: Field
+fISETP_SRC0_PRED = fPREDSRC_UNSIGNED "ISETP.Src0.PredExpr" 84
+fISETP_SRC3_PRED :: Field
+fISETP_SRC3_PRED = fPREDSRC "ISETP.Src3.PredExpr" 87
+fISETP_SRC4_PRED :: Field
+fISETP_SRC4_PRED = fPREDSRC "ISETP.Src4.PredExpr" 68
+
+fISETP_EX :: Field
+fISETP_EX = fb "ISETP.IsU32" 72 ".EX" -- 64b
+
+fISETP_U32 :: Field
+fISETP_U32 = fl "ISETP.IsU32" 73 1 [".U32","(.S32)"]
+
+fISETP_COMBINING_FUNCTION :: Field
+fISETP_COMBINING_FUNCTION = fl "ISETP.CombiningFunction" 74 2 [".AND",".OR",".XOR",".INVALID3"]
+
+fISETP_FUNCTION :: Field
+fISETP_FUNCTION = f "ISETP.Function" 76 3 $ \_ val ->
+  case val of
+    0 -> ".F"
+    1 -> ".LT"
+    2 -> ".EQ"
+    3 -> ".LE"
+    4 -> ".GT"
+    5 -> ".NE"
+    6 -> ".GE"
+    7 -> ".T"

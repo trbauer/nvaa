@@ -113,6 +113,8 @@ data Dst =
     DstR !R
   | DstP !PR
   | DstB !BR
+  | DstUR !UR
+  | DstUP !UP
   deriving (Show,Eq)
 instance Syntax Dst where
   format d =
@@ -120,6 +122,8 @@ instance Syntax Dst where
       DstR r -> format r
       DstP r -> format r
       DstB r -> format r
+      DstUR r -> format r
+      DstUP r -> format r
 
 data Src =
     --    neg    abs   reuse
@@ -131,6 +135,7 @@ data Src =
   --      nega   abs
   | SrcUR !Bool !Bool         !UR  -- uniform reg (I don't think this can be absval)
   | SrcP  !Bool  !PR               -- predication
+  | SrcUP !Bool  !UP
   | SrcB  !BR                      -- barrier register
 --  | SrcI  !Int64                   -- immediate (f32 is in the low 32 in binary)
   | SrcI  !Word64                  -- immediate (f32 is in the low 32 in binary)
@@ -149,6 +154,7 @@ instance Syntax Src where
         SrcUR neg abs ur -> negAbs neg abs (format ur)
         SrcSR sr -> format sr
         SrcP neg pr -> maybeS neg "!" ++ format pr
+        SrcUP neg pr -> maybeS neg "!" ++ format pr
         SrcB br -> format br
         SrcI i -> printf "0x%08X" (fromIntegral i :: Word32)
     where maybeS z s = if z then s else ""
@@ -164,6 +170,7 @@ sNegated s =
     SrcCX n _ _ _ -> n
     SrcUR n _ _ -> n
     SrcP n _ -> n
+    SrcUP n _ -> n
     _ -> False
 
 sAbs :: Src -> Bool
@@ -439,12 +446,14 @@ instance Syntax BR where format = show
 -- instruction options are the tokens following the mnemonic
 data InstOpt =
     -- ISETP/UISETP
-    InstOptEQ
-  | InstOptNE
+    InstOptF
   | InstOptLT
+  | InstOptEQ
   | InstOptLE
-  | InstOptGE
   | InstOptGT
+  | InstOptNE
+  | InstOptGE
+  | InstOptT
   -- FSETP/HSETP
   | InstOptEQU
   | InstOptNEU
@@ -459,6 +468,7 @@ data InstOpt =
   --
   | InstOptAND
   | InstOptOR
+  | InstOptXOR
   --
   | InstOptFTZ -- FSETP, others
   | InstOptRZ -- round to zero
@@ -497,6 +507,8 @@ data InstOpt =
   | InstOpt128 -- .128
   --
   | InstOptPRIVATE
+  --
+  | InstOptZD
   -- scope
   | InstOptCTA
   | InstOptSM
@@ -511,11 +523,22 @@ data InstOpt =
   | InstOptLU
   | InstOptEU
   | InstOptNA
-
   deriving (Show,Eq,Ord,Enum)
 instance Syntax InstOpt where
   -- format = ('.':) . drop (length "InstOpt") . show
   format = drop (length "InstOpt") . show
+inst_opt_isetp_functions :: [InstOpt]
+inst_opt_isetp_functions =
+  [
+    InstOptF
+  , InstOptLT
+  , InstOptEQ
+  , InstOptLE
+  , InstOptGT
+  , InstOptNE
+  , InstOptGE
+  , InstOptT
+  ]
 inst_opt_ldst_types :: [InstOpt]
 inst_opt_ldst_types = [InstOptU,InstOptU8,InstOptS8,InstOptU16,InstOptS16,InstOpt64,InstOpt128]
 inst_opt_ldst_scope :: [InstOpt]
@@ -569,18 +592,30 @@ fmtInst i =
 
               _ -> ""
           | otherwise = ""
+
         opnds_str :: String
         opnds_str
-          | iOp i == Op "STG" = src_addr ++ ", " ++ src_data
+          | iOp i == Op "LDG" = intercalate "," dsts ++ ", " ++ fmtAddrs (iSrcs i)
+          | iOp i == Op "STG" = st_src_addr ++ ", " ++ st_src_data
           | otherwise = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
-          where (src_addr,src_data) =
+          where (st_src_addr,st_src_data) =
                   case iSrcs i of
-                    [SrcR _ _ _ r, SrcUR _ _ ur, SrcI imm, SrcR _ _ _ dat] ->
-                        ("[" ++ format r ++ opt_ur ++ opt_imm ++ "]",format dat)
+                    [_, _, _, SrcR _ _ _ dat] ->
+                        (fmtAddrs (iSrcs i),format dat)
+                    _ -> ("?","?")
+
+                fmtAddrs :: [Src] -> String
+                fmtAddrs srcs =
+                  case srcs of
+                    (SrcR _ _ _ r:SrcUR _ _ ur:SrcI imm:_) ->
+                        "[" ++ format r ++ opt_ur ++ opt_imm ++ "]"
                       where opt_ur = if ur == URZ then "" else ("+" ++ format ur)
                             opt_imm = if imm /= 0 then "" else (printf "+0x%X" imm)
+                    _ -> "?"
+
                 dsts = map format (iDsts i)
                 srcs = map format visible_srcs
+
                 visible_srcs
                   | iOp i == Op "IADD3" =
                     case iSrcs i of

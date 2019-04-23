@@ -125,17 +125,17 @@ pBlocks pc0 li0 = seqResult <$> pInstOrLabel [] pc0 li0
 
         pInstOrLabel :: [Unresolved Inst] -> PC -> LabelIndex -> PI ([Unresolved Inst],LabelIndex)
         pInstOrLabel ruis pc lbl_ix =
-            pTryInst <|> pLabel <|> pEof
-          where pTryInst = do
+            P.try pLabel <|> pInstNoFail <|> pEof
+          where pInstNoFail = do
                   ui <- P.try (pInst pc)
                   pInstOrLabel (ui:ruis) (pc+16) lbl_ix
                 pLabel = pWithLoc $ \loc -> do
                   lbl <- pLabelChars
+                  pSymbol ":"
                   case lbl`lookup`lbl_ix of
                     Just x ->
                       pSemanticError loc "label already defined"
                     Nothing -> do
-                      pSymbol ":"
                       pInstOrLabel ruis pc ((lbl,pc):lbl_ix)
                 pEof = do
                   P.eof
@@ -154,8 +154,8 @@ pInst pc = pWhiteSpace >> body
               let dft_pred = SrcP False PT
               (p0,p1) <-
                 P.option (dft_pred,dft_pred) $ P.try $ do
-                  p0 <- pSymbol "," >> pRegP
-                  p1 <- P.option dft_pred (P.try $ pSymbol "," >> pRegP)
+                  p0 <- pSymbol "," >> pSrcP
+                  p1 <- P.option dft_pred (P.try $ pSymbol "," >> pSrcP)
                   return (p0,p1)
               pIntTernary loc prd op opts dsts (resolveds [p0, p1])
             Op "IMAD" -> do
@@ -164,7 +164,28 @@ pInst pc = pWhiteSpace >> body
               pIntTernary loc prd op opts dsts []
             Op "STG" -> do
               opts <- pInstOpts op
-              pSTG loc prd op opts
+              pST loc prd op opts
+            Op "LDG" -> do
+              opts <- pInstOpts op
+              pLD loc prd op opts
+            Op "ISETP" -> do
+              opts <- pInstOpts op
+              dst <- pDst
+              pSymbol_ ","
+              c_pred <- pSrcP
+              pSymbol_ ","
+              unresolved_srcs <- pSrcsN 2 pc op
+              x_pred_srcs <- pOptPreds
+              pCompleteInst
+                loc
+                prd
+                op
+                opts
+                [dst]
+                (resolved c_pred:unresolved_srcs)
+                x_pred_srcs
+            Op "NOP" -> do
+              pCompleteInst loc prd op [] [] [] []
             _ -> do
               opts <- pInstOpts op
               dsts <- pDsts op
@@ -194,8 +215,30 @@ pInst pc = pWhiteSpace >> body
             -- else return [PredP True PT,PredP True PT]
           pCompleteInst loc prd op opts dsts (src_pfx_preds++unresolved_srcs) x_pred_srcs
 
-        pSTG :: Loc -> Pred -> Op -> [InstOpt] -> PI (Unresolved Inst)
-        pSTG loc prd op opts = do
+        pLD :: Loc -> Pred -> Op -> [InstOpt] -> PI (Unresolved Inst)
+        pLD loc prd op opts = do
+          let pDstPred = do
+                p <- pDstP
+                pSymbol_ ","
+                return [p]
+          dst_p <- if InstOptZD`elem`opts then pDstPred else return []
+          dst_r <- pDstR
+          pSymbol_ ","
+          let pBareSrcR = SrcR False False False <$> pSyntax
+          pSymbol "["
+          r_addr <- pBareSrcR
+          -- TODO: UR# goes in middle
+          let pImmOffs = do
+                ur <- P.option URZ $ P.try (pSymbol "+" >> pSyntax)
+                i <- P.option (SrcI 0) $ P.try (pSymbol "+" >> pSrcI op)
+                return (SrcUR False False ur,i)
+          (ur_off,i_off) <- pImmOffs
+          pSymbol "]"
+          pCompleteInst
+            loc prd op opts (dst_p++[dst_r]) (resolveds [r_addr,ur_off,i_off]) []
+
+        pST :: Loc -> Pred -> Op -> [InstOpt] -> PI (Unresolved Inst)
+        pST loc prd op opts = do
           let pBareSrcR = SrcR False False False <$> pSyntax
           pSymbol "["
           r_addr <- pBareSrcR
@@ -209,6 +252,7 @@ pInst pc = pWhiteSpace >> body
           pSymbol ","
           r_data <- pBareSrcR
           pCompleteInst loc prd op opts [] (resolveds [r_addr,ur_off,i_off,r_data]) []
+
 
         -- up to two predicate sources
         pOptPreds = do
@@ -315,7 +359,7 @@ pDsts op = do
     return $ dst_pred_opt ++ [dst]
   where pDstPredOpt
           | oHasDstPred op = do
-              dp <- pDstPred
+              dp <- pDstP
               pSymbol ","
               return [dp]
           | otherwise = return []
@@ -323,13 +367,17 @@ pDsts op = do
 
 
 pDst :: PI Dst
-pDst = pDstReg <|> pDstPred <|> pDstRegB
-pDstReg :: PI Dst
-pDstReg = DstR <$> pSyntax
-pDstRegB :: PI Dst
-pDstRegB = DstB <$> pSyntax
-pDstPred :: PI Dst
-pDstPred = DstP <$> pSyntax
+pDst = pDstR <|> pDstP <|> pDstUP <|> pDstUR <|> pDstB
+pDstR :: PI Dst
+pDstR = pLabel "reg" $ DstR <$> pSyntax
+pDstB :: PI Dst
+pDstB = pLabel "barrier" $ DstB <$> pSyntax
+pDstP :: PI Dst
+pDstP = pLabel "pred reg" $ DstP <$> pSyntax
+pDstUP :: PI Dst
+pDstUP = pLabel "unif pred reg" $ DstUP <$> pSyntax
+pDstUR :: PI Dst
+pDstUR = pLabel "unif reg" $ DstUR <$> pSyntax
 
 pSrcsN :: Int -> PC -> Op -> PI [Unresolved Src]
 pSrcsN 0 _  _  = return []
@@ -345,24 +393,26 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
         pNonLabel = alwaysSucceeds <$> pCases
           where pCases =
                   P.try (pSrcI op) <|>
-                  P.try pConstInd <|>
-                  P.try pConstDir <|>
-                  pReg <|>
-                  pRegSR <|>
-                  pRegUR <|>
-                  pRegP <|>
-                  pRegB
+                  pSrcCCX <|>
+                  pSrcR <|>
+                  pSrcSR <|>
+                  pSrcUR <|>
+                  pSrcUP <|>
+                  pSrcP <|>
+                  pSrcB
 
         alwaysSucceeds :: Src -> Unresolved Src
         alwaysSucceeds src _ = Right src
 
-        pReg :: PI Src
-        pReg = do
-          (r,neg,abs) <- pWithNegAbs pSyntax
-          reuse <- P.option False $ P.try (pSymbol ".reuse" >> return True)
-          return $ SrcR neg abs reuse r
+        pImmLbl :: PI (Unresolved Src)
+        pImmLbl = pLabel "label expression" $ do
+          e <- pLExpr pc
+          return $ \lix -> SrcI <$> evalLExpr lix e
 
-        pConstDir :: PI Src
+
+pSrcCCX :: PI Src
+pSrcCCX = pLabel "const surface" $ P.try pConstInd <|> P.try pConstDir
+  where pConstDir :: PI Src
         pConstDir = do
           let pCon = do
                 pSymbol "c"
@@ -390,14 +440,9 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
               return (u,o)
           return $ SrcCX neg abs u o
 
-        pImmLbl :: PI (Unresolved Src)
-        pImmLbl = do
-          e <- pLExpr pc
-          return $ \lix -> SrcI <$> evalLExpr lix e
-
 -- rejects 32@hi... and 32@lo...
 pSrcI :: Op -> PI Src
-pSrcI = pSrcImmNonBranch
+pSrcI = pLabel "imm" . pSrcImmNonBranch
 pSrcImmNonBranch :: Op -> PI Src
 pSrcImmNonBranch op = do
     imm <- pVal
@@ -427,8 +472,14 @@ pWithNegAbs pBody = do
   (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
   return (r,neg,abs)
 
-pRegSR :: PI Src
-pRegSR = SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
+pSrcR :: PI Src
+pSrcR = pLabel "reg" $ do
+  (r,neg,abs) <- pWithNegAbs pSyntax
+  reuse <- P.option False $ P.try (pSymbol ".reuse" >> return True)
+  return $ SrcR neg abs reuse r
+
+pSrcSR :: PI Src
+pSrcSR = pLabel "sys reg" $ SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
   where pUnderbarTidCtaid =
           -- we accept these with a dot, but we also allow
           -- the more IR-consistent form here (SR_TID.X)
@@ -443,16 +494,21 @@ pRegSR = SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
           (pSymbol "SR_CTAID_Y" >> return SR_TID_Y) <|>
           (pSymbol "SR_CTAID_Z" >> return SR_TID_Z)
 
-pRegUR :: PI Src
-pRegUR = do
+pSrcUR :: PI Src
+pSrcUR = pLabel "unif reg" $ do
   (ur,neg,abs) <- pWithNegAbs pSyntax
   return (SrcUR neg abs ur)
 
-pRegP :: PI Src
-pRegP = SrcP <$> pNegationLogical <*> pSyntax
+pSrcP :: PI Src
+pSrcP = pLabel "pred reg" $
+  SrcP <$> pNegationLogical <*> pSyntax
 
-pRegB :: PI Src
-pRegB = SrcB <$> pSyntax
+pSrcUP :: PI Src
+pSrcUP = pLabel "pred reg" $
+  SrcUP <$> pNegationLogical <*> pSyntax
+
+pSrcB :: PI Src
+pSrcB = pLabel "barrier reg" $ SrcB <$> pSyntax
 
 
 pLExpr :: PC -> PI LExpr
