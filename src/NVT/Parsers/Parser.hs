@@ -96,9 +96,11 @@ pTraceLAK k msg = do
 
 pDebug :: (Monad m, Show a) => String -> P m u a -> P m u a
 pDebug lbl pa = do
-  pTraceLA $ ">> " ++ lbl
+  inp1 <- P.getInput
+  pTrace $ ">> " ++ lbl ++ " | " ++ show (take 10 inp1) ++ "  ..."
   a <- pa
-  pTraceLA $ "<< " ++ show a
+  inp2 <- P.getInput
+  pTrace $ "<< " ++ lbl ++ " | " ++ show a ++ " | " ++ show (take 10 inp2) ++ "  ..."
   return a
 
 pLabel :: Monad m => String -> P m u a -> P m u a

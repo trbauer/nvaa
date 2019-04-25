@@ -51,13 +51,26 @@ import Text.Printf
         /*00a0*/                   BRA 0xa0;                                /* 0xfffffff000007947 */
                                                                             /* 0x000fc0000383ffff */
 -}
+-- [11:9]  [90] [91]  [31:24]
+--    1     *    0     /=RZ       LDG.E.64.SYS R16, [R24] {!1,+4.W} ;
+--    4     0    1     /=RZ       LDG.E.64.SYS R16, [R254.U32+UR0]
+--    4     0    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
+--    4     1    1     /=RZ       LDG.E.64.SYS R16, [R254.64+UR0]
+--    4     1    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
+
+
+-- 000EE200001EEB00`0000000018107381:        LDG.E.64.SYS R16, [R24] {!1,+4.W} ;
+-- 000EE2000C1EEB00`00000004FF107981:        LDG.E.64.SYS R16, [UR4] {!1,+4.W} ;
+
+--
 
 testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
 testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
 testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
 testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
 testISETP = testFile "examples\\sm_75\\ops\\ISETP.sass"
--- testSTG = testFile "examples\\sm_75\\ops\\STG.sass"
+testSTG = testFile "examples\\sm_75\\ops\\STG.sass"
+testLDG = testFile "examples\\sm_75\\ops\\LDG.sass"
 -- 0041E8000010ED00`0000100402007386:        STG.E.128.SYS [R2+0x10], R4 {!4,+1.R,^3}
 
 -- 000FD80003F04070`727FFFFF0000780C
@@ -152,7 +165,9 @@ stripPrefixBits ln =
 
 
 testFile :: FilePath -> IO Bool
-testFile fp = do
+testFile = testFileK (-1)
+testFileK :: Int -> FilePath -> IO Bool
+testFileK k fp = do
   let testLoop [] = return True
       testLoop ((lno,ln):lns)
         | instHasLabels ln = do
@@ -181,7 +196,8 @@ testFile fp = do
               if not z then return False
                 else do
                   testLoop lns
-  flns <- lines <$> readFile fp
+  let takePrefix = if k >= 0 then take k else id
+  flns <- takePrefix . lines <$> readFile fp
   testLoop $ zip [1..] flns
 
 -- 000FE40000000F00`0000000000147802:        MOV R20, 32@lo((_Z21computeBezierLinesCDPP10BezierLinei + .L_4@srel)) {!2} ; // examples/sm_75/samples\BezierLineCDP.sass:1526

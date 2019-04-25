@@ -225,34 +225,50 @@ pInst pc = pWhiteSpace >> body
           dst_r <- pDstR
           pSymbol_ ","
           let pBareSrcR = SrcR False False False <$> pSyntax
-          pSymbol "["
-          r_addr <- pBareSrcR
-          -- TODO: UR# goes in middle
-          let pImmOffs = do
-                ur <- P.option URZ $ P.try (pSymbol "+" >> pSyntax)
-                i <- P.option (SrcI 0) $ P.try (pSymbol "+" >> pSrcI op)
-                return (SrcUR False False ur,i)
-          (ur_off,i_off) <- pImmOffs
-          pSymbol "]"
+          (r_addr,ur_off,i_off) <- pLDST_Addrs op
+
           pCompleteInst
             loc prd op opts (dst_p++[dst_r]) (resolveds [r_addr,ur_off,i_off]) []
 
+        --  R (+ UR) (+ IMM)
+        --       UR  (+ IMM)
+        --       IMM (+ UR)
+        --
+        -- TODO: support for LDS offsets and the other [91:90] stuff
+        pLDST_Addrs :: Op -> PI (Src,Src,Src)
+        pLDST_Addrs op = do
+          let src_urz = SrcUR False False URZ
+          let src_rz = SrcR False False False RZ
+          let pBareSrcUR = pLabel "ureg" $ SrcUR False False <$> pSyntax
+          let pR_UR_IMM = do
+                r_addr <- pBareSrcR
+                let pAddends = do
+                      pSymbol "+"
+                      P.try pUR_IMM <|> pIMM_UR
+                (_,src_ur,src_imm) <- pAddends <|> return (src_rz,src_urz,SrcI 0)
+                return (r_addr,src_ur,src_imm)
+              pUR_IMM = do
+                ur <- pBareSrcUR
+                imm <- P.option (SrcI 0) $ pSymbol "+" >> pSrcI op
+                return (src_rz,ur,imm)
+              pIMM_UR = do
+                imm <- pSrcI op
+                ur <- P.option src_urz $ pSymbol "+" >> pBareSrcUR
+                return (src_rz,ur,imm)
+          pSymbol "["
+          r <- P.try pUR_IMM <|> P.try pIMM_UR <|> pR_UR_IMM
+          pSymbol "]"
+          return r
+
         pST :: Loc -> Pred -> Op -> [InstOpt] -> PI (Unresolved Inst)
         pST loc prd op opts = do
-          let pBareSrcR = SrcR False False False <$> pSyntax
-          pSymbol "["
-          r_addr <- pBareSrcR
-          -- TODO: UR# goes in middle
-          let pImmOffs = do
-                ur <- P.option URZ $ P.try (pSymbol "+" >> pSyntax)
-                i <- P.option (SrcI 0) $ P.try (pSymbol "+" >> pSrcI op)
-                return (SrcUR False False ur,i)
-          (ur_off,i_off) <- pImmOffs
-          pSymbol "]"
+          (r_addr,ur_off,i_off) <- pLDST_Addrs op
           pSymbol ","
           r_data <- pBareSrcR
           pCompleteInst loc prd op opts [] (resolveds [r_addr,ur_off,i_off,r_data]) []
 
+        pBareSrcR :: PI Src
+        pBareSrcR = pLabel "reg" $  SrcR False False False <$> pSyntax
 
         -- up to two predicate sources
         pOptPreds = do

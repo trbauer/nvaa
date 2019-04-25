@@ -1,7 +1,8 @@
 module NVT.IR where
 
-import NVT.Loc
 import NVT.Encoders.Codable
+import NVT.Loc
+import qualified NVT.EnumSet as ES
 
 import Data.Bits
 import Data.Int
@@ -109,6 +110,48 @@ instance Syntax Pred where
 --   | PredNEG
 --   deriving (Show,Eq)
 
+-- operand modifiers
+data Mod =
+    -- prefix modifiers
+    ModABS   -- |R12|
+  | ModNEG   -- -R12 or !P1
+  | ModCOMP  -- ~R12
+  -- suffix modifiers
+  --
+  -- for LD*/ST*
+  | ModU32   -- [R12.U32]
+  | Mod64    -- [R12.64]
+  -- LDS/STS
+  | ModX4    -- LDS ... [R12.X4]
+  | ModX8    -- LDS ... [R12.X8]
+  | ModX16   -- LDS ... [R12.X16]
+  --
+  | ModREU   -- R12.reuse
+  -- these suffixes all follow the .reuse flag
+  | ModH0_H0 -- HADD2 ... R12.reuse.H0_H0
+  | ModH1_H1 -- ...
+  | ModROW -- IMMA ... R12.reuse.ROW
+  | ModCOL --
+  deriving (Show,Eq,Ord,Enum)
+type ModSet = ES.EnumSet Mod
+msElem :: Mod -> ModSet -> Bool
+msElem = ES.elem
+msCons :: [Mod] -> ModSet
+msCons = ES.fromList
+mMutuallyExclusive :: Mod -> Mod -> Bool
+mMutuallyExclusive m1 m2 = m1 == m2 || check sets
+  where check [] = False
+        check (ms:mss) = m1 `msElem` ms && m2 `msElem` ms || check mss
+
+        sets :: [ModSet]
+        sets = map msCons
+          [
+            [ModX4,ModX8,ModX16]
+          , [ModH0_H0,ModH1_H1]
+          , [ModROW,ModCOL]
+          , [ModU32,Mod64]
+          ]
+
 data Dst =
     DstR !R
   | DstP !PR
@@ -124,6 +167,9 @@ instance Syntax Dst where
       DstB r -> format r
       DstUR r -> format r
       DstUP r -> format r
+
+data Src2 =
+    Src2R !ModSet !R
 
 data Src =
     --    neg    abs   reuse
@@ -508,7 +554,7 @@ data InstOpt =
   --
   | InstOptPRIVATE
   --
-  | InstOptZD
+  | InstOptZD  -- .ZD (on LDG)
   -- scope
   | InstOptCTA
   | InstOptSM
@@ -610,7 +656,7 @@ fmtInst i =
                     (SrcR _ _ _ r:SrcUR _ _ ur:SrcI imm:_) ->
                         "[" ++ format r ++ opt_ur ++ opt_imm ++ "]"
                       where opt_ur = if ur == URZ then "" else ("+" ++ format ur)
-                            opt_imm = if imm /= 0 then "" else (printf "+0x%X" imm)
+                            opt_imm = if imm == 0 then "" else (printf "+0x%X" imm)
                     _ -> "?"
 
                 dsts = map format (iDsts i)

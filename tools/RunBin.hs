@@ -37,12 +37,17 @@ data Opts =
     oVerbosity :: !Int
   , oSaveExe :: !Bool
   , oPath :: !FilePath
+  , oIterations :: !Int
   } deriving Show
+osVerboseLn :: Opts -> String -> IO ()
+osVerboseLn os = when (oVerbosity os > 0) . putStrLn
+
 dft_opts :: Opts
-dft_opts = Opts 0 False ""
+dft_opts = Opts 0 False "" 1
 
 run :: [String] -> IO ()
-run as = parseArgs dft_opts as >>= runWithOpts
+run as = parseArgs dft_opts as >>= runWithOpts (const True)
+
 
 vERSION :: String
 vERSION = "0.0.0"
@@ -54,6 +59,7 @@ usage =
   "usage: runasm.exe [OPTIONS]  <INPUT>\n" ++
   "where OPTIONS are:\n" ++
   "  -v/-v2/-q        verbose/debug/quiet\n" ++
+  "  -i=INT           iterations\n" ++
   "\n" ++
   "EXAMPLES:\n" ++
   " % runasm foo.sass\n" ++
@@ -72,6 +78,7 @@ parseArgs os (a:as)
   | "-q" == a = parseArgs os{oVerbosity = -1} as
   | "-v" == a = parseArgs os{oVerbosity = 1} as
   | "-v2" == a = parseArgs os{oVerbosity = 2} as
+  | "-i" == key = parseInt (\i -> os{oIterations = i})
   | "-"`isPrefixOf`a = badArg "unrecognized option"
   | null (oPath os) = parseArgs os{oPath=a} as
   | otherwise = badArg "duplicate argument"
@@ -79,23 +86,66 @@ parseArgs os (a:as)
         badArg msg = fatal (a ++ ": " ++ msg)
         (key,eq_val) = span (/='=') a
         val = drop 1 eq_val
+        parseInt :: (Int -> Opts) -> IO Opts
+        parseInt f =
+          case reads val of
+            [(x,"")] -> parseArgs (f x) as
+            _ -> badArg "malformed int"
 
 fatal :: String -> IO a
 fatal msg = do
   hPutStrLn stderr msg
   exitFailure
 
+type RunResult = (Int,String,String)
 
-runWithOpts :: Opts -> IO ()
-runWithOpts os = do
+test :: IO ()
+test = runWithOpts (==ws) dft_opts{oPath = "trial.sass"}
+  where ws :: [Word32]
+        ws = []
+
+runWithOpts :: ([Word32] -> Bool) -> Opts -> IO ()
+runWithOpts referee os = do
+  rrs <- runWithOptsRs os
+  forM_ (zip rrs [0..]) $ \((ec,out,err),run) -> do
+    -- fatal ("micro exited " ++ show ec ++ "\n" ++ out ++ err)
+    putStrLn $ "============ RUN " ++ show run ++ " exited " ++ show ec
+    putStr err
+    putStr out
+    let ws :: [String]
+        ws = concatMap (drop 1 . words) (drop 2 (lines out))
+
+        par [] = Just []
+        par (w:ws) =
+          case reads w of
+            [(x,"")] ->
+              case par ws of
+                Just xs -> Just (x:xs)
+                _ -> Nothing
+            _ -> Nothing
+    case par ws of
+      Nothing -> putStrLn "output parse failed"
+      Just xs -> do
+        unless (referee xs) $
+          putStrLn "referee failed (output mismatches expected)"
+    return ()
+  -- let (ecs,outs,errs) = unzip3 rrs
+  unless (null rrs) $ do
+    when (any (/= head rrs) (tail rrs)) $
+      putStrLn "output differs"
+
+
+
+runWithOptsRs :: Opts -> IO [RunResult]
+runWithOptsRs os = do
   exe <- assembleExe os
-  (ec,out,err) <- readProcessWithExitCode exe [] ""
-  case ec of
-    ExitFailure ec -> fatal ("micro exited " ++ show ec ++ "\n" ++ out ++ err)
-    ExitSuccess -> do
-      putStr err
-      putStr out
-      return ()
+  forM [0 .. (oIterations os - 1)] $ \i -> do
+    (ec,out,err) <- readProcessWithExitCode exe [] ""
+    case ec of
+      ExitFailure ec -> return (ec,out,err)
+      ExitSuccess -> return (0,out,err)
+
+
 
 data SkeletonExeInfo =
   SkeletonExeInfo !Int !Int !BS.ByteString
@@ -126,7 +176,8 @@ assembleExe os = do
   inp_w128s <- assembleInput os
   let inp_bs = BS.concat $ map toByteStringU128LE inp_w128s
   BS.length inp_bs `seq` return ()
-  putStrLn "parse/encode done"
+
+  osVerboseLn os "parse/encode done"
   --
   -- stall until exe search done
   SkeletonExeInfo isa_s isa_e bs_exe <- takeMVar mv_esi
@@ -154,7 +205,7 @@ assembleInput :: Opts -> IO [Word128]
 assembleInput os = do
   fstr <- readFile (oPath os)
   length fstr `seq` return ()
-  putStrLn "*** PARSING"
+  osVerboseLn os "*** PARSING"
   let fmtDiag = dFormatWithLines (lines fstr)
       emitWarnings ws = mapM_ (putStrLn . fmtDiag) ws
   case parseInstsUnresolved [] 0 (oPath os) 1 fstr of
@@ -164,7 +215,7 @@ assembleInput os = do
       case uis lbl_ix of
         Left err -> fatal $ fmtDiag err
         Right is -> do
-          putStrLn "*** ENCODING"
+          osVerboseLn os "*** ENCODING"
           case runInstEncoders is of
             Left err -> fatal $ fmtDiag err
             Right (w128s,ws) -> do

@@ -133,6 +133,17 @@ eInst :: Inst -> E ()
 eInst i = enc
   where op = iOp i
 
+        iOptsSubset :: [InstOpt] -> [InstOpt]
+        iOptsSubset xs = sort (filter (`elem`xs) (iOptions i))
+
+        iHasOpt :: InstOpt -> Bool
+        iHasOpt = (`elem`iOptions i)
+
+        eInstOpt :: Field -> InstOpt -> E ()
+        eInstOpt fF io = eEncode fF (iHasInstOpt io i)
+        eInvertedInstOpt :: Field -> InstOpt -> E ()
+        eInvertedInstOpt fF io = eEncode fF (not (iHasInstOpt io i))
+
         enc = do
           case oMnemonic op of
             "MOV" -> eMOV
@@ -141,6 +152,7 @@ eInst i = enc
             "IMAD" -> eIMAD
             "ISETP" -> eISETP
             "STG" -> eSTG
+            "LDG" -> eLDG
             "NOP" -> do
               eField fOPCODE 0x118
               eRegFile False 0x4
@@ -425,7 +437,7 @@ eInst i = enc
           eField fOPCODE 0x010
           ePredication
           eDstRegR
-          eEncode fINSTOPT_X (iHasInstOpt InstOptX i)
+          eInstOpt fINSTOPT_X InstOptX
           -- the first two operands may be predicate sources,
           -- if they are omitted, we encode PT (0x7); neither has a sign
           (p0,p1,srcs) <-
@@ -494,7 +506,7 @@ eInst i = enc
           -- these are the extra source predicate expressions
           -- for the .X case
           (ext_pred0,ext_pred1) <- do
-            if iHasInstOpt InstOptX i then
+            if iHasOpt InstOptX then
               case iSrcPreds i of
                 [sp0,sp1] -> return (sp0,sp1)
                 [] -> return (PredNONE,PredNONE)
@@ -518,12 +530,10 @@ eInst i = enc
           eField fOPCODE 0x00C
           --
           ePredication
-          --
-          let iOptsSubset xs = filter (`elem`xs) (iOptions i)
           -- .EX
-          eEncode fISETP_EX (iHasInstOpt InstOptEX i)
+          eInstOpt fISETP_EX InstOptEX
           -- .U32
-          eEncode fISETP_U32 (not (iHasInstOpt InstOptU32 i))
+          eInvertedInstOpt fISETP_U32 InstOptU32
           -- .{AND,OR,XOR}
           case iOptsSubset [InstOptAND,InstOptOR,InstOptXOR] of
             [InstOptAND] -> eField fISETP_COMBINING_FUNCTION 0x0
@@ -569,26 +579,67 @@ eInst i = enc
                 [psrc] -> ePredicationSrc fISETP_SRC4_PRED psrc
                 _ -> eFatal "wrong number of extra source predicates (src4)"
 
-
         -----------------------------------------------------------------------
-        eLDG :: E ()
-        eLDG = do
-          eField fOPCODE 0x181
-          ePredication
-          -- case iSrcs i of
-          --  []
+        -- LD/ST helpers
+        --
+        eLdStDataType :: E ()
+        eLdStDataType =
+          case iOptsSubset inst_opt_ldst_types of
+            [] -> eField fLDST_DATA_TYPE 0x4
+            [InstOptU,InstOpt128] -> eField fLDST_DATA_TYPE 0x7
+            (InstOptU:_) -> eFatalF fLDST_DATA_TYPE ".U only allowed on .128"
+            [InstOptU8] -> eField fLDST_DATA_TYPE 0x0
+            [InstOptS8] -> eField fLDST_DATA_TYPE 0x1
+            [InstOptU16] -> eField fLDST_DATA_TYPE 0x2
+            [InstOptS16] -> eField fLDST_DATA_TYPE 0x3
+            --
+            [InstOpt64] -> eField fLDST_DATA_TYPE 0x5
+            [InstOpt128] -> eField fLDST_DATA_TYPE 0x6
+            xs -> eFatalF fLDST_DATA_TYPE $
+                    "invalid data combination: {" ++
+                      intercalate ", " (map format xs) ++ "}"
 
-        -----------------------------------------------------------------------
-        eSTG :: E ()
-        eSTG = do
-          eField fOPCODE 0x186
-          ePredication
+
+        eLdStCommon :: E ()
+        eLdStCommon = do
+          eLdStDataType
           --
-          -- see below for this (in the case expr)
-          -- eEncode fREGFILE 0x1
+          eInstOpt fLDST_ADDR_E InstOptE
           --
-          case iSrcs i of
-            [SrcR _ _ _ r_addr, SrcUR _ _ ur, SrcI imm, SrcR _ _ _ r_data] -> do
+          eInstOpt fLDST_PRIVATE InstOptPRIVATE
+          --
+          case iOptsSubset inst_opt_ldst_scope of
+            [InstOptCTA] -> eField fLDST_SCOPE 0x0
+            [InstOptSM]  -> eField fLDST_SCOPE 0x1
+            [InstOptGPU] -> eField fLDST_SCOPE 0x2
+            [InstOptSYS] -> eField fLDST_SCOPE 0x3
+            _ -> eFatal "exactly one scope option required"
+          --
+          case iOptsSubset inst_opt_ldst_ordering of
+            [] -> eField fLDST_ORDERING 0x1 -- default
+            [InstOptSTRONG] -> eField fLDST_ORDERING 0x2
+            [InstOptMMIO]   -> eField fLDST_ORDERING 0x3
+            _ -> eFatal "only one memory ordering option permitted"
+          --
+          case iOptsSubset inst_opt_ldst_caching of
+            [] -> eField fLDST_CACHING 0x1 -- default
+            [InstOptEF] -> eField fLDST_CACHING 0x0
+            [InstOptEL] -> eField fLDST_CACHING 0x2
+            [InstOptLU] -> eField fLDST_CACHING 0x3
+            [InstOptEU] -> eField fLDST_CACHING 0x4
+            [InstOptNA] -> eField fLDST_CACHING 0x5
+            _ -> eFatal "only one caching option permitted"
+
+        -- [11:9]  [90] [91]  [31:24]
+        --    1     *    0     /=RZ       LDG.E.64.SYS R16, [R24] {!1,+4.W} ;
+        --    4     0    1     /=RZ       LDG.E.64.SYS R16, [R254.U32+UR0]
+        --    4     0    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
+        --    4     1    1     /=RZ       LDG.E.64.SYS R16, [R254.64+UR0]
+        --    4     1    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
+        eLDST_Addrs :: [Src] -> E ()
+        eLDST_Addrs srcs =
+          case srcs of
+            [SrcR _ _ _ r_addr, SrcUR _ _ ur, SrcI imm] -> do
               eEncode fSRC0_REG r_addr
               if ur == URZ
                 then do
@@ -599,62 +650,46 @@ eInst i = enc
                   eField fREGFILE 0x4
                   eEncode fLDST_ADDR_UROFF ur
                   -- eEncode fLDST_UNIFORMOPTS True
-                  eFatal "STG doesn't support URZ yet (need to sort out bits[91:90])"
+                  eFatal $ "op doesn't support URZ yet (need to sort out bits[91:90])"
               eField fLDST_ADDR_IMMOFF imm
+            _ -> eFatal $ "malformed source parameters for " ++ show (iOp i)
+
+        -----------------------------------------------------------------------
+        eLDG :: E ()
+        eLDG = do
+          eField fOPCODE 0x181
+          ePredication
+          eLdStCommon
+          case iDsts i of
+            [DstP r_prd,DstR r_data] -> do
+              unless (iHasOpt InstOptZD || r_prd == PT) $
+                eFatalF fLD_ZD_PREG "dst predicate requires .ZD be set"
+              eEncode fLD_ZD_PREG r_prd
+              eEncode fDST_REG r_data
+            [DstR r_data] -> do
+              when (iHasOpt InstOptZD) $
+                eFatalF fLD_ZD "lack of dst predicate forbids .ZD be set"
+              eEncode fDST_REG r_data
+              eEncode fLD_ZD_PREG PT
+            _ -> eFatal "expected one data register"
+          eLDST_Addrs (iSrcs i)
+          eInstOpt fLD_ZD InstOptZD
+
+        -----------------------------------------------------------------------
+        eSTG :: E ()
+        eSTG = do
+          eField fOPCODE 0x186
+          ePredication
+          eLdStCommon
+          eLDST_Addrs (take 3 (iSrcs i))
+          case drop 3 (iSrcs i) of
+            [SrcR False False False r_data] -> do
               eEncode fSRC1_REG r_data
-            _ -> eFatal "malformed source parameters for store"
-          ---------------------------------------------------------------------
-          let iOptsSubset xs = filter (`elem`xs) (iOptions i)
+            [SrcR _ _ _ r_data] -> eFatal "source modifiers and reuse flags not permitted"
+            _ -> eFatal "expected one data register"
           --
-          eEncode fLDST_ADDR_E (iHasInstOpt InstOptE i)
-          --
-          case sort (iOptsSubset inst_opt_ldst_types) of
-            [] -> eField fLDST_DATA_TYPE 0x4
-            [InstOptU,InstOpt128] -> eField fLDST_DATA_TYPE 0x7
-            (InstOptU:_) -> eFatalF fLDST_DATA_TYPE ".U only allowed on .128"
-            [dt] ->
-              case dt of
-                InstOptU8  -> eField fLDST_DATA_TYPE 0x0
-                InstOptS8  -> eField fLDST_DATA_TYPE 0x1
-                InstOptU16 -> eField fLDST_DATA_TYPE 0x2
-                InstOptS16 -> eField fLDST_DATA_TYPE 0x3
-                --
-                InstOpt64  -> eField fLDST_DATA_TYPE 0x5
-                InstOpt128 -> eField fLDST_DATA_TYPE 0x6
-            xs -> eFatalF fLDST_DATA_TYPE $
-                    "invalid data combination: {" ++
-                      intercalate ", " (map format xs) ++ "}"
-          --
-          eEncode fLDST_PRIVATE (iHasInstOpt InstOptPRIVATE i)
-          --
-          case iOptsSubset inst_opt_ldst_scope of
-            [x] ->
-              case x of
-                InstOptCTA -> eField fLDST_SCOPE 0x0
-                InstOptSM  -> eField fLDST_SCOPE 0x1
-                InstOptGPU -> eField fLDST_SCOPE 0x2
-                InstOptSYS -> eField fLDST_SCOPE 0x3
-            _ -> eFatal "exactly one scope option required"
-          --
-          case iOptsSubset inst_opt_ldst_ordering of
-            [] -> eField fLDST_ORDERING 0x1 -- default
-            [x] ->
-              case x of
-                InstOptSTRONG -> eField fLDST_ORDERING 0x2
-                InstOptMMIO   -> eField fLDST_ORDERING 0x3
-            _ -> eFatal "only one memory ordering option permitted"
-          --
-          case iOptsSubset inst_opt_ldst_caching of
-            [] -> eField fLDST_CACHING 0x1 -- default
-            [x] ->
-              case x of
-                InstOptEF -> eField fLDST_CACHING 0x0
-                InstOptEL -> eField fLDST_CACHING 0x2
-                InstOptLU -> eField fLDST_CACHING 0x3
-                InstOptEU -> eField fLDST_CACHING 0x4
-                InstOptNA -> eField fLDST_CACHING 0x5
-            _ -> eFatal "only one caching option permitted"
           return ()
+
 
         -----------------------------------------------------------------------
         -- eNEXTOP :: E ()
@@ -742,8 +777,8 @@ fPREDSRC nm off = f nm off 4 fmt
               Left err -> neg ++ err
               Right a -> neg ++ format a
           where neg = if testBit val 3 then "!" else ""
-fPREDSRC_UNSIGNED :: String -> Int -> Field
-fPREDSRC_UNSIGNED nm off = f nm off 3 fmt
+fPREG :: String -> Int -> Field
+fPREG nm off = f nm off 3 fmt
   where fmt _ val =
           case decode val :: Either String PR of
             Left err -> err
@@ -757,8 +792,9 @@ fREGFILE :: Field
 fREGFILE = fi "RegFile" 9 3
 
 fPREDICATION :: Field
-fPREDICATION = fPREDSRC "Predication" 12
-
+fPREDICATION = f{fFormat = fmt}
+  where f = fPREDSRC "Predication" 12
+        fmt w128 v64 = "@" ++ fFormat f w128 v64
 
 fABS :: Int -> Int -> Field
 fABS src_ix off = fb ("Src" ++ show src_ix ++ ".AbsVal") off "|..|"
@@ -906,9 +942,9 @@ fINSTOPT_X = fi "IADD3.X" 74 1
 -- since they have no signs and reject PT from syntax (hide),
 -- it's fishy
 fIADD3_SRCPRED0 :: Field
-fIADD3_SRCPRED0 = fPREDSRC_UNSIGNED "IADD3.SrcPred0" 81
+fIADD3_SRCPRED0 = fPREG "IADD3.SrcPred0" 81
 fIADD3_SRCPRED1 :: Field
-fIADD3_SRCPRED1 = fPREDSRC_UNSIGNED "IADD3.SrcPred1" 84
+fIADD3_SRCPRED1 = fPREG "IADD3.SrcPred1" 84
 -- bit 4
 
 fIADD3_X_SRCPRED0 :: Field
@@ -919,6 +955,7 @@ fIADD3_X_SRCPRED1 = fPREDSRC "IADD3.X.SrcPred1" 87
 fIMAD_SIGNED :: Field
 fIMAD_SIGNED = fl "IMAD.Signed" 73 1 [".U32","(.S32)"]
 
+-------------------------------------------------------------------------------
 fLDST_ADDR_E :: Field
 fLDST_ADDR_E = fb "LDST.Addr.Is64b" 72 ".E"
 fLDST_DATA_TYPE :: Field
@@ -931,15 +968,32 @@ fLDST_DATA_TYPE = f "LDST.Data.Type" 73 3 $ \_ val ->
     4 -> "(.32)"
     5 -> ".64"
     6 -> ".128"
-    7 -> ".U.128"
+    7 -> ".U.128" -- forbidden in LDS
 fLDST_ADDR_IMMOFF :: Field
 fLDST_ADDR_IMMOFF = fi "LDST.Addr.ImmOff" 40 24
 fLDST_ADDR_UROFF :: Field
-fLDST_ADDR_UROFF = fUR "LDST.Addr.UROff" 64
+fLDST_ADDR_UROFF = fUR "LDST.Addr.UROff" 32
+
+-- this is not to be confused with fLDST_DATA_TYPE = 7
+fLDS_U :: Field
+fLDS_U = fb "LDS.U" 76 ".U"
+-- LDS ... [R12.X4]
+fLDSTS_SCALE :: Field
+fLDSTS_SCALE = f "LDST.Scale" 77 2 $ \_ val ->
+  case val of
+    0 -> "(no scale)"
+    1 -> ".X4"
+    2 -> ".X8"
+    3 -> ".X16"
+
+fLD_ZD :: Field
+fLD_ZD = fb "LD.ZD" 87 ".ZD"
+fLD_ZD_PREG :: Field
+fLD_ZD_PREG = fPREG "LD.ZD.Pred" 81
 
 fLDST_PRIVATE :: Field
 fLDST_PRIVATE = fb "LDST.Private" 76 ".PRIVATE"
-fLDST_SCOPE:: Field
+fLDST_SCOPE :: Field
 fLDST_SCOPE = f "LDST.Scope" 77 2 $ \_ val ->
   case val of
     0 -> ".CTA"
@@ -966,10 +1020,10 @@ fLDST_CACHING = f "LDST.Caching" 84 3 $ \_ val ->
     7 -> ".INVALID7"
 
 fISETP_DST_PRED :: Field
-fISETP_DST_PRED = fPREDSRC_UNSIGNED "ISETP.Dst.Reg" 81
+fISETP_DST_PRED = fPREG "ISETP.Dst.Reg" 81
 
 fISETP_SRC0_PRED :: Field
-fISETP_SRC0_PRED = fPREDSRC_UNSIGNED "ISETP.Src0.PredExpr" 84
+fISETP_SRC0_PRED = fPREG "ISETP.Src0.PredExpr" 84
 fISETP_SRC3_PRED :: Field
 fISETP_SRC3_PRED = fPREDSRC "ISETP.Src3.PredExpr" 87
 fISETP_SRC4_PRED :: Field
