@@ -1,7 +1,10 @@
+{-# LANGUAGE PatternSynonyms #-}
 module NVT.IR where
 
+import NVT.Bits
 import NVT.Encoders.Codable
 import NVT.Loc
+import NVT.Floats
 import qualified NVT.EnumSet as ES
 
 import Data.Bits
@@ -10,14 +13,15 @@ import Data.List
 import Data.Word
 import Debug.Trace
 import Text.Printf
+import qualified Data.Map.Strict as DM
 
 -- TODO: consider more specific IR
 --
 -- data Srcs =
---     SrcRRR !SrcR !SrcR !SrcR
---   | SrcRCR !SrcR !SrcC !SrcR
---   | SrcRIR !SrcR !SrcI !SrcR
---   | SrcRIR !SrcR !SrcU !SrcR
+--     SrcRRR !RegR !RegR  !RegR
+--   | SrcRCR !RegR !SrcC  !RegR
+--   | SrcRIR !RegR !Imm32 !RegR
+--   | SrcRIR !RegR !SrcU  !RegR
 --   ...
 -- (store extra predicates separate)
 --
@@ -46,10 +50,28 @@ oHasOptDstPred (Op op) =
   --   LOP3.LUT P1, RZ, R16,     0x20000, RZ, 0xc0, !PT {!12,Y,^4} ;  008fd8000782c0ff`0002000010ff7812
   op `elem` ["LOP3"]
 
-oOpIsFP :: Op -> Bool
-oOpIsFP (Op op) =
+oIsBitwise :: Op -> Bool
+oIsBitwise (Op op) = op `elem` ["LOP","PLOP","SHL","SHR","SHF","SHFL"]
+
+oIsBranch :: Op -> Bool
+oIsBranch (Op op) =
+  op `elem` ["BPT","BRA","BRX","CALL","KILL","NANOTRAP","RET","RTT"]
+
+oIsFP :: Op -> Bool
+oIsFP (Op op) =
   op `elem` ["FADD","FFMA","FCHK","FMNMX","FMUL","FSEL","FSET","FSETP"] ||
   op `elem` ["DADD","DFMA","DMUL","DSETP"]
+oIsInt :: Op -> Bool
+oIsInt (Op op) =
+  op `elem` ["I2I","I2F","IABS","IADD3","IDP","IMAD","IMMA","IMNMX","ISETP"]
+oIsLD :: Op -> Bool
+oIsLD (Op op) =
+  op `elem` ["LDG","LDS","LD","LDL","LDSM"]
+oIsST :: Op -> Bool
+oIsST (Op op) =
+  op `elem` ["STG","STS","ST","STL"]
+oIsSLM :: Op -> Bool
+oIsSLM (Op op) = op `elem` ["LDS","LDSM","STS"]
 
 data Inst =
   Inst {
@@ -57,20 +79,22 @@ data Inst =
   , iPc :: !PC
   , iPredication :: !Pred
   , iOp :: !Op
-  , iOptions :: ![InstOpt] -- the . suffixes
+  , iOptions :: !InstOptSet -- the mnemonic '.' suffixes
   , iDsts :: ![Dst]
   , iSrcs :: ![Src]
   , iSrcPreds :: ![Pred] -- e.g. IADD3.X has two extra predicate expressions
   , iDepInfo :: !DepInfo
   } deriving (Show,Eq)
 instance Syntax Inst where
-  format = fmtInst
+  format i = fmtInst (defaultImmFormatter (iOp i)) i
 -- iLogicallyEqual :: Inst -> Inst -> Bool
 -- iLogicallyEqual i0 i1 = i0{iLoc=lNONE} == i1{iLoc=lNONE}
 
 
 iHasInstOpt :: InstOpt -> Inst -> Bool
-iHasInstOpt io = (io`elem`) . iOptions
+iHasInstOpt io = (io`ES.member`) . iOptions
+iLacksInstOpt :: InstOpt -> Inst -> Bool
+iLacksInstOpt io = (io`ES.member`) . iOptions
 
 fmtInstIr :: Inst -> String
 fmtInstIr i =
@@ -93,7 +117,7 @@ fmtInstIr i =
 
 data Pred =
     PredNONE
-    --     sign  reg
+    --     neg  reg
   | PredP  !Bool !PR -- regular predicate
   | PredUP !Bool !UP -- uniform predicate (True,UP7) is "UPZ"
                      -- this should act the same as PredNONE
@@ -110,21 +134,193 @@ instance Syntax Pred where
 --   | PredNEG
 --   deriving (Show,Eq)
 
+data Reg =
+    RegR !R
+  | RegP !PR
+  | RegB !BR
+  | RegUR !UR
+  | RegUP !UP
+  | RegSR !SR
+  deriving (Show,Eq,Ord)
+instance Syntax Reg where
+  format reg =
+    case reg of
+      RegR r -> format r
+      RegP r -> format r
+      RegB r -> format r
+      RegUR r -> format r
+      RegUP r -> format r
+      RegSR r -> format r
+
+
+data Dst = Dst !Reg deriving (Show,Eq,Ord)
+pattern DstR :: R -> Dst
+pattern DstR r = Dst (RegR r)
+pattern DstRZ = DstR RZ
+pattern DstP :: PR -> Dst
+pattern DstP p = Dst (RegP p)
+pattern DstB :: BR -> Dst
+pattern DstB b = Dst (RegB b)
+pattern DstUR :: UR -> Dst
+pattern DstUR ur = Dst (RegUR ur)
+pattern DstUP :: UP -> Dst
+pattern DstUP up = Dst (RegUP up)
+
+instance Syntax Dst where
+  format (Dst r) = format r
+
+
+
+data Src =
+    SrcReg !ModSet !Reg
+  | SrcCon !ModSet !Surf !Int
+  | SrcImm !Imm
+  deriving (Show,Eq,Ord)
+pattern SrcRZ :: Src
+pattern SrcRZ  = SrcReg ES.EnumSetEMPTY (RegR RZ)
+pattern SrcURZ = SrcReg ES.EnumSetEMPTY (RegUR URZ)
+pattern SrcPT  = SrcReg ES.EnumSetEMPTY (RegP PT)
+--
+pattern Src_R ms r = SrcReg ms (RegR r)
+pattern Src_P ms p = SrcReg ms (RegP p)
+pattern Src_UP ms up = SrcReg ms (RegUP up)
+pattern Src_B ms b = SrcReg ms (RegB b)
+pattern Src_UR ms ur = SrcReg ms (RegUR ur)
+pattern SrcI32 i = SrcImm (Imm32 i)
+----------------------------------------------------
+-- common values
+sRC_PT :: Src
+sRC_PT = SrcReg msEmpty (RegP PT)
+sRC_P0 :: Src
+sRC_P0 = SrcReg msEmpty (RegP P0)
+sRC_P1 :: Src
+sRC_P1 = SrcReg msEmpty (RegP P1)
+sRC_NP0 :: Src
+sRC_NP0 = SrcReg (msSingleton ModNEG) (RegP P0)
+sRC_NP1 :: Src
+sRC_NP1 = SrcReg (msSingleton ModNEG) (RegP P1)
+sRC_RZ :: Src
+sRC_RZ = SrcReg msEmpty (RegR RZ)
+sRC_URZ :: Src
+sRC_URZ = SrcReg msEmpty (RegUR URZ)
+sRC_SR_CTAID_X :: Src
+sRC_SR_CTAID_X = SrcReg msEmpty (RegSR SR_CTAID_X)
+sRC_SR_TID_X :: Src
+sRC_SR_TID_X = SrcReg msEmpty (RegSR SR_TID_X)
+sRC_IMM_0 :: Src
+sRC_IMM_0 = SrcI32 0
+sRC_IMM_1 :: Src
+sRC_IMM_1 = SrcI32 1
+sRC_C00 :: Src
+sRC_C00 = SrcCon msEmpty (SurfImm 0) 0
+
+
+sHARED_DSTS :: DM.Map Dst Dst
+sHARED_DSTS = DM.fromList $ map (\x -> (x,x)) $
+  [
+    DstP P0
+  , DstP P1
+  --
+  , DstR R0
+  , DstR R1
+  , DstR R2
+  , DstR R3
+  , DstR R4
+  --
+  , DstUR UR0
+  , DstUR UR1
+  ]
+
+dstIntern :: Dst -> Dst
+dstIntern = internLookup sHARED_DSTS
+srcIntern :: Src -> Src
+srcIntern = internLookup sHARED_SRCS
+
+internLookup :: Ord a => DM.Map a a -> a -> a
+internLookup m a =
+  case a `DM.lookup` m  of
+    Just a1 -> a1
+    Nothing -> a
+--
+-- TODO: use a tree
+sHARED_SRCS :: DM.Map Src Src
+sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
+  [
+    sRC_PT
+  , sRC_P0
+  , sRC_P1
+  , sRC_NP0
+  , sRC_NP1
+  --
+  , sRC_RZ
+  , SrcReg msEmpty (RegR R0)
+  , SrcReg msEmpty (RegR R1)
+  , SrcReg msEmpty (RegR R2)
+  , SrcReg msEmpty (RegR R3)
+  , SrcReg msEmpty (RegR R4)
+  --
+  , sRC_URZ
+  , SrcReg msEmpty (RegUR UR0)
+  , SrcReg msEmpty (RegUR UR1)
+  --
+  , SrcI32 0xFFFFFFFF
+  , sRC_IMM_0
+  , sRC_IMM_1
+  , SrcI32 0x2
+  , SrcI32 0x4
+  , SrcI32 0x8
+  , SrcI32 0x10
+  --
+  , sRC_SR_TID_X
+  , sRC_SR_CTAID_X
+  ]
+
+data Imm =
+    Imm32 !Word32
+  | Imm49 !Word64
+  deriving (Show,Eq,Ord)
+data Surf =
+    SurfImm !Int
+  | SurfReg !UR
+  deriving (Show,Eq,Ord)
+instance Syntax Surf where
+  format (SurfImm i) = printf "c[0x%X]" i
+  format (SurfReg ur) = "cx[" ++ format ur ++ "]"
+
+instance Syntax Src where
+  format = formatSrcWithOpts (defaultImmFormatter (Op "NOP"))
+
+type ImmFormatter = Imm -> String
+--
+defaultImmFormatter :: Op -> ImmFormatter
+defaultImmFormatter op imm =
+  case imm of
+    Imm32 u32
+      -- e.g. FADD
+      | oIsFP op -> printf "%f" (bitsToFloat u32)
+      -- e.g. IMAD
+      | oIsInt op && s32 < 0 -> printf "-0x%08X" (negate s32)
+      -- everything else
+      | otherwise -> printf "0x%08X" u32
+      where s32 = fromIntegral u32 :: Int32
+    Imm49 u64 -> printf "0x%013X" u64
+
+formatSrcWithOpts :: ImmFormatter -> Src -> String
+formatSrcWithOpts fmt_imm src =
+  case src of
+    SrcReg ms r -> msDecorate ms (format r)
+    SrcCon ms six soff -> msDecorate ms (format six ++ printf "[0x%X]" soff)
+    SrcImm i -> fmt_imm i
+
+
 -- operand modifiers
 data Mod =
-    -- prefix modifiers
+  -- prefix modifiers
     ModABS   -- |R12|
   | ModNEG   -- -R12 or !P1
   | ModCOMP  -- ~R12
-  -- suffix modifiers
   --
-  -- for LD*/ST*
-  | ModU32   -- [R12.U32]
-  | Mod64    -- [R12.64]
-  -- LDS/STS
-  | ModX4    -- LDS ... [R12.X4]
-  | ModX8    -- LDS ... [R12.X8]
-  | ModX16   -- LDS ... [R12.X16]
+  -- suffix modifiers
   --
   | ModREU   -- R12.reuse
   -- these suffixes all follow the .reuse flag
@@ -132,105 +328,72 @@ data Mod =
   | ModH1_H1 -- ...
   | ModROW -- IMMA ... R12.reuse.ROW
   | ModCOL --
+  --
+  -- more suffixes, but for LD*/ST* addr operands
+  | ModU32   -- [R12.U32]
+  | Mod64    -- [R12.64]
+  -- LDS/STS
+  | ModX4    -- LDS ... [R12.X4]
+  | ModX8    -- LDS ... [R12.X8]
+  | ModX16   -- LDS ... [R12.X16]
   deriving (Show,Eq,Ord,Enum)
 type ModSet = ES.EnumSet Mod
 msElem :: Mod -> ModSet -> Bool
 msElem = ES.elem
-msCons :: [Mod] -> ModSet
-msCons = ES.fromList
+msEmpty :: ModSet
+msEmpty = ES.empty
+msNull :: ModSet -> Bool
+msNull = ES.null
+msNonNull :: ModSet -> Bool
+msNonNull = not . ES.null
+msUnion :: ModSet -> ModSet -> ModSet
+msUnion = ES.union
+msToList :: ModSet -> [Mod]
+msToList = ES.toList
+msFromList :: [Mod] -> ModSet
+msFromList = msIntern . ES.fromList
+msSingleton :: Mod -> ModSet
+msSingleton = ES.singleton
+msIntern :: ModSet -> ModSet
+msIntern ms -- for object sharing
+  | msNull ms = msEmpty
+  | otherwise = ms
 mMutuallyExclusive :: Mod -> Mod -> Bool
 mMutuallyExclusive m1 m2 = m1 == m2 || check sets
   where check [] = False
         check (ms:mss) = m1 `msElem` ms && m2 `msElem` ms || check mss
 
         sets :: [ModSet]
-        sets = map msCons
+        sets = map msFromList
           [
             [ModX4,ModX8,ModX16]
           , [ModH0_H0,ModH1_H1]
           , [ModROW,ModCOL]
           , [ModU32,Mod64]
           ]
+-- .reuse follows |..|; -|R12|.reuse
+msDecorate :: ModSet -> String -> String
+msDecorate ms body = prefixes ++ abs_body ++ suffixes
+  where abs_body = if has ModABS then ("|" ++ body ++ "|") else body
+        prefixes = neg ++ comp
+          where neg = if has ModNEG then "-" else ""
+                comp = if has ModCOMP then "~" else ""
+        suffixes = concatMap fmtSfx (msToList ms)
+        has = (`msElem`ms)
+        fmtSfx m
+          | m`msElem`ms =
+            if m > ModCOMP then msFormatSuffix m else ""
+          | otherwise = ""
 
-data Dst =
-    DstR !R
-  | DstP !PR
-  | DstB !BR
-  | DstUR !UR
-  | DstUP !UP
-  deriving (Show,Eq)
-instance Syntax Dst where
-  format d =
-    case d of
-      DstR r -> format r
-      DstP r -> format r
-      DstB r -> format r
-      DstUR r -> format r
-      DstUP r -> format r
+msFormatSuffix :: Mod -> String
+msFormatSuffix m =
+  case m of
+    ModREU -> ".reuse"
+    _ -> "." ++ drop 3 (show m)
 
-data Src2 =
-    Src2R !ModSet !R
-
-data Src =
-    --    neg    abs   reuse
-    SrcR  !Bool !Bool  !Bool  !R   -- register
-  --                    surf  off
-  | SrcC  !Bool !Bool  !Int   !Int -- constant direct
-  | SrcCX !Bool !Bool  !UR    !Int -- constant indirect
-  | SrcSR                     !SR  -- system register
-  --      nega   abs
-  | SrcUR !Bool !Bool         !UR  -- uniform reg (I don't think this can be absval)
-  | SrcP  !Bool  !PR               -- predication
-  | SrcUP !Bool  !UP
-  | SrcB  !BR                      -- barrier register
---  | SrcI  !Int64                   -- immediate (f32 is in the low 32 in binary)
-  | SrcI  !Word64                  -- immediate (f32 is in the low 32 in binary)
-                                   -- only branching ops use >32b (49b)
-  deriving (Show,Eq)
-instance Syntax Src where
-  format s =
-      case s of
-        SrcR neg abs reuse reg ->
-            negAbs neg abs (format reg) ++ reuses
-          where reuses = maybeS reuse ".reuse"
-        SrcC neg abs six soff ->
-          negAbs neg abs ("c[" ++ show six ++ "][" ++ printf "0x%X" soff ++ "]")
-        SrcCX neg abs sur soff ->
-          negAbs neg abs ("cx[" ++ format sur ++ "][" ++ printf "0x%X" soff ++ "]")
-        SrcUR neg abs ur -> negAbs neg abs (format ur)
-        SrcSR sr -> format sr
-        SrcP neg pr -> maybeS neg "!" ++ format pr
-        SrcUP neg pr -> maybeS neg "!" ++ format pr
-        SrcB br -> format br
-        SrcI i -> printf "0x%08X" (fromIntegral i :: Word32)
-    where maybeS z s = if z then s else ""
-          negAbs neg abs reg = negs ++ abss ++ reg ++ abss
-            where negs = maybeS neg "-"
-                  abss = maybeS abs "|"
-
-sNegated :: Src -> Bool
-sNegated s =
-  case s of
-    SrcR n _ _ _ -> n
-    SrcC n _ _ _ -> n
-    SrcCX n _ _ _ -> n
-    SrcUR n _ _ -> n
-    SrcP n _ -> n
-    SrcUP n _ -> n
-    _ -> False
-
-sAbs :: Src -> Bool
-sAbs s =
-  case s of
-    SrcR _ a _ _ -> a
-    SrcC _ a _ _ -> a
-    SrcCX _ a _ _ -> a
-    SrcUR _ a _ -> a
-    SrcP   a _   -> a
-    _ -> False
 
 data PR = P0 | P1 | P2 | P3 | P4 | P5 | P6 | PT
-  deriving (Show,Eq,Enum,Read)
+  deriving (Show,Eq,Enum,Read,Ord)
 
 data R =
     R0   | R1   | R2   | R3   | R4   | R5   | R6   | R7
@@ -265,7 +428,7 @@ data R =
   | R232 | R233 | R234 | R235 | R236 | R237 | R238 | R239
   | R240 | R241 | R242 | R243 | R244 | R245 | R246 | R247
   | R248 | R249 | R250 | R251 | R252 | R253 | R254 | RZ
-  deriving (Show,Eq,Enum,Read)
+  deriving (Show,Eq,Enum,Read,Ord)
 
 data SR =
     SR_LANEID
@@ -408,19 +571,19 @@ data UR =
   | UR40  | UR41  | UR42  | UR43  | UR44  | UR45  | UR46  | UR47
   | UR48  | UR49  | UR50  | UR51  | UR52  | UR53  | UR54  | UR55
   | UR56  | UR57  | UR58  | UR59  | UR60  | UR61  | UR62  | URZ
-  deriving (Show,Eq,Enum,Read)
+  deriving (Show,Eq,Enum,Read,Ord)
 
 data UP =
     -- there is no UPT (true), but the non-negated use
     -- of UP7 appears to be treated that way in uniform ops
     -- (shows no predication on the instruction)
     UP0 | UP1 | UP2 | UP3 | UP4 | UP5 | UP6 | UP7
-  deriving (Show,Eq,Enum,Read)
+  deriving (Show,Eq,Enum,Read,Ord)
 
 data BR =
     B0  | B1  | B2  | B3  | B4  | B5  | B6  | B7
   | B8  | B9  | B10 | B11 | B12 | B13 | B14 | B15
-  deriving (Show,Eq,Enum,Read)
+  deriving (Show,Eq,Enum,Read,Ord)
 
 -- this type omits src reuse info as we couple that with the operands
 data DepInfo =
@@ -452,6 +615,29 @@ instance Syntax DepInfo where
             case f di of
               Nothing -> ""
               Just b -> "+" ++ show b ++ "." ++ what
+diIntern :: DepInfo -> DepInfo
+diIntern di
+  | diDefault == di = diDefault
+  | diStall1 == di = diStall1
+  | diStall2 == di = diStall2
+  | diStall4Y == di = diStall4Y
+  | diStall10Y == di = diStall10Y
+  | diStall12Y == di = diStall12Y
+  | otherwise = di
+diDefault, diStall1, diStall2, diStall4Y, diStall10Y, diStall12Y :: DepInfo
+diDefault =
+  DepInfo {
+    diStalls = 0
+  , diYield = False
+  , diAllocWr = Nothing
+  , diAllocRd = Nothing
+  , diWaitSet = 0
+  }
+diStall1 = diDefault{diStalls = 1}
+diStall2 = diDefault{diStalls = 2}
+diStall4Y = diDefault{diStalls = 4,diYield = True}
+diStall10Y = diDefault{diStalls = 10,diYield = True}
+diStall12Y = diDefault{diStalls = 12,diYield = True}
 
 instance Codeable PR where
   encode = encodeEnum
@@ -490,6 +676,21 @@ instance Syntax BR where format = show
 
 
 -- instruction options are the tokens following the mnemonic
+type InstOptSet = ES.EnumBitSet Word128 InstOpt
+iosToList :: InstOptSet -> [InstOpt]
+iosToList = ES.toList
+iosFromList :: [InstOpt] -> InstOptSet
+iosFromList = ES.fromList
+iosElem :: InstOpt -> InstOptSet -> Bool
+iosElem = ES.elem
+iosIntersect :: InstOptSet -> InstOptSet -> InstOptSet
+iosIntersect = ES.intersect
+iosEmpty :: InstOptSet
+iosEmpty = ES.empty
+iosNull :: InstOptSet -> Bool
+iosNull = ES.null
+
+
 data InstOpt =
     -- ISETP/UISETP
     InstOptF
@@ -533,12 +734,18 @@ data InstOpt =
   --
   | InstOptHI -- SHF, IADD3, ...
   --
+  -- SHFL
+  | InstOptUP
+  | InstOptDOWN
+  | InstOptIDX
+  | InstOptBFLY
+  --
   | InstOptREL -- call/ret
   | InstOptABS
   | InstOptNODEC
   | InstOptNOINC
   --
-  | InstOptRCP
+  | InstOptRCP -- MUFU.*
   | InstOptLG2
   | InstOptEX2
   | InstOptRSQ
@@ -569,12 +776,13 @@ data InstOpt =
   | InstOptLU
   | InstOptEU
   | InstOptNA
+  -- WARNING: this mustn't exceed 64 or we need to change our EnumSet
   deriving (Show,Eq,Ord,Enum)
 instance Syntax InstOpt where
   -- format = ('.':) . drop (length "InstOpt") . show
   format = drop (length "InstOpt") . show
-inst_opt_isetp_functions :: [InstOpt]
-inst_opt_isetp_functions =
+inst_opt_isetp_functions :: InstOptSet
+inst_opt_isetp_functions = iosFromList
   [
     InstOptF
   , InstOptLT
@@ -585,28 +793,28 @@ inst_opt_isetp_functions =
   , InstOptGE
   , InstOptT
   ]
-inst_opt_ldst_types :: [InstOpt]
-inst_opt_ldst_types = [InstOptU,InstOptU8,InstOptS8,InstOptU16,InstOptS16,InstOpt64,InstOpt128]
-inst_opt_ldst_scope :: [InstOpt]
-inst_opt_ldst_scope = [InstOptCTA, InstOptSM, InstOptSYS, InstOptGPU]
-inst_opt_ldst_ordering :: [InstOpt]
-inst_opt_ldst_ordering = [InstOptSTRONG, InstOptMMIO]
-inst_opt_ldst_caching :: [InstOpt]
-inst_opt_ldst_caching = [InstOptEF, InstOptEL, InstOptLU, InstOptEU, InstOptNA]
+inst_opt_ldst_types :: InstOptSet
+inst_opt_ldst_types = iosFromList [InstOptU8,InstOptS8,InstOptU16,InstOptS16,InstOpt64,InstOpt128]
+inst_opt_ldst_scope :: InstOptSet
+inst_opt_ldst_scope = iosFromList [InstOptCTA, InstOptSM, InstOptSYS, InstOptGPU]
+inst_opt_ldst_ordering :: InstOptSet
+inst_opt_ldst_ordering = iosFromList [InstOptSTRONG, InstOptMMIO]
+inst_opt_ldst_caching :: InstOptSet
+inst_opt_ldst_caching = iosFromList [InstOptEF, InstOptEL, InstOptLU, InstOptEU, InstOptNA]
 
 
 all_inst_opts :: [InstOpt]
 all_inst_opts = [toEnum 0 ..]
 
 
-fmtInst :: Inst -> String
-fmtInst i =
+fmtInst :: ImmFormatter -> Inst -> String
+fmtInst fmt_imm i =
     pred ++ op_str ++ " " ++ opnds_str ++ depinfo_str ++ ";"
   where pred = padR 5 (format (iPredication i))
         op_str = padR 12 (format (iOp i) ++ inst_opts)
           where inst_opts =
-                  imad_hints ++
-                  concatMap (\io -> "." ++ format io) (iOptions i)
+                  synthetic_tokens ++
+                  concatMap (\io -> "." ++ format io) (iosToList (iOptions i))
 
         -- This is annoying, but for exact matching of nvdisasm, we have to
         -- print helpful hints on IMADs that are used for identity operations.
@@ -617,8 +825,8 @@ fmtInst i =
         --                          or   1*X + RZ
         --  * .IADD .. X, Y         <-  X*1 + Y
         --  * .SHL  K, X            <-  X*(2^K) + RZ
-        imad_hints :: String
-        imad_hints
+        synthetic_tokens :: String
+        synthetic_tokens
           | iOp i == Op "IMAD" =
             case iSrcs i of
               (src0:src1:src2:_)
@@ -626,49 +834,63 @@ fmtInst i =
                 | isEqI 1 src1 && isRZ src2 -> ".MOV" -- X*1 + 0 = MOV X
                 | isR src0 && isEqI 1 src1 -> ".IADD"
                 | isPow2Gt1 src1 && isRZ src2 -> ".SHL"
-                where isRZ (SrcR False False False RZ) = True
+                where isRZ SrcRZ = True
                       isRZ _ = False
-                      isR (SrcR _ _ _ _) = True
+                      isR (Src_R _ _) = True
                       isR _ = False
-                      isEqI k (SrcI x) = x == k
+                      isEqI k (SrcI32 x) = x == k
                       isEqI _ _ = False
-                      isPow2Gt1 (SrcI imm) =
+                      isPow2Gt1 (SrcI32 imm) =
                         imm > 1 && (imm .&. (imm - 1)) == 0
                       isPow2Gt1 _ = False
-
               _ -> ""
+          -- unless I choose to use the LUT as syntax
+          | iOp i == Op "LOP3" || iOp i == Op "PLOP3" = ".LUT"
           | otherwise = ""
 
         opnds_str :: String
         opnds_str
-          | iOp i == Op "LDG" = intercalate "," dsts ++ ", " ++ fmtAddrs (iSrcs i)
-          | iOp i == Op "STG" = st_src_addr ++ ", " ++ st_src_data
+          | oIsLD (iOp i) = intercalate "," dsts ++ ", " ++ fmtAddrs (iSrcs i)
+          | oIsST (iOp i) = st_src_addr ++ ", " ++ st_src_data
           | otherwise = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
           where (st_src_addr,st_src_data) =
-                  case iSrcs i of
-                    [_, _, _, SrcR _ _ _ dat] ->
-                        (fmtAddrs (iSrcs i),format dat)
+                  case splitAt 3 (iSrcs i) of
+                    (src_addrs,[src_dat]) ->
+                      (fmtAddrs (iSrcs i),formatSrcWithOpts fmt_imm src_dat)
                     _ -> ("?","?")
 
+                -- we attempt to copy nvdisasm here (at least for LDG/LDS);
+                -- specifically, we omit default values except when all are default;
+                -- then we emit RZ only
                 fmtAddrs :: [Src] -> String
-                fmtAddrs srcs =
-                  case srcs of
-                    (SrcR _ _ _ r:SrcUR _ _ ur:SrcI imm:_) ->
-                        "[" ++ format r ++ opt_ur ++ opt_imm ++ "]"
-                      where opt_ur = if ur == URZ then "" else ("+" ++ format ur)
-                            opt_imm = if imm == 0 then "" else (printf "+0x%X" imm)
-                    _ -> "?"
+                fmtAddrs srcs = intercalate "+" $ concatMap fmtSrc srcs
+                  where opIsDefault :: Src -> Bool
+                        opIsDefault SrcRZ = True
+                        opIsDefault SrcURZ = True
+                        opIsDefault (SrcI32 0) = True
+                        opIsDefault _ = False
+
+                        all_default = all opIsDefault srcs
+
+                        fmtSrc src =
+                          case src of
+                            SrcRZ
+                              | not (opIsDefault src) || all_default -> [formatSrcWithOpts fmt_imm src]
+                            _ -> [formatSrcWithOpts fmt_imm src]
 
                 dsts = map format (iDsts i)
-                srcs = map format visible_srcs
+                srcs = map (formatSrcWithOpts fmt_imm) visible_srcs
 
                 visible_srcs
                   | iOp i == Op "IADD3" =
                     case iSrcs i of
-                      (SrcP False PT:SrcP False PT:sfx) -> sfx
-                      (SrcP False PT:sfx) -> sfx
+                      -- (SrcP False PT:SrcP False PT:sfx) -> sfx
+                      -- (SrcP False PT:sfx) -> sfx
+                      SrcPT:SrcPT:sfx -> sfx
+                      SrcPT:sfx -> sfx
                       sfx -> sfx
                   | otherwise = iSrcs i
                 ext_pred_srcs = map (drop 1 . format) (iSrcPreds i) -- drop 1 for the @ format produces
+
         depinfo_str = if null d then "" else (" " ++ d)
           where d = format (iDepInfo i)

@@ -285,3 +285,47 @@ pOneOf opts = loop (sortOn (Down . fst) opts)
 
 pSymbols :: Monad m => [String] -> P m u String
 pSymbols  = pOneOf . map (\s -> (s,s))
+
+-- A sep B sep C
+-- A sep B
+-- A       sep C
+-- A
+-- ....
+
+
+{-
+pChain ::
+  Monad m =>
+  P () ->
+  [(a,P a)] ->
+  P [a]
+pChain pSep = loop []
+  where loop ras [] = return (reverse ras)
+        loop ras (a,pA) = do
+          unless (null ras) $
+            pSep
+
+pAnyOrderSubset :: Monad m =>
+  (a,P a) ->
+  (b,P b) ->
+  (c,P c) ->
+  P () ->
+  P (a,b,c)
+pAnyOrderSubset (dft_a,pA) (dft_b,pB) (dft_c,pC) pSep =
+  pAXX <|> pBXX <|> pCXX
+ where pAXX = do
+        a <- pA
+        pABX a <|> pABC a dft_b <|> return (a,dft_b,dft_c)
+       pABX a = do
+        pSep
+        b <- pB
+        pABC a b <|> pABC a dft_b <|> return (a,dft_b,dft_c)
+       pAC a = do
+        pSep
+        b <- pC
+        pABC a b <|> return (a,b,dft_c)
+       pABC a b = do
+        pSep
+        c <- pC
+        return (a,b,c)
+-}

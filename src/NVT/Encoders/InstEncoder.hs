@@ -105,8 +105,8 @@ eFieldE f e =
 eEncode :: Codeable e => Field -> e -> E ()
 eEncode f = eFieldE f . encode
 
-eFieldU32 :: Field -> Word64 -> E ()
-eFieldU32 = eFieldUnsignedImm 32
+eFieldU32 :: Field -> Word32 -> E ()
+eFieldU32 f = eFieldUnsignedImm 32 f . fromIntegral
 eFieldUnsignedImm :: Int -> Field -> Word64 -> E ()
 eFieldUnsignedImm bits f val
   | val <= 2^bits - 1 = eField f val
@@ -133,16 +133,16 @@ eInst :: Inst -> E ()
 eInst i = enc
   where op = iOp i
 
-        iOptsSubset :: [InstOpt] -> [InstOpt]
-        iOptsSubset xs = sort (filter (`elem`xs) (iOptions i))
+        iOptsSubset :: InstOptSet -> [InstOpt]
+        iOptsSubset = iosToList . (`iosIntersect` iOptions i)
 
         iHasOpt :: InstOpt -> Bool
-        iHasOpt = (`elem`iOptions i)
+        iHasOpt = (`iosElem`iOptions i)
 
         eInstOpt :: Field -> InstOpt -> E ()
         eInstOpt fF io = eEncode fF (iHasInstOpt io i)
         eInvertedInstOpt :: Field -> InstOpt -> E ()
-        eInvertedInstOpt fF io = eEncode fF (not (iHasInstOpt io i))
+        eInvertedInstOpt fF io = eEncode fF (iLacksInstOpt io i)
 
         enc = do
           case oMnemonic op of
@@ -202,11 +202,11 @@ eInst i = enc
             [_] -> eFatal "wrong kind of destination operand"
             _ -> eFatal "wrong number of destination operands"
 
-        ensureNoNegAbs :: Bool -> Bool -> E ()
-        ensureNoNegAbs neg abs = do
-          when neg $
+        ensureNoNegAbs :: ModSet -> E ()
+        ensureNoNegAbs ms = do
+          when (ModNEG`msElem`ms || ModCOMP`msElem`ms) $
             eFatal "unary instructions don't support src negation modifier"
-          when abs $
+          when (ModABS`msElem`ms) $
             eFatal "unary instructions don't support src aboslute-value modifier"
 
         eConstOffDiv4 :: Field -> Int -> E ()
@@ -215,31 +215,35 @@ eInst i = enc
             eFatalF f "constant offset must be a multiple of 4"
           eField fSRCCOFF (fromIntegral soff `div` 4)
 
+        --
         -- 1 = R, 4 = IMM, 5 = const
         eUnrSrcs :: [Src] -> E ()
         eUnrSrcs srcs =
           case srcs of
-            [SrcR neg abs reu reg] -> do
-              eField fREGFILE 1
+            [SrcReg ms (RegR reg)] -> do
+              eRegFile False 0x1
               eEncode fSRC1_REG reg -- src goes in [39:32]
-              ensureNoNegAbs neg abs
-              eEncode fSRC1_REUSE reu -- use Src1.Reuse
-            [SrcC neg abs six soff] -> do
-              eField fREGFILE 5
-              eField fSRCCIX  (fromIntegral six)
+              ensureNoNegAbs ms
+              eEncode fSRC1_REUSE (ModREU`msElem`ms) -- use Src1.Reuse
+            [SrcCon ms six soff] -> do
+              let neg = msElem ModNEG ms || msElem ModCOMP ms
+              case six of
+                SurfImm imm -> do
+                  eRegFile False 0x4
+                  eField fSRCCIX (fromIntegral imm)
+                SurfReg ur -> do
+                  eRegFile True 0x5
+                  eEncode fSRC1_REG ur
               eConstOffDiv4 fSRCCOFF soff
-              ensureNoNegAbs neg abs
-            [SrcCX neg abs ur_six soff] -> do
-              eFatal "eUnrSrcs: TODO: cx[UR#][...] src"
-            [SrcI imm] -> do
-              eField fREGFILE 4
-              eFieldU32 fSRCIMM imm
-            [SrcUR neg abs ur] -> do
+              ensureNoNegAbs ms
+            [SrcI32 i] -> do
+              eRegFile False 0x4
+              eFieldU32 fSRCIMM i
+            [SrcReg ms (RegUR ur)] -> do
+              eRegFile True 0x6
               eEncode fSRC1_UREG ur
-              eEncode fSRC1_NEG neg
-              eEncode fSRC1_ABS abs
-              eField fREGFILE 6
-              eEncode fUNIFORMREG True
+              eEncode fSRC1_NEG (ModNEG`msElem`ms)
+              eEncode fSRC1_ABS (ModABS`msElem`ms)
             [_] -> eFatal "wrong kind of source operand"
             _ -> eFatal "wrong number of source operands"
 
@@ -252,22 +256,19 @@ eInst i = enc
         eSrcXC :: (Field,Field,Field,Field,Field) -> Src -> E ()
         eSrcXC  (fSRC_NEG,fSRC_ABS,fSRC_CIX,fSRC_UREG,fSRC_COFF) src = do
           case src of
-            SrcC neg abs six soff -> do
-              eEncode fSRC_NEG neg
-              eEncode fSRC_ABS abs
-              eEncode fSRC_CIX six
-              eConstOffDiv4 fSRC_COFF soff
-            SrcCX neg abs sur soff -> do
-              eEncode fSRC_NEG neg
-              eEncode fSRC_ABS abs
-              eEncode fSRC_UREG sur
+            SrcCon ms six soff -> do
+              eEncode fSRC_NEG (ModNEG`msElem`ms)
+              eEncode fSRC_ABS (ModABS`msElem`ms)
+              case six of
+                SurfReg ur -> eEncode fSRC_UREG ur
+                SurfImm imm -> eEncode fSRC_CIX imm
               eConstOffDiv4 fSRC_COFF soff
             _ -> eFatal "INTERNAL ERROR: eSrcXC: wrong source type"
 
-        eSrcR :: Int -> (Maybe Field,Maybe Field,Field,Field) -> Src -> E ()
-        eSrcR src_ix (mfNEG,mfABS,fREU,fREG) (SrcR neg abs reu r) = do
-          eMaybeNegAbs src_ix (mfNEG,mfABS) neg abs
-          eEncode fREU reu
+        eSrc_R :: Int -> (Maybe Field,Maybe Field,Field,Field) -> Src -> E ()
+        eSrc_R src_ix (mfNEG,mfABS,fREU,fREG) (SrcReg ms (RegR r)) = do
+          eMaybeNegAbs src_ix (mfNEG,mfABS) (ModNEG`msElem`ms) (ModABS`msElem`ms)
+          eEncode fREU (ModREU`msElem`ms)
           eEncode fREG r
 
         eMaybeNegAbs :: Int -> (Maybe Field,Maybe Field) -> Bool -> Bool -> E ()
@@ -282,21 +283,21 @@ eInst i = enc
           eMaybe "negation source modifier "       mfNEG neg
 
         eSrc0R :: Src -> E ()
-        eSrc0R = eSrcR 0 (Just fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
+        eSrc0R = eSrc_R 0 (Just fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
         -- e.g. .U32 of IMAD overlaps Src0.Negated
         -- "NN" means no negation
         eSrc0R_NN :: Src -> E ()
-        eSrc0R_NN = eSrcR 0 (Nothing,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
+        eSrc0R_NN = eSrc_R 0 (Nothing,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
         eSrc0R_NNA :: Src -> E ()
-        eSrc0R_NNA = eSrcR 0 (Nothing,Nothing,fSRC0_REUSE,fSRC0_REG)
+        eSrc0R_NNA = eSrc_R 0 (Nothing,Nothing,fSRC0_REUSE,fSRC0_REG)
         eSrc1R :: Src -> E ()
-        eSrc1R = eSrcR 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
+        eSrc1R = eSrc_R 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
         eSrc2R :: Src -> E ()
-        eSrc2R = eSrcR 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
+        eSrc2R = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
 
         eSrcUR :: Int -> (Field,Maybe Field,Maybe Field) -> Src -> E ()
-        eSrcUR src_ix (fSRC_UREG,mfSRC_NEG,mfSRC_ABS) (SrcUR neg abs ur) = do
-          eMaybeNegAbs src_ix (Nothing,Nothing) neg abs
+        eSrcUR src_ix (fSRC_UREG,mfSRC_NEG,mfSRC_ABS) (Src_UR ms ur) = do
+          eMaybeNegAbs src_ix (Nothing,Nothing) (ModNEG`msElem`ms) (ModABS`msElem`ms)
           eEncode fSRC_UREG ur
         eSrc1UR_NN :: Src -> E ()
         eSrc1UR_NN = eSrcUR 1 (fSRC1_UREG,Nothing,Nothing)
@@ -311,7 +312,7 @@ eInst i = enc
           ePredication
           eDstRegR
           case iSrcs i of
-            [src,SrcI imm] -> do
+            [src,SrcI32 imm] -> do
               eUnrSrcs [src]
               eField fMOV_SRC_CHEN4 (fromIntegral imm)
             srcs -> do
@@ -328,7 +329,8 @@ eInst i = enc
           eDstRegR
           eField fREGFILE 0x4
           case iSrcs i of
-            [SrcSR sr] ->
+            [SrcReg ms (RegSR sr)] -> do
+              ensureNoNegAbs ms
               eEncode fS2R_SRC0 sr
             _ -> eFatal "S2R requires SR* register source"
 
@@ -341,86 +343,58 @@ eInst i = enc
           eDstRegR
           eEncode fIMAD_SIGNED (not (iHasInstOpt InstOptU32 i))
           case iSrcs i of
-            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcR _ _ _ _)] -> do
+            [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_R _ _)] -> do
               -- imad__RRR_RRR
               eRegFile False 0x1
               --
               eSrc0R_NN s0
-              --
-              eSrc1R s1
-              --
-              eSrc2R s2
-            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),SrcI imm] -> do
+              eSrc1R    s1
+              eSrc2R    s2
+            [s0@(Src_R _ _),s1@(Src_R _ _),SrcI32 imm] -> do
               -- imad__RRsI_RRI
               eRegFile False 0x2
               --
               eSrc0R_NN s0
-              --
-              eField fSRC1_IMM imm
-              --
+              eField fSRC1_IMM (fromIntegral imm)
               eSrc2R s1
-            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcC _ _ _ _)] -> do
+            [s0@(Src_R _ _),s1@(Src_R _ _),s2@(SrcCon _ six _)] -> do
               -- imad__RRC_RRC
-              eRegFile False 0x3
-              --
-              eSrc0R_NN s0
-              --
-              eSrc1C s2
-              --
-              eSrc2R s1
-            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcCX _ _ _ _)] -> do
               -- imad__RRCx_RRCx
-              eRegFile True 0x3
+              let is_ind = case six of {SurfReg _ -> True; _ -> False}
+              eRegFile is_ind 0x3
               --
               eSrc0R_NN s0
-              --
               eSrc1C s2
-              --
               eSrc2R s1
-            [s0@(SrcR _ _ _ _),SrcI imm,s2@(SrcR _ _ _ _)] -> do
+            [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
               -- imad__RsIR_RIR
               eRegFile False 0x4
               --
               eSrc0R_NN s0
-              --
-              eField fSRC1_IMM imm
-              --
+              eField fSRC1_IMM (fromIntegral imm)
               eSrc2R s2
-            [s0@(SrcR _ _ _ _),s1@(SrcC _ _ _ _),s2@(SrcR _ _ _ _)] -> do
+            [s0@(Src_R _ _),s1@(SrcCon _ six _),s2@(Src_R _ _)] -> do
               -- imad__RCR_RCR
-              eRegFile False 0x5
-              --
-              eSrc0R_NN s0
-              --
-              eSrc1C s1
-              --
-              eSrc2R s2
-            [s0@(SrcR _ _ _ _),s1@(SrcCX _ _ _ _),s2@(SrcR _ _ _ _)] -> do
               -- imad__RCxR_RCxR
-              eRegFile True 0x5
+              let is_ind = case six of {SurfReg _ -> True; _ -> False}
+              eRegFile is_ind 0x5
               --
               eSrc0R_NN s0
-              --
               eSrc1C s1
-              --
               eSrc2R s2
-            [s0@(SrcR _ _ _ _),s1@(SrcUR _ _ _),s2@(SrcR _ _ _ _)] -> do
+            [s0@(Src_R _ _),s1@(Src_UR _ _),s2@(Src_R _ _)] -> do
               -- imad__RUR_RUR
               eRegFile True 0x6
               --
               eSrc0R_NN s0
-              --
               eSrc1UR_NN s1
-              --
               eSrc2R s2
-            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcUR _ _ _)] -> do
+            [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_UR _ _)] -> do
               -- imad__RRU_RRU
               eRegFile True 0x7
               --
               eSrc0R_NN s0
-              --
               eSrc2R s1
-              --
               eSrc2UR_NN s2
             [_,_,_] -> eFatal "wrong type of arguments to instruction"
             _ -> eFatal "wrong number of arguments to instruction"
@@ -442,64 +416,46 @@ eInst i = enc
           -- if they are omitted, we encode PT (0x7); neither has a sign
           (p0,p1,srcs) <-
             case iSrcs i of
-              (SrcP p0neg p0:SrcP p1neg p1:sfx)
-                | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
-                | p1neg -> eFatal "predicate negation not support on extra predicate source (1)"
+              (Src_P p0_ms p0:Src_P p1_ms p1:sfx)
+                | ModNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
+                | ModNEG`msElem`p1_ms -> eFatal "predicate negation not support on extra predicate source (1)"
                 | otherwise -> return (p0,p1,sfx)
-              (SrcP p0neg p0:sfx)
-                | p0neg -> eFatal "predicate negation not support on extra predicate source (0)"
+              (Src_P p0_ms p0:sfx)
+                | ModNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
                 | otherwise -> return (p0,PT,sfx)
               sfx -> return (PT,PT,sfx)
           eEncode fIADD3_SRCPRED0 p0
           eEncode fIADD3_SRCPRED1 p1
           case srcs of
+            [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_R _ _)] -> do
               -- iadd3_noimm__RRR_RRR
-            [s0@(SrcR _ _ _ _),s1@(SrcR _ _ _ _),s2@(SrcR _ _ _ _)] -> do
-              eField fREGFILE 0x1
-              eEncode fUNIFORMREG False
+              eRegFile False 0x1
               --
               eSrc0R s0
               eSrc1R s1
               eSrc2R s2
+            [s0@(Src_R _ _),s1@(SrcCon _ six _),s2@(Src_R _ _)] -> do
               -- iadd3_noimm__RCR_RCR
-            [s0@(SrcR _ _ _ _),s1@(SrcC _ _ _ _),s2@(SrcR _ _ _ _)] -> do
-              eField fREGFILE 0x5
-              eEncode fUNIFORMREG False
+              -- iadd3_noimm__RCxR_RCxR
+              let is_ind = case six of {SurfReg _ -> True; _ -> False}
+              eRegFile is_ind 0x5
               --
               eSrc0R s0
-              --
               eSrc1C s1
-              --
               eSrc2R s2
-            -- iadd3_noimm__RCxR_RCxR
-            [s0@(SrcR _ _ _ _),s1@(SrcCX _ _ _ _),s2@(SrcR _ _ _ _)] -> do
-              eField fREGFILE 0x5
-              eEncode fUNIFORMREG True
+            [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
+              -- iadd3_imm__RsIR_RIR
+              eRegFile False 0x4
               --
               eSrc0R s0
-              --
-              eSrc1C s1
-              --
+              eField fSRC1_IMM (fromIntegral imm)
               eSrc2R s2
-            -- iadd3_imm__RsIR_RIR
-            [s0@(SrcR _ _ _ _),SrcI imm,s2@(SrcR _ _ _ _)] -> do
-              eField fREGFILE 0x4
-              eEncode fUNIFORMREG False
+            [s0@(Src_R _ _),s1@(Src_UR _ _),s2@(Src_R _ _)] -> do
+              -- iadd3_noimm__RUR_RUR
+              eRegFile True 0x6
               --
               eSrc0R s0
-              --
-              eField fSRC1_IMM imm
-              --
-              eSrc2R s2
-            -- iadd3_noimm__RUR_RUR
-            [s0@(SrcR _ _ _ _),s1@(SrcUR _ _ _),s2@(SrcR _ _ _ _)] -> do
-              eField fREGFILE 0x6
-              eEncode fUNIFORMREG True
-              --
-              eSrc0R s0
-              --
               eSrc1UR_NN s1
-              --
               eSrc2R s2
             [_,_,_] -> eFatal "unsupported operand kinds to IADD3"
             _ -> eFatal "wrong number of operands to IADD3"
@@ -535,7 +491,7 @@ eInst i = enc
           -- .U32
           eInvertedInstOpt fISETP_U32 InstOptU32
           -- .{AND,OR,XOR}
-          case iOptsSubset [InstOptAND,InstOptOR,InstOptXOR] of
+          case iOptsSubset (iosFromList [InstOptAND,InstOptOR,InstOptXOR]) of
             [InstOptAND] -> eField fISETP_COMBINING_FUNCTION 0x0
             [InstOptOR]  -> eField fISETP_COMBINING_FUNCTION 0x1
             [InstOptXOR] -> eField fISETP_COMBINING_FUNCTION 0x2
@@ -555,17 +511,18 @@ eInst i = enc
             [DstP p] -> eEncode fISETP_DST_PRED p
             _ ->  eFatal "malformed destination"
           case iSrcs i of
-            [SrcP c_neg c_pr, src0@(SrcR _ _ _ _), src1] -> do
+            [Src_P c_ms c_pr, src0@(Src_R _ _), src1] -> do
+              let c_neg = ModNEG`msElem`c_ms
               when c_neg $
                 eFatalF fISETP_SRC0_PRED "src0 predicate cannot be negated"
-              ePredicationSrc fISETP_SRC0_PRED (PredP c_neg c_pr)
+              ePredicationSrc fISETP_SRC0_PRED (PredP False c_pr)
               eSrc0R_NNA src0
               case src1 of
-                SrcR _ _ _ _ -> eRegFile False 0x1 >> eSrc1R src1
-                SrcC _ _ _ _ -> eRegFile False 0x5 >> eSrc1C src1
-                SrcCX _ _ _ _ -> eRegFile True 0x5 >> eSrc1C src1
-                SrcI imm -> eRegFile False 0x4 >> eField fSRC1_IMM imm
-                SrcUR _ _ _ -> eRegFile True 0x6 >> eSrc1UR_NN src1
+                Src_R _ _ -> eRegFile False 0x1 >> eSrc1R src1
+                SrcCon _ six _ -> eRegFile is_ind 0x5 >> eSrc1C src1
+                  where is_ind = case six of {SurfReg _ -> True; _ -> False}
+                SrcI32 imm -> eRegFile False 0x4 >> eField fSRC1_IMM (fromIntegral imm)
+                Src_UR _ _ -> eRegFile True 0x6 >> eSrc1UR_NN src1
                 _ -> eFatal "source 1 must be R, I, or C"
             _ -> eFatal "wrong number of sources (expects P, R, R|I|C, P(, P?))"
           case iSrcPreds i of
@@ -583,26 +540,33 @@ eInst i = enc
         -- LD/ST helpers
         --
         eLdStDataType :: E ()
-        eLdStDataType =
+        eLdStDataType = do
           case iOptsSubset inst_opt_ldst_types of
-            [] -> eField fLDST_DATA_TYPE 0x4
-            [InstOptU,InstOpt128] -> eField fLDST_DATA_TYPE 0x7
-            (InstOptU:_) -> eFatalF fLDST_DATA_TYPE ".U only allowed on .128"
             [InstOptU8] -> eField fLDST_DATA_TYPE 0x0
             [InstOptS8] -> eField fLDST_DATA_TYPE 0x1
             [InstOptU16] -> eField fLDST_DATA_TYPE 0x2
             [InstOptS16] -> eField fLDST_DATA_TYPE 0x3
-            --
+            [{- (InstOpt32) -}] -> eField fLDST_DATA_TYPE 0x4
             [InstOpt64] -> eField fLDST_DATA_TYPE 0x5
-            [InstOpt128] -> eField fLDST_DATA_TYPE 0x6
+            [InstOpt128]
+              | oIsSLM (iOp i) -> eField fLDST_DATA_TYPE 0x6 -- .U is separate
+              | iLacksInstOpt InstOptU i -> eField fLDST_DATA_TYPE 0x6 -- global  (no .U)
+              | otherwise -> eField fLDST_DATA_TYPE 0x7 -- .U is part of data type
             xs -> eFatalF fLDST_DATA_TYPE $
                     "invalid data combination: {" ++
                       intercalate ", " (map format xs) ++ "}"
 
+        whenSLM :: E () -> E ()
+        whenSLM = when (oIsSLM (iOp i))
+        unlessSLM :: E () -> E ()
+        unlessSLM = unless (oIsSLM (iOp i))
 
         eLdStCommon :: E ()
         eLdStCommon = do
+          --
           eLdStDataType
+          --
+          whenSLM $ eEncode fLDS_U (iHasInstOpt InstOptU i)
           --
           eInstOpt fLDST_ADDR_E InstOptE
           --
@@ -639,19 +603,26 @@ eInst i = enc
         eLDST_Addrs :: [Src] -> E ()
         eLDST_Addrs srcs =
           case srcs of
-            [SrcR _ _ _ r_addr, SrcUR _ _ ur, SrcI imm] -> do
+            [Src_R r_ms r_addr, Src_UR ur_ms ur, SrcI32 imm] -> do
               eEncode fSRC0_REG r_addr
               if ur == URZ
-                then do
-                  eField fREGFILE 0x1
+                then do eField fREGFILE 0x1
                 else do
-                -- oddly their encoder leaves this 0's if the uniform offset
-                -- isn't used (bit 91) so we only set this field for that case
-                  eField fREGFILE 0x4
+                  eRegFile True 0x4
+                  case filter (`elem`[ModU32,Mod64]) (msToList r_ms) of
+                    [] -> do
+                      when (r_addr /= RZ) $
+                       eFatal "non RZ register requires .U32 or .64"
+                    [x] -> eEncode fUNIFORM_64 (x==Mod64)
+                    _ -> eFatal "only one of .U32 or .64 allowed"
+                  --
                   eEncode fLDST_ADDR_UROFF ur
+                  --
+                  unless (msNull ur_ms) $
+                    eFatal "uniform reg doesn't support modifiers"
                   -- eEncode fLDST_UNIFORMOPTS True
                   eFatal $ "op doesn't support URZ yet (need to sort out bits[91:90])"
-              eField fLDST_ADDR_IMMOFF imm
+              eField fLDST_ADDR_IMMOFF (fromIntegral imm)
             _ -> eFatal $ "malformed source parameters for " ++ show (iOp i)
 
         -----------------------------------------------------------------------
@@ -683,9 +654,10 @@ eInst i = enc
           eLdStCommon
           eLDST_Addrs (take 3 (iSrcs i))
           case drop 3 (iSrcs i) of
-            [SrcR False False False r_data] -> do
+            [Src_R ms r_data] -> do
+              unless (msNull ms) $
+                eFatal "source modifiers and reuse flags not permitted"
               eEncode fSRC1_REG r_data
-            [SrcR _ _ _ r_data] -> eFatal "source modifiers and reuse flags not permitted"
             _ -> eFatal "expected one data register"
           --
           return ()
@@ -871,6 +843,8 @@ fSRCCUIX = f "Src.ConstIndex" 32 6 $ \_ val ->
 
 fUNIFORMREG :: Field
 fUNIFORMREG = fb "EnableUniformReg" 91 "uniform registers enabled"
+fUNIFORM_64 :: Field
+fUNIFORM_64 = fl "EnableUniformReg" 90 1 ["ADDR.U32","ADDR.64"]
 
 fDEPINFO_STALLS :: Field
 fDEPINFO_STALLS = f "DepInfo.Stalls" 105 4 $ \_ val -> -- [108:105]

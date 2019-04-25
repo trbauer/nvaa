@@ -48,6 +48,31 @@ instance Read Word128 where
             _ -> []
         _ -> []
   readsPrec _ _ = []
+instance Num Word128 where
+  (+) = w128BinOp (+)
+  (-) = w128BinOp (-)
+  (*) = w128BinOp (*)
+  --
+  negate = w128UnOp negate
+  abs = w128UnOp abs
+  signum = w128UnOp signum
+  --
+  fromInteger i = Word128 hi lo
+    where hi = fromInteger (0xFFFFFFFFFFFFFFFF .&. (i`shiftR`64)) :: Word64
+          lo = fromInteger (0xFFFFFFFFFFFFFFFF .&. i) :: Word64
+
+w128UnOp :: (Integer -> Integer) -> Word128 -> Word128
+w128UnOp f w128 =
+  fromInteger (f (w128ToInteger w128))
+w128BinOp :: (Integer -> Integer -> Integer) -> Word128 -> Word128 -> Word128
+w128BinOp f w128a w128b =
+  fromInteger (f (w128ToInteger w128a) (w128ToInteger w128b))
+
+w128ToInteger :: Word128 -> Integer
+w128ToInteger (Word128 hi lo) = hi_i .|. lo_i
+  where hi_i = fromIntegral hi `shiftL` 64 :: Integer
+        lo_i = fromIntegral lo :: Integer
+
 
 {-
 getFieldBits :: FiniteBits b => Int -> Int -> b -> Word64

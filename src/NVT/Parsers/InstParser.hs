@@ -147,29 +147,24 @@ pInst pc = pWhiteSpace >> body
   where body = pWithLoc $ \loc -> do
           prd <- P.option PredNONE pPred
           op <- pOp
+          (ios,mlop3) <- pInstOpts op
           case op of
             Op "IADD3" -> do
-              opts <- pInstOpts op
               dsts <- pDsts op
-              let dft_pred = SrcP False PT
               (p0,p1) <-
-                P.option (dft_pred,dft_pred) $ P.try $ do
+                P.option (sRC_PT,sRC_PT) $ P.try $ do
                   p0 <- pSymbol "," >> pSrcP
-                  p1 <- P.option dft_pred (P.try $ pSymbol "," >> pSrcP)
+                  p1 <- P.option sRC_PT (P.try $ pSymbol "," >> pSrcP)
                   return (p0,p1)
-              pIntTernary loc prd op opts dsts (resolveds [p0, p1])
+              pIntTernary loc prd op ios dsts (resolveds [p0, p1])
             Op "IMAD" -> do
-              opts <- pInstOpts op
               dsts <- pDsts op
-              pIntTernary loc prd op opts dsts []
+              pIntTernary loc prd op ios dsts []
             Op "STG" -> do
-              opts <- pInstOpts op
-              pST loc prd op opts
+              pST loc prd op ios
             Op "LDG" -> do
-              opts <- pInstOpts op
-              pLD loc prd op opts
+              pLD loc prd op ios
             Op "ISETP" -> do
-              opts <- pInstOpts op
               dst <- pDst
               pSymbol_ ","
               c_pred <- pSrcP
@@ -180,19 +175,21 @@ pInst pc = pWhiteSpace >> body
                 loc
                 prd
                 op
-                opts
+                ios
                 [dst]
                 (resolved c_pred:unresolved_srcs)
                 x_pred_srcs
+            Op "LOP3" -> do
+              -- use mlop3 potentially in the operand parse
+              return $ error "pInst.LOP3"
             Op "NOP" -> do
-              pCompleteInst loc prd op [] [] [] []
+              pCompleteInst loc prd op iosEmpty [] [] []
             _ -> do
-              opts <- pInstOpts op
               dsts <- pDsts op
               unless (null dsts) $ do
                 pSymbol_ ","
               unresolved_srcs <- pSrcs pc op
-              pCompleteInst loc prd op opts dsts unresolved_srcs []
+              pCompleteInst loc prd op ios dsts unresolved_srcs []
 
         resolved :: a -> Unresolved a
         resolved = const . Right
@@ -215,20 +212,20 @@ pInst pc = pWhiteSpace >> body
             -- else return [PredP True PT,PredP True PT]
           pCompleteInst loc prd op opts dsts (src_pfx_preds++unresolved_srcs) x_pred_srcs
 
-        pLD :: Loc -> Pred -> Op -> [InstOpt] -> PI (Unresolved Inst)
-        pLD loc prd op opts = do
+        pLD :: Loc -> Pred -> Op -> InstOptSet -> PI (Unresolved Inst)
+        pLD loc prd op ios = do
           let pDstPred = do
                 p <- pDstP
                 pSymbol_ ","
                 return [p]
-          dst_p <- if InstOptZD`elem`opts then pDstPred else return []
+          dst_p <- if InstOptZD`iosElem`ios then pDstPred else return []
           dst_r <- pDstR
           pSymbol_ ","
-          let pBareSrcR = SrcR False False False <$> pSyntax
+          let pBareSrcR = Src_R msEmpty <$> pSyntax
           (r_addr,ur_off,i_off) <- pLDST_Addrs op
 
           pCompleteInst
-            loc prd op opts (dst_p++[dst_r]) (resolveds [r_addr,ur_off,i_off]) []
+            loc prd op ios (dst_p++[dst_r]) (resolveds [r_addr,ur_off,i_off]) []
 
         --  R (+ UR) (+ IMM)
         --       UR  (+ IMM)
@@ -237,38 +234,50 @@ pInst pc = pWhiteSpace >> body
         -- TODO: support for LDS offsets and the other [91:90] stuff
         pLDST_Addrs :: Op -> PI (Src,Src,Src)
         pLDST_Addrs op = do
-          let src_urz = SrcUR False False URZ
-          let src_rz = SrcR False False False RZ
-          let pBareSrcUR = pLabel "ureg" $ SrcUR False False <$> pSyntax
+          let pBareSrcUR :: PI Src
+              pBareSrcUR = pLabel "ureg" $ Src_UR msEmpty <$> pSyntax
           let pR_UR_IMM = do
-                r_addr <- pBareSrcR
-                let pAddends = do
-                      pSymbol "+"
-                      P.try pUR_IMM <|> pIMM_UR
-                (_,src_ur,src_imm) <- pAddends <|> return (src_rz,src_urz,SrcI 0)
-                return (r_addr,src_ur,src_imm)
+                r_addr <- pSyntax
+                -- technically LDS/STS don't permit .U32 or .64
+                ms <-
+                  if oIsSLM op
+                    then pModSetSuffixesOptOneOf [ModX4,ModX8,ModX16]
+                    else pModSetSuffixesOptOneOf [ModU32,Mod64]
+                (_,src_ur,src_imm) <-
+                  P.option (sRC_RZ,sRC_URZ,sRC_IMM_0) $ do
+                    pSymbol "+"
+                    P.try pUR_IMM <|> pIMM_UR
+                return (Src_R ms r_addr,src_ur,src_imm)
+              pUR_IMM :: PI (Src,Src,Src)
               pUR_IMM = do
                 ur <- pBareSrcUR
-                imm <- P.option (SrcI 0) $ pSymbol "+" >> pSrcI op
-                return (src_rz,ur,imm)
+                imm <- P.option sRC_IMM_0 $ pSymbol "+" >> pSrcI32 op
+                return (sRC_RZ,ur,imm)
+              pIMM_UR :: PI (Src,Src,Src)
               pIMM_UR = do
-                imm <- pSrcI op
-                ur <- P.option src_urz $ pSymbol "+" >> pBareSrcUR
-                return (src_rz,ur,imm)
+                imm <- pSrcI32 op
+                ur <- P.option sRC_URZ $ pSymbol "+" >> pBareSrcUR
+                return (sRC_RZ,ur,imm)
           pSymbol "["
           r <- P.try pUR_IMM <|> P.try pIMM_UR <|> pR_UR_IMM
           pSymbol "]"
           return r
 
-        pST :: Loc -> Pred -> Op -> [InstOpt] -> PI (Unresolved Inst)
-        pST loc prd op opts = do
+        pModSetSuffixesOptOneOf :: [Mod] -> PI ModSet
+        pModSetSuffixesOptOneOf ms = do
+          let msSingleton s = msFromList [s]
+              opts = map (\m -> ("." ++ drop 3 (show m),m))
+          P.option msEmpty $ msSingleton <$> pOneOf (opts ms)
+
+        pST :: Loc -> Pred -> Op -> InstOptSet -> PI (Unresolved Inst)
+        pST loc prd op ios = do
           (r_addr,ur_off,i_off) <- pLDST_Addrs op
           pSymbol ","
           r_data <- pBareSrcR
-          pCompleteInst loc prd op opts [] (resolveds [r_addr,ur_off,i_off,r_data]) []
+          pCompleteInst loc prd op ios [] (resolveds [r_addr,ur_off,i_off,r_data]) []
 
         pBareSrcR :: PI Src
-        pBareSrcR = pLabel "reg" $  SrcR False False False <$> pSyntax
+        pBareSrcR = pLabel "reg" $ Src_R msEmpty <$> pSyntax
 
         -- up to two predicate sources
         pOptPreds = do
@@ -278,7 +287,7 @@ pInst pc = pWhiteSpace >> body
               p_src1 <- pSymbol "," >> pPredSrcP
               return [p_src0,p_src1]
 
-        pCompleteInst :: Loc -> Pred -> Op -> [InstOpt] -> [Dst] -> [Unresolved Src] -> [Pred] -> PI (Unresolved Inst)
+        pCompleteInst :: Loc -> Pred -> Op -> InstOptSet -> [Dst] -> [Unresolved Src] -> [Pred] -> PI (Unresolved Inst)
         pCompleteInst loc prd op opts dsts unresolved_srcs src_preds = do
           dep_info <- pDepInfo
           P.try $ pSymbol ";"
@@ -321,20 +330,23 @@ pOp = do
   return $ Op op
 
 
-pInstOpts :: Op -> PI [InstOpt]
+pInstOpts :: Op -> PI (InstOptSet,Maybe Word8)
 pInstOpts op
-  | is_lop3 = P.try pLop3Code <|> pOptSeq
-  | otherwise = pOptSeq
+  | is_lop3 = P.try pLop3Code <|> pOptSeq Nothing
+  | otherwise = pOptSeq Nothing
   where is_lop3 = op `elem` [Op "LOP3",Op "ULOP3"]
 
-        pLop3Code :: PI [InstOpt]
+        pLop3Code :: PI (InstOptSet,Maybe Word8)
         pLop3Code = do
           pSymbol "."
-          _ <- pLop3Expr
-          return []
+          e <- pLop3Expr
+          pOptSeq (Just e)
 
-        pOptSeq :: PI [InstOpt]
-        pOptSeq = concat <$> P.many pToken
+        pOptSeq :: Maybe Word8 -> PI (InstOptSet,Maybe Word8)
+        pOptSeq mlut = do
+            ios0 <- iosFromList . concat <$> P.many pToken
+            let ios = if iosNull ios0 then iosEmpty else ios0 -- shared object
+            return (ios,mlut)
           where pToken = do
                   pSymbol "."
                   P.try pIgnore <|> pInstOpt
@@ -404,11 +416,13 @@ pSrcsN n pc op = do
 pSrcs :: PC -> Op -> PI [Unresolved Src]
 pSrcs pc op = P.sepBy (pSrc pc op) (pSymbol ",")
 pSrc :: PC -> Op -> PI (Unresolved Src)
-pSrc pc op = P.try pNonLabel <|> pImmLbl
+pSrc pc op = pWithLoc $ pSrcAt pc op
+pSrcAt :: PC -> Op -> Loc -> PI (Unresolved Src)
+pSrcAt pc op loc = P.try pNonLabel <|> pImmLbl
   where pNonLabel :: PI (Unresolved Src)
         pNonLabel = alwaysSucceeds <$> pCases
           where pCases =
-                  P.try (pSrcI op) <|>
+                  P.try pImmNonLabel <|>
                   pSrcCCX <|>
                   pSrcR <|>
                   pSrcSR <|>
@@ -417,13 +431,26 @@ pSrc pc op = P.try pNonLabel <|> pImmLbl
                   pSrcP <|>
                   pSrcB
 
+        pImmNonLabel
+          | oIsBranch op = pSrcI49 op
+          | otherwise = pSrcI32 op
+
         alwaysSucceeds :: Src -> Unresolved Src
-        alwaysSucceeds src _ = Right src
+        alwaysSucceeds src _ = Right (srcIntern src)
 
         pImmLbl :: PI (Unresolved Src)
         pImmLbl = pLabel "label expression" $ do
           e <- pLExpr pc
-          return $ \lix -> SrcI <$> evalLExpr lix e
+          let eval :: Unresolved Src
+              eval lix
+                | oIsBranch op = SrcImm . Imm49 . fromIntegral <$> evalLExpr lix e
+                | otherwise = do
+                  val <- evalLExpr lix e
+                  if val < -2^31 || val > 2^31-1
+                    then Left (dCons loc "value overflows 32b imm")
+                    else return (SrcI32 (fromIntegral val))
+          -- FIXME: for BR we need ot use big op
+          return eval
 
 
 pSrcCCX :: PI Src
@@ -438,13 +465,13 @@ pSrcCCX = pLabel "const surface" $ P.try pConstInd <|> P.try pConstDir
                 pSymbol "["
                 o <- pInt
                 pSymbol "]"
-                return (s,o)
-          ((s,o),neg,abs) <- pWithNegAbs pCon
-          return $ SrcC neg abs s o
+                return (SurfImm s,o)
+          ((s,o),ms_neg_abs) <- pWithNegAbs pCon
+          return $ SrcCon ms_neg_abs s o
 
         pConstInd :: PI Src
         pConstInd = do
-          ((u,o),neg,abs) <-
+          ((u,o),ms_neg_abs) <-
             pWithNegAbs $ do
               pSymbol "cx"
               pSymbol "["
@@ -453,50 +480,70 @@ pSrcCCX = pLabel "const surface" $ P.try pConstInd <|> P.try pConstDir
               pSymbol "["
               o <- pInt
               pSymbol "]"
-              return (u,o)
-          return $ SrcCX neg abs u o
+              return (SurfReg u,o)
+          return $ SrcCon ms_neg_abs u o
 
 -- rejects 32@hi... and 32@lo...
-pSrcI :: Op -> PI Src
-pSrcI = pLabel "imm" . pSrcImmNonBranch
-pSrcImmNonBranch :: Op -> PI Src
-pSrcImmNonBranch op = do
-    imm <- pVal
+pSrcI32 :: Op -> PI Src
+pSrcI32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
+pSrcImmNonBranch32 :: Op -> PI Src
+pSrcImmNonBranch32 op = do
+  imm <- pIntImm64
+  P.notFollowedBy (P.char '@')
+  pWhiteSpace
+  return $ SrcImm (Imm49 imm)
+
+pSrcI49 :: Op -> PI Src
+pSrcI49 op = pLabel "imm49" $ srcIntern <$> pSrcImmNonBranch49 op
+pSrcImmNonBranch49 :: Op -> PI Src
+pSrcImmNonBranch49 op = do
+    imm <- pVal32
     P.notFollowedBy (P.char '@')
     pWhiteSpace
-    return $ SrcI imm
-  where pVal
-          | oOpIsFP op = pFltImm32 <|> pIntImm32
+    return $ SrcI32 imm
+  where pVal32
+          | oIsFP op = pFltImm32 <|> pIntImm32
           | otherwise = pIntImm32
 
-pNegationNumeric :: PI Bool
-pNegationNumeric = P.option False $ (pSymbol "-" <|> pSymbol "~") >> return True
-pNegationLogical :: PI Bool
-pNegationLogical = P.option False (pSymbol "!" >> return True)
+pNegationNumericOpt :: PI ModSet
+pNegationNumericOpt = P.option msEmpty $
+  (pSymbol "-" >> return (msSingleton ModNEG)) <|>
+  (pSymbol "~" >> return (msSingleton ModCOMP))
+pNegationLogical :: PI ModSet
+pNegationLogical = P.option msEmpty (pSymbol "!" >> return (msSingleton ModNEG))
 
 -- how to make this work with <$>...<*>...<*>...
 -- pWithNegAbsC :: PI a -> PI (Bool -> Bool -> PI a)
 
-pWithNegAbs :: PI a -> PI (a,Bool,Bool)
+pWithNegAbs :: PI a -> PI (a,ModSet)
 pWithNegAbs pBody = do
-  neg <- pNegationNumeric
+  ms_neg <- pNegationNumericOpt
   let pWithAbs = do
           pSymbol "|"
           r <- pBody
           pSymbol "|"
           return (r,True)
   (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
-  return (r,neg,abs)
+  let char x a = if x then msSingleton a else msEmpty
+  let ms = msIntern $ msUnion ms_neg $ char abs ModABS
+  return (r,ms)
+
+
+pAddModRegSuffixes :: PI ModSet
+pAddModRegSuffixes = msIntern . msFromList <$> P.many (pOneOf opts)
+  where opts = map (\m -> (msFormatSuffix m,m)) reg_sfx_mods
+        reg_sfx_mods = [ModREU,ModH0_H0,ModH1_H1,ModROW,ModCOL]
 
 pSrcR :: PI Src
 pSrcR = pLabel "reg" $ do
-  (r,neg,abs) <- pWithNegAbs pSyntax
-  reuse <- P.option False $ P.try (pSymbol ".reuse" >> return True)
-  return $ SrcR neg abs reuse r
+  (reg,ms_pfx) <- pWithNegAbs pSyntax
+  ms_sfx <- pAddModRegSuffixes
+  return $ SrcReg (msIntern (ms_pfx`msUnion`ms_sfx)) (RegR reg)
 
 pSrcSR :: PI Src
-pSrcSR = pLabel "sys reg" $ SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
-  where pUnderbarTidCtaid =
+pSrcSR = pLabel "sys reg" $ SrcReg msEmpty . RegSR <$> parse
+  where parse = P.try pUnderbarTidCtaid <|> pSyntax
+        pUnderbarTidCtaid =
           -- we accept these with a dot, but we also allow
           -- the more IR-consistent form here (SR_TID.X)
           --
@@ -512,19 +559,21 @@ pSrcSR = pLabel "sys reg" $ SrcSR <$> (P.try pUnderbarTidCtaid <|> pSyntax)
 
 pSrcUR :: PI Src
 pSrcUR = pLabel "unif reg" $ do
-  (ur,neg,abs) <- pWithNegAbs pSyntax
-  return (SrcUR neg abs ur)
+  (ur,ms) <- pWithNegAbs pSyntax
+  return (Src_UR ms ur)
 
 pSrcP :: PI Src
-pSrcP = pLabel "pred reg" $
-  SrcP <$> pNegationLogical <*> pSyntax
+pSrcP = pLabel "pred reg" $ do
+  ms <- pNegationLogical
+  Src_P ms <$> pSyntax
 
 pSrcUP :: PI Src
-pSrcUP = pLabel "pred reg" $
-  SrcUP <$> pNegationLogical <*> pSyntax
+pSrcUP = pLabel "pred reg" $ do
+  ms <- pNegationLogical
+  Src_UP ms <$> pSyntax
 
 pSrcB :: PI Src
-pSrcB = pLabel "barrier reg" $ SrcB <$> pSyntax
+pSrcB = pLabel "barrier reg" $ Src_B msEmpty <$> pSyntax
 
 
 pLExpr :: PC -> PI LExpr
@@ -582,8 +631,8 @@ pLabelChars = pDotLabel <|> pNonDotLabel
           sfx <- P.many $ P.alphaNum <|> pOtherIdentChar
           return (c0:sfx)
 
-evalLExpr :: LabelIndex -> LExpr -> Either Diagnostic Word64
-evalLExpr lix = (fromIntegral <$>) . eval
+evalLExpr :: LabelIndex -> LExpr -> Either Diagnostic Int64
+evalLExpr lix = eval
   where eval :: LExpr -> Either Diagnostic Int64
         eval le =
           case le of
@@ -647,7 +696,7 @@ data LExpr =
 -- oHasSrcs :: Op -> Bool
 -- oHasSrcs op =
 
-pIntImm32 :: PI Word64
+pIntImm32 :: PI Word32
 pIntImm32 = do
   -- Were we to use Int32, then fromIntegral to Word64 would sign extend
   -- and create a value that won't fit in encoding.
@@ -655,9 +704,14 @@ pIntImm32 = do
   -- The function negate :: Word32 -> Word32 is still two's-complement
   let pImmS32 = pImmA :: PI Word32
   maybeNegate <- P.option id (pSymbol "-" >> return negate)
-  fromIntegral . maybeNegate <$> pImmS32
+  maybeNegate <$> pImmS32
+pIntImm64 :: PI Word64
+pIntImm64 = do
+  let pImmS64 = pImmA :: PI Word64
+  maybeNegate <- P.option id (pSymbol "-" >> return negate)
+  maybeNegate <$> pImmS64
 
-pFltImm32 :: PI Word64
+pFltImm32 :: PI Word32
 pFltImm32 = do
     maybeNegate <- P.option id $ pSymbol "-" >> return (flip complementBit 31)
     maybeNegate <$> (pInf <|> pNonInf)
@@ -667,8 +721,9 @@ pFltImm32 = do
 
 -- {!8,Y,+2.R,+3.W,^4,^1}
 pDepInfo :: PI DepInfo
-pDepInfo = (pSymbol "{" >> pTokenLoop 0 di0 ) <|> return di0
-  where di0 = DepInfo 0 False Nothing Nothing 0
+pDepInfo = diIntern <$> parseIt
+  where parseIt = P.option diDefault $ pSymbol "{" >> pTokenLoop 0 diDefault
+
         pTokenLoop :: Int -> DepInfo -> PI DepInfo
         pTokenLoop ix di = pEnd <|> (pMaybeSep >> pToken)
           where pEnd = do pSymbol "}" >> return di
