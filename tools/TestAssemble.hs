@@ -14,9 +14,11 @@ import Control.Applicative
 import Control.Exception
 import Control.Monad
 import Data.Char
+import Data.IORef
 import Data.List
 import Data.Word
 import Debug.Trace
+import System.Directory
 import System.IO
 import Text.Printf
 
@@ -77,9 +79,10 @@ testLDG = testFile "examples\\sm_75\\ops\\LDG.sass"
 -- 000F`D800`03F0`4070
 --        96|  80|
 -- t = testInst "000FD80003F04070`727FFFFF0000780C:        ISETP.GT.U32.AND P0, PT, R0, 0x727fffff, PT {!12,Y} ;"
-t = testInst "000FC00000000000`0000000000007918:        NOP  {Y} ;"
+-- t = testInst "000FC00000000000`0000000000007918:        NOP  {Y} ;"
+t = testInst "0003E8000C10E904`0000000FFF007986:        STG.E.SYS [UR4], R15 {!4,+2.R} ;"
 
-tld = testInst "000EA800001EE900`0000040004087381:        LDG.E.SYS R8, [R4+0x4] {!4,+3.W} ;"
+tld = testInst "000EE800001EE900`FFFFFC0012127381:        LDG.E.SYS R18, [R18+-0x4] {!4,+4.W} ;"
 
 
 
@@ -101,6 +104,18 @@ testB =
     ""
 
 
+help :: IO ()
+help = putStrLn $
+  "testAllFF      - runs all tests failing fast\n"++
+  "testInst       - once a test fails cut and paste the sample into testInst to isolate\n"++
+  ""
+
+testAll, testAllFF :: IO Bool
+testAll = testAllFF
+testAllFF = testAllG True
+testAllNFF :: IO Bool
+testAllNFF = testAllG False
+
 -- my minimal program to write effects out is:
 --   IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};      000FD000078E00FF`00000A00FF017624
 --   S2R              R0, SR_CTAID.X {!1,+1.W};
@@ -121,7 +136,7 @@ testInst syntax =
       putStrLn $ show 1 ++ ". " ++ err ++ ": malformed sample instruction\n"
     Right si -> do
       let syntax_x = stripPrefixBits syntax
-      testSampleInst True si ("<interactive>",1) syntax_x
+      testSampleInst id True si ("<interactive>",1) syntax_x
       return ()
 
 testParseInst :: String -> IO ()
@@ -164,12 +179,41 @@ stripPrefixBits ln =
     _ -> ln
 
 
-testFile :: FilePath -> IO Bool
-testFile = testFileK (-1)
-testFileK :: Int -> FilePath -> IO Bool
-testFileK k fp = do
-  let testLoop [] = return True
-      testLoop ((lno,ln):lns)
+
+testAllG :: Bool -> IO Bool
+testAllG fail_fast = do
+  putStrLn $ replicate 70 '*'
+  let runTestFiles rs [] = return (reverse rs)
+      runTestFiles rs (sass_f:sass_fs) = do
+        putStr $ printf "  %-32s" (sass_f++":") ++ "  "
+        -- putStrLn $ "************ TESTING " ++ sass_f ++ " ************"
+        ior <- newIORef ([] :: [IO ()])
+        let recordIO :: IO () -> IO ()
+            recordIO act = modifyIORef ior ((act:))
+        (np,nt) <- testFileG recordIO ("tests/"++sass_f)
+        if np == nt then putStrGreen "SUCCESS" >> putStrLn ("  (" ++ show nt ++ " tests)")
+          else do
+            putStrRed "FAILED\n"
+            racts <- readIORef ior
+            sequence_ (reverse racts)
+        if (fail_fast && np /= nt) then return ((np,nt):rs)
+          else runTestFiles ((np,nt):rs) sass_fs
+
+  sass_fs <- filter (".sass"`isSuffixOf`) <$> listDirectory "tests"
+  (nps,nts) <- unzip <$> runTestFiles [] sass_fs
+  let (np,nt) = (sum nps,sum nts)
+  putStrLn $ "******** passed " ++ show np ++ " of " ++ show nt ++ " ********"
+  return $ np == nt
+
+testFile :: FilePath -> IO (Int,Int)
+testFile = testFileGK id (-1)
+testFileG :: (IO () -> IO ()) -> FilePath -> IO (Int,Int)
+testFileG emit_io = testFileGK emit_io (-1)
+testFileGK ::  (IO () -> IO ()) -> Int -> FilePath -> IO (Int,Int)
+testFileGK emit_io k fp = do
+  let testLoop (np,nt) [] = return (np,nt)
+      testLoop (np,nt) ((lno,ln):lns)
+        | null skipped_spaces || "//"`isPrefixOf`skipped_spaces = testLoop (np,nt) lns
         | instHasLabels ln = do
           -- should be able to parse it
           let syntax = stripPrefixBits ln
@@ -177,28 +221,29 @@ testFileK k fp = do
             Left err -> do
               -- putStrLn $ "==> " ++ show ln
               let fmtDiag = dFormatWithLines (lines syntax)
-              putStrLn "ERROR: parsed SampleInst, but InstParser failed"
-              putStrLn $ fmtDiag err
-              return False
+              emit_io $ putStrLn "ERROR: parsed SampleInst, but InstParser failed"
+              emit_io $ putStrLn $ fmtDiag err
+              return (np,nt+1)
             Right _ -> do
               --
               -- putStrLn $ "SKIPPING LABEL CASE: " ++ ln
-              testLoop lns
+              testLoop (np,nt) lns
         | otherwise = do
           -- 0001E80000100000`0000042908007387:        STL.U8 [R8+0x4], R41 {!4,+1.R} ;       // examples/sm_75/samples\cdpSimplePrint.sass:1519
           case parseSampleInst ln of
             Left err -> do
-              putStrLn $ "SKIPPING: " ++ ln
-              testLoop lns
+              emit_io $ putStrLn $ "FAILED TO PARSE SAMPLE: " ++ ln
+              testLoop (np,nt+1) lns
             Right si -> do
-              putStrLn ln
-              z <- testSampleInst False si (fp,lno) (stripPrefixBits ln)
-              if not z then return False
+              emit_io $ putStrYellow (ln++"\n")
+              z <- testSampleInst emit_io False si (fp,lno) (stripPrefixBits ln)
+              if not z then return (np,nt+1)
                 else do
-                  testLoop lns
+                  testLoop (np+1,nt+1) lns
+        where skipped_spaces = dropWhile isSpace ln
   let takePrefix = if k >= 0 then take k else id
   flns <- takePrefix . lines <$> readFile fp
-  testLoop $ zip [1..] flns
+  testLoop (0,0) $ zip [1..] flns
 
 -- 000FE40000000F00`0000000000147802:        MOV R20, 32@lo((_Z21computeBezierLinesCDPP10BezierLinei + .L_4@srel)) {!2} ; // examples/sm_75/samples\BezierLineCDP.sass:1526
 -- 000FD00000000F00`0000000000157802:        MOV R21, 32@hi((_Z21computeBezierLinesCDPP10BezierLinei + .L_4@srel)) {!8,Y} ; // examples/sm_75/samples\BezierLineCDP.sass:1527
@@ -207,42 +252,44 @@ testFileK k fp = do
 instHasLabels :: String -> Bool
 instHasLabels ln = any (`isInfixOf`ln) ["32@lo(","32@hi(","`(","@srel"]
 
-testSampleInst :: Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool
-testSampleInst verbose si (fp,lno) syntax = do
+testSampleInst :: (IO () -> IO ()) -> Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool -- (Int,Int)
+testSampleInst emit_io verbose si (fp,lno) syntax = do
   let fmtDiag = dFormatWithLines (lines syntax)
+      emitLn = emit_io . putStrLn
+      emitLnRed = emit_io . putStrRed
   case parseInst 0 fp lno syntax of
     Left err -> do
-      putStrLn "ERROR: parsed SampleInst, but InstParser failed"
-      putStrLn $ fmtDiag err
+      emitLn "ERROR: parsed SampleInst, but InstParser failed"
+      emitLn $ fmtDiag err
       return False
     Right (i,ws) -> do
-      mapM_ (putStrLn . fmtDiag) ws
+      emit_io $ mapM_ (putStrLn . fmtDiag) ws
       let i_formatted = format i
       case parseInst 0 fp lno i_formatted of
         Left err -> do
-          putStrLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
-          putStrLn $ fmtInstIr i
-          putStrLn $ "formatted as ==> " ++ i_formatted
-          putStrLn $ "but failed to re-parse"
-          putStrLn $ dFormatWithLines (lines i_formatted) err
+          emitLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
+          emitLn $ fmtInstIr i
+          emitLn $ "formatted as ==> " ++ i_formatted
+          emitLn $ "but failed to re-parse"
+          emitLn $ dFormatWithLines (lines i_formatted) err
           return False
         Right (i2,_)
           | i{iLoc=lNONE} /= i2{iLoc=lNONE} -> do
-            putStrLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
-            putStrLn $ "formatted as ==> " ++ i_formatted
-            putStrLn $ "re-parsed differently"
-            putStrLn $ fmtInstIr i
-            putStrLn "========"
-            putStrLn $ fmtInstIr i2
+            emitLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
+            emitLn $ "formatted as ==> " ++ i_formatted
+            emitLn $ "re-parsed differently"
+            emitLn $ fmtInstIr i
+            emitLn "========"
+            emitLn $ fmtInstIr i2
             return False
           | otherwise -> do
             case runInstDbgEncoder i of
               Left err -> do
-                putStrLn $ fmtInstIr i
-                putStrRed $ "encode failed: " ++ fmtDiag err ++ "\n"
+                emitLn $ fmtInstIr i
+                emitLnRed $ "encode failed: " ++ fmtDiag err ++ "\n"
                 return False
               Right (w_enc,ws_enc,fs_enc) -> do
-                mapM_ (putStrLn . fmtDiag) ws_enc
+                emit_io $ mapM_ (putStrLn . fmtDiag) ws_enc
                 oks_diags <-
                   forM (insertReservedFields fs_enc) $ \(f,f_val) -> do
                     let ref = getField128 (fOffset f) (fLength f) (siBits si)
@@ -252,7 +299,7 @@ testSampleInst verbose si (fp,lno) syntax = do
                                 | encd /= ref = putStrRed
                                 | otherwise = putStr
                           if encd /= f_val then putStr " ==> " else putStr "     "
-                          putStrFunc $
+                          emit_io $ putStrFunc $
                             printf "    %-32s   %49s  %49s\n"
                               (fmtField f)
                               (fHexFieldWithMeaning f (siBits si))
@@ -261,23 +308,30 @@ testSampleInst verbose si (fp,lno) syntax = do
                 let (oks,diags) = unzip oks_diags
                     all_ok = and oks
                 unless all_ok $ do
-                  putStrLn "encoding mismatch"
-                  putStrLn ""
+                  emit_io $ do
+                    putStrLn "encoding mismatch"
+                    putStrLn ""
                 when (not all_ok || verbose) $ do
-                  putStrLn syntax
-                  putStrLn ""
-                  putStrLn $ fmtInstIr i
-                  putStrLn ""
-                  putStrLn "=== encoded fields ==="
-                  putStrLn $ "     " ++ printf "    %-32s   %16s %32s  %16s %32s" "FIELD" "REFERENCE" "" "ENCODED" ""
+                  emitLn syntax
+                  emitLn ""
+                  emitLn $ fmtInstIr i
+                  emitLn ""
+                  emitLn "=== encoded fields ==="
+                  emitLn $ "     " ++ printf "    %-32s   %16s %32s  %16s %32s" "FIELD" "REFERENCE" "" "ENCODED" ""
                   sequence diags
-                  putStrLn ""
+                  emitLn ""
                   when verbose $
-                    if all_ok then putStrGreen "fields match\n" else putStrRed "fields mismatch\n"
-
-                  putStrLn "== bit by bit ==="
-                  compareBits (siBits si) w_enc
+                    emit_io $ if all_ok then putStrGreen "fields match\n" else putStrRed "fields mismatch\n"
+                  emitLn "== bit by bit ==="
+                  compareBits emit_io (siBits si) w_enc
                 return all_ok
+
+-- putStrSuccess :: Bool -> String -> IO ()
+-- putStrSuccess z
+--   | z = putStrGreen
+--   | otherwise = putStrRed
+-- putStrLnSuccess :: Bool -> String -> IO ()
+-- putStrLnSuccess z s = putStrSuccess z (s++"\n")
 
 insertReservedFields :: [(Field,Word64)] -> [(Field,Word64)]
 insertReservedFields = loop 0
@@ -295,8 +349,8 @@ insertReservedFields = loop 0
 
 
 
-compareBits :: Word128 -> Word128 -> IO ()
-compareBits w_ref w_sut = cmpBits [0 .. 127]
+compareBits :: (IO () -> IO ()) -> Word128 -> Word128 -> IO ()
+compareBits emit_io w_ref w_sut = cmpBits [0 .. 127]
   where cmpBits :: [Int] -> IO ()
         cmpBits [] = return ()
         cmpBits (ix:ixs) = do
@@ -306,7 +360,7 @@ compareBits w_ref w_sut = cmpBits [0 .. 127]
                   len = if null nxt then 1 else last nxt - ix + 1
                   val_sut = getField128 ix 1 w_sut
                   val_ref = getField128 ix 1 w_ref
-              putStrLn $
+              emit_io $ putStrLn $
                 "Bits" ++
                   printf "%-24s" (fmtFieldIndices (ix,len)++":") ++
                   printf " 0x%0X     vs.    0x%0X" val_ref val_sut
@@ -369,22 +423,3 @@ hPutStrColored sgr h str = bracket_ acq rel act
         rel = SCA.hSetSGR h [SCA.Reset]
 
 
--- compareEncoding :: Word128 -> Word128
--- compareEncoding =
-
-{-
-      case encodeRawInstDebug (siRawInst si) of
-        Left err -> putStrLn $ dFormat err
-        Right (bits,ws,fs) -> do
-          mapM_ (putStrLn . dFormat) ws
-          let emitField :: (Field,Word64) -> IO ()
-              emitField (f,val) = do
-                let val_sut = getField128 (fOffset f) (fLength f) bits
-                    val_ref = getField128 (fOffset f) (fLength f) (siBits si)
-                when (val_sut /= val_ref) $ do
-                  let patt = "%-24s  " ++ fHexField f ++ " " ++ fHexField f
-                  putStrLn $ printf patt (fmtField f ++ ":") val_sut val_ref
-          mapM_ emitField fs
-          compareBits (siBits si) bits
-      return ()
--}

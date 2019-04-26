@@ -155,17 +155,35 @@ help :: IO ()
 help = do
   putStr $
     "COMMANDS\n" ++
-    "  * listDiffs          => lists the different fields between two samples\n" ++
-    "  * extractFields      => lists the values of a given set of fields\n" ++
-    "  * decode             => emits the syntax for a sample\n" ++
-    "  * twiddleField[s]    => given fields, test all values and emit syntax\n" ++
-    "  * twiddleFields[s]B  => same as above, but emit fields in binary\n" ++
-    "  * findValues         => finds longest fields that match each input in the sequence of samples\n" ++
+    "  listDiffs           => lists the different fields between two samples\n" ++
+    "  surveyFields        => lists the values of a given set of fields\n" ++
+    "  decode              => emits the syntax for a sample\n" ++
+    "  twiddleField[s][BX] => given field[s], test all values and emit syntax\n" ++
+    "                         emit data in binary or hex (or omit for default)\n" ++
+    "  findValues         => finds longest fields that match each input in the sequence of samples\n" ++
     "\n" ++
     "SAMPLE CONSTRUCTORS:\n" ++
     "  sString           => loads a bit pattern from a `-separated Word128 string\n" ++
-    "  sFile             => loads samples from a file (sFile \"foo.sass\")\n" ++
+    "  sFile[K]          => loads samples from a file (sFile \"foo.sass\")\n" ++
     "  sAllOps[K]        => loads all ops with a given name (sAllOps \"LDC\")\n" ++
+    "SAMPLE MODIFIERS:\n" ++
+    "  * pre-twiddle a sample field\n" ++
+    "    ~> F .= VAL\n" ++
+    "    (sString ... ~> (9,3).=5) flips field [11:9] to be 5\n" ++
+    "\n" ++
+    "  * pre-twiddle several sample fields\n" ++
+    "    *~> [F .= VAL, ...]\n" ++
+    "    (sString ... *~> [(91,1).=1, (9,3).=5]) flips field [11:9] to be 5 and [91] to be 1\n" ++
+    "\n" ++
+    "EXAMPLES:\n" ++
+    "  Lists the field values in from the first 100 samples in the given files.\n" ++
+    "    *> surveyFields [(90,2),(9,3)] (sFileK 100 \"examples/sm_75/ops/LDL.sass\")\n" ++
+    "\n" ++
+    "  Similar to the previous, but lookup the ISA file by op name\n" ++
+    "    *> surveyFields [(90,2),(9,3)] (sAllOpsK 24 \"LDC\")\n" ++
+    "\n" ++
+    "  List differences between two ops and then interpolate field by field\n" ++
+    "    *> listDiffs (sString \"000EA20000000000`00006900FF0F7B82\") (sString \"000E620000000000`00006440FF037B82\")\n" ++
     ""
 
 -- POSSIBLE ADDITIONS
@@ -201,8 +219,23 @@ listDiffs ms1 ms2 = do
       putStrLn $ intercalate "  " (map fmtFieldHeader fs)
       let fmt :: Sample -> Field -> String
           fmt s f = fmtFieldValue f (fGetValue f s)
-      putStrLn $ intercalate "  " (map (fmt s1) fs)
-      putStrLn $ intercalate "  " (map (fmt s2) fs)
+      s1_str <- disBitsRaw opts (sBits s1)
+      putStrLn $ intercalate "  " (map (fmt s1) fs) ++ "  " ++ s1_str
+      s2_str <- disBitsRaw opts (sBits s2)
+      putStrLn $ intercalate "  " (map (fmt s2) fs) ++ "  " ++ s2_str
+      putStrLn "INTERPOLATING"
+      let interpolateField :: Field -> IO ()
+          interpolateField f = do
+            let val2 = fGetValue f s2
+                s1a = Sample (putField128 (fOff f) (fLen f) val2 (sBits s1))
+            s1a_str <- disBitsRaw opts (sBits s1a)
+            putStrLn $ intercalate "  " (map (fmt s1a) fs) ++ "  (flipped " ++ show f ++ ") " ++ s1a_str
+
+
+      mapM_ interpolateField fs
+
+
+
 -- given two samples, tell me the bits that are different
 sampleDifferences :: Sample -> Sample -> [Field]
 sampleDifferences (Sample w1) (Sample w2) = diffFieldsMatching 0 []
@@ -360,8 +393,8 @@ twiddleFieldsBaseP binary fs s0s = body
 --            Sample w128 -> Sample $ putField128 (fOff f) (fLen f) val w128
 
 
-extractFields :: IO [Sample] -> [Field] -> IO ()
-extractFields io_ss fs = body
+surveyFields :: [Field] -> IO [Sample] -> IO ()
+surveyFields fs io_ss = body
   where body = do
           ss <- io_ss
           putStrLn "disassembling"

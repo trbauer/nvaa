@@ -15,7 +15,7 @@ import Data.List
 import Data.Word
 import Debug.Trace
 import Text.Printf
-import qualified Control.Monad.State as CMS
+import qualified Control.Monad.State.Strict as CMS
 import qualified Control.Monad.Trans.Except as CME
 import Data.Functor.Identity
 
@@ -95,6 +95,16 @@ eField f val = do
 
 eTrace :: String -> E ()
 eTrace s = trace s $ return ()
+eTraceFields :: String -> E ()
+eTraceFields msg = do
+  es <- CMS.get
+  let w128 = esInst es
+  let fmtF :: (Field,Word64) -> String
+      fmtF (f,val) =
+        printf "  %-32s %8Xh  " (fFormatName f++":") val ++ fFormat f w128 val ++ "\n"
+  eTrace $
+    msg ++ "\n" ++
+    concatMap fmtF (esFields es)
 
 eFieldE :: Field -> Either String Word64 -> E ()
 eFieldE f e =
@@ -151,8 +161,16 @@ eInst i = enc
             "IADD3" -> eIADD3
             "IMAD" -> eIMAD
             "ISETP" -> eISETP
-            "STG" -> eSTG
-            "LDG" -> eLDG
+            --
+            "ST"  -> eST
+            "STG" -> eST
+            "STL" -> eST
+            "STS" -> eST
+            --
+            "LD"  -> eLD
+            "LDG" -> eLD
+            "LDL" -> eLD
+            "LDS" -> eLD
             "NOP" -> do
               eField fOPCODE 0x118
               eRegFile False 0x4
@@ -215,6 +233,15 @@ eInst i = enc
             eFatalF f "constant offset must be a multiple of 4"
           eField fSRCCOFF (fromIntegral soff `div` 4)
 
+        eSIMM :: Field -> Word64 -> E ()
+        eSIMM fF uval
+          | sval < -2^(len-1) || sval >= 2^(len-1) =
+            eFatalF fF ("immediate value " ++ show sval ++ " overflows field")
+          | otherwise = eField fF (fromIntegral (uval .&. mask))
+          where len = fLength fF
+                mask = if len == 64 then 0xFFFFFFFFFFFFFFFF else ((1`shiftL`len)-1)
+                sval = fromIntegral uval :: Int64
+
         --
         -- 1 = R, 4 = IMM, 5 = const
         eUnrSrcs :: [Src] -> E ()
@@ -229,7 +256,7 @@ eInst i = enc
               let neg = msElem ModNEG ms || msElem ModCOMP ms
               case six of
                 SurfImm imm -> do
-                  eRegFile False 0x4
+                  eRegFile False 0x5
                   eField fSRCCIX (fromIntegral imm)
                 SurfReg ur -> do
                   eRegFile True 0x5
@@ -549,7 +576,7 @@ eInst i = enc
             [{- (InstOpt32) -}] -> eField fLDST_DATA_TYPE 0x4
             [InstOpt64] -> eField fLDST_DATA_TYPE 0x5
             [InstOpt128]
-              | oIsSLM (iOp i) -> eField fLDST_DATA_TYPE 0x6 -- .U is separate
+              | oIsSLM (iOp i) -> eField fLDST_DATA_TYPE 0x6 -- .U is a separate field
               | iLacksInstOpt InstOptU i -> eField fLDST_DATA_TYPE 0x6 -- global  (no .U)
               | otherwise -> eField fLDST_DATA_TYPE 0x7 -- .U is part of data type
             xs -> eFatalF fLDST_DATA_TYPE $
@@ -561,32 +588,60 @@ eInst i = enc
         unlessSLM :: E () -> E ()
         unlessSLM = unless (oIsSLM (iOp i))
 
+        eHandleInstOptBitWhen :: Field -> InstOpt -> Bool -> E ()
+        eHandleInstOptBitWhen f io exists
+          | not exists = do
+            when (iHasOpt io) $
+              eFatalF f "unsupported instruction option"
+          | otherwise = eEncode f (iHasOpt io)
+
         eLdStCommon :: E ()
         eLdStCommon = do
           --
           eLdStDataType
           --
-          whenSLM $ eEncode fLDS_U (iHasInstOpt InstOptU i)
+          eHandleInstOptBitWhen fLDS_U InstOptU $ oIsSLM (iOp i)
           --
           eInstOpt fLDST_ADDR_E InstOptE
           --
-          eInstOpt fLDST_PRIVATE InstOptPRIVATE
+          eHandleInstOptBitWhen fLDST_PRIVATE InstOptPRIVATE $
+                not (oIsSLM (iOp i)) && not (oIsLDST_L (iOp i))
           --
+          let is_ldc = Op "LDC" == iOp i
+          --
+          let allows_scope =
+                not is_ldc && all (not . ($iOp i)) [oIsLDST_L, oIsSLM]
           case iOptsSubset inst_opt_ldst_scope of
+            [] | not allows_scope -> return ()
+            (_:_) | not allows_scope -> eFatal "scope option forbidden"
             [InstOptCTA] -> eField fLDST_SCOPE 0x0
             [InstOptSM]  -> eField fLDST_SCOPE 0x1
             [InstOptGPU] -> eField fLDST_SCOPE 0x2
             [InstOptSYS] -> eField fLDST_SCOPE 0x3
             _ -> eFatal "exactly one scope option required"
           --
+          let fLDST_ORDERING = if oIsST (iOp i) then fST_ORDERING else fLD_ORDERING
+          let supports_ordering = not (oIsSLM (iOp i)) && not is_ldc && not (oIsLDST_L (iOp i))
           case iOptsSubset inst_opt_ldst_ordering of
-            [] -> eField fLDST_ORDERING 0x1 -- default
+            (_:_) | not supports_ordering ->
+              eFatal "memory semantics option forbidden"
+            [InstOptCONSTANT]
+              | oIsST (iOp i) -> eFatal ".CONSTANT forbidden on store ops"
+              | otherwise -> eField fLDST_ORDERING 0x0
+            []
+              | supports_ordering -> eField fLDST_ORDERING 0x1 -- default
+              | otherwise -> return ()
             [InstOptSTRONG] -> eField fLDST_ORDERING 0x2
             [InstOptMMIO]   -> eField fLDST_ORDERING 0x3
             _ -> eFatal "only one memory ordering option permitted"
           --
+          let supports_caching = not (oIsSLM (iOp i)) && not is_ldc
           case iOptsSubset inst_opt_ldst_caching of
-            [] -> eField fLDST_CACHING 0x1 -- default
+            (_:_)
+              | not supports_caching -> eFatal "caching option forbidden"
+            []
+              | supports_caching -> eField fLDST_CACHING 0x1 -- default
+              | otherwise -> return ()
             [InstOptEF] -> eField fLDST_CACHING 0x0
             [InstOptEL] -> eField fLDST_CACHING 0x2
             [InstOptLU] -> eField fLDST_CACHING 0x3
@@ -594,71 +649,158 @@ eInst i = enc
             [InstOptNA] -> eField fLDST_CACHING 0x5
             _ -> eFatal "only one caching option permitted"
 
+        -- The register file encoding is a swampy mess that I must totally
+        -- misunderstand.
+        --
+        -- LDG
         -- [11:9]  [90] [91]  [31:24]
         --    1     *    0     /=RZ       LDG.E.64.SYS R16, [R24] {!1,+4.W} ;
         --    4     0    1     /=RZ       LDG.E.64.SYS R16, [R254.U32+UR0]
         --    4     0    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
         --    4     1    1     /=RZ       LDG.E.64.SYS R16, [R254.64+UR0]
-        --    4     1    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
-        eLDST_Addrs :: [Src] -> E ()
-        eLDST_Addrs srcs =
+        --    4     1    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.64+UR0]
+        --
+        -- LDL
+        -- [11:9]  [90] [91]  [31:24]
+        --    4      0    0     /=RZ      LDL.LU R0, [R1+0x20] {!4,+3.W} ;
+        --    4      0    0     /=RZ      LDL.LU R0, [R1+0x20]
+        --    1  ALWAYS ILLEGAL
+        --                      ==R1      RZ drops that parameter off from syntax
+
+        -- LDS
+        -- [11:9]  [90] [91]  [31:24]
+        --    4      0    0      *        LDS.U.S8 R0, [R12]
+        --    4      0    1      *        LDS.U.S8 R0, [R12+UR0]
+        --    always uses [11:9] = 4, but [01] enables UR
+        --
+        -- LDSM
+        -- [11:9]  [90] [91]  [31:24]
+        --    4      0    0      /=RZ     LDSM.16.M88.2 R76, [R76]
+        --    4      0    1      ?        LDSM.16.MT88.4 R188, [R162+UR4+0x4800]
+        --    similar to LDS
+        --
+        -------------------------------------------------------------
+        -- ST (similar to LDG)
+        -- [11:9]  [90] [91]  [31:24]
+        --    1      0    0    /=RZ         ST.E.STRONG.GPU [R4+0x184], R10
+        --    1      0    0    /=RZ         ST.E.STRONG.GPU [R4+0x188], R11
+        --    1      0    0    ==RZ         ST.E.STRONG.GPU [0x188], R11
+        --    4      0    1    /=RZ         ST.E.U8.STRONG.GPU [R254.U32+UR4+0x20], R3
+        --    4      1    1    /=RZ         ST.E.U8.STRONG.GPU [R254.64+UR4+0x20], R3
+        --    4      1    1    ==RZ         ST.E.U8.STRONG.GPU [UR4+0x20], R3
+        --
+        -- STL
+        -- [11:9]  [90] [91]  [31:24]
+        --    1      0    0     /=RZ        STL.128 [R1+0x70], R20
+        --    1      0    0     ==RZ        STL.128 [0x70], R20
+        --    4      0    1     /=RZ        STL.U8 [R9+UR4], R12
+        --  [90] is always 0
+        --
+        -- STS
+        -- [11:9]  [90] [91]  [31:24]
+        --    1      0    0     /=RZ        STS [R4.X4+0x300], RZ
+        --    4      0    1     /=RZ        STS.64 [R3.X8+UR4], R24
+        --  [90] is always 0
+        --
+        -------------------------------------------------------------
+        -- I think the rule is:
+        --   If the uniform register is used at all, then [11:9] = 4 and [91] = 1
+        --   otherwise [11:9] = 1; ***EXCEPT*** for shared and local memory
+        --   *loads* (not stores), which always use 4 for [11:9]; they still
+        --   permit [91] to control the uniform register.
+        --
+        --   Finally, bit 90 enables 64b arithmetic with the uniform register
+        --   (hence, [90]==1 -> [91]==1), if the modifier token
+        --   (is .64 or absent (i.e. not .U32)) and the message supports it,
+        --   then we use set [90].
+        --
+        --   So fairly insane:
+        --    [11:9] = is_lds_lsdm_ldl || uses_ur ? 4 : 1
+        --    [91] = uses_ur ? 1 : 0
+        --    [90] = uses_ur && opIs(LDG,LD,STG,ST) && (.U32 suffix absent)
+        --
+        eAddrsLDST :: Field -> [Src] -> E ()
+        eAddrsLDST fADDR_UROFF srcs =
           case srcs of
             [Src_R r_ms r_addr, Src_UR ur_ms ur, SrcI32 imm] -> do
+              --
               eEncode fSRC0_REG r_addr
-              if ur == URZ
-                then do eField fREGFILE 0x1
-                else do
-                  eRegFile True 0x4
-                  case filter (`elem`[ModU32,Mod64]) (msToList r_ms) of
-                    [] -> do
-                      when (r_addr /= RZ) $
-                       eFatal "non RZ register requires .U32 or .64"
-                    [x] -> eEncode fUNIFORM_64 (x==Mod64)
-                    _ -> eFatal "only one of .U32 or .64 allowed"
-                  --
-                  eEncode fLDST_ADDR_UROFF ur
-                  --
-                  unless (msNull ur_ms) $
-                    eFatal "uniform reg doesn't support modifiers"
-                  -- eEncode fLDST_UNIFORMOPTS True
-                  eFatal $ "op doesn't support URZ yet (need to sort out bits[91:90])"
-              eField fLDST_ADDR_IMMOFF (fromIntegral imm)
+              --
+              let is_lds_ldsm = iOp i `elem` map Op ["LDS","LDSM","LDL"]
+                  uses_ur = ur /= URZ
+                  bits_11_9 = if is_lds_ldsm || uses_ur then 4 else 1
+              eRegFile uses_ur bits_11_9
+              when uses_ur $
+                eEncode fADDR_UROFF ur
+              case filter (`elem`[ModU32,Mod64]) (msToList r_ms) of
+                []
+                  -- global defaults to A64?
+                --  | oIsLDST_G (iOp i) -> eEncode fLDST_UNIFORM_64 True
+                  | otherwise -> return ()
+                [io]
+                  | oIsLDST_G (iOp i) -> eEncode fLDST_UNIFORM_64 (io==Mod64)
+                  | otherwise -> eFatal (format io ++ " not allow here")
+                _ -> eFatal "only one of .U32 or .64 allowed"
+              eSIMM fLDST_ADDR_IMMOFF (fromIntegral (fromIntegral imm :: Int32))
             _ -> eFatal $ "malformed source parameters for " ++ show (iOp i)
 
         -----------------------------------------------------------------------
-        eLDG :: E ()
-        eLDG = do
-          eField fOPCODE 0x181
+        eLD :: E ()
+        eLD = do
+          case iOp i of
+            Op "LD"  -> eField fOPCODE 0x180
+            Op "LDG" -> eField fOPCODE 0x181
+            Op "LDL" -> eField fOPCODE 0x183
+            Op "LDS" -> eField fOPCODE 0x184
+            _ -> eFatalF fOPCODE "unhandled load op"
+          --
           ePredication
+          --
           eLdStCommon
+          --
+          eDstLD
+          --
+          eAddrsLDST fLD_ADDR_UROFF (iSrcs i)
+
+        eDstLD :: E ()
+        eDstLD = do
+          let supports_zd = iOp i `elem` [Op "LDG",Op "LD"]
+          eHandleInstOptBitWhen fLD_ZD InstOptZD supports_zd
           case iDsts i of
             [DstP r_prd,DstR r_data] -> do
-              unless (iHasOpt InstOptZD || r_prd == PT) $
+              unless (iHasOpt InstOptZD) $
                 eFatalF fLD_ZD_PREG "dst predicate requires .ZD be set"
               eEncode fLD_ZD_PREG r_prd
               eEncode fDST_REG r_data
             [DstR r_data] -> do
-              when (iHasOpt InstOptZD) $
-                eFatalF fLD_ZD "lack of dst predicate forbids .ZD be set"
+              if supports_zd then eEncode fLD_ZD_PREG PT
+                else if iHasOpt InstOptZD then eFatalF fLD_ZD "missing predicate dst for .ZD"
+                else return ()
               eEncode fDST_REG r_data
-              eEncode fLD_ZD_PREG PT
             _ -> eFatal "expected one data register"
-          eLDST_Addrs (iSrcs i)
-          eInstOpt fLD_ZD InstOptZD
+
 
         -----------------------------------------------------------------------
-        eSTG :: E ()
-        eSTG = do
-          eField fOPCODE 0x186
+        eST :: E ()
+        eST = do
+          case iOp i of
+            Op "ST"   -> eField fOPCODE 0x185
+            Op "STG"  -> eField fOPCODE 0x186
+            Op "STL"  -> eField fOPCODE 0x187
+            Op "STS"  -> eField fOPCODE 0x188
+            _ -> eFatalF fOPCODE "unhandled store op"
+          --
           ePredication
+          --
           eLdStCommon
-          eLDST_Addrs (take 3 (iSrcs i))
-          case drop 3 (iSrcs i) of
-            [Src_R ms r_data] -> do
+          --
+          case splitAt 3 (iSrcs i) of
+            (src_addrs,[Src_R ms r_data]) -> do
+              eAddrsLDST fST_ADDR_UROFF src_addrs
               unless (msNull ms) $
                 eFatal "source modifiers and reuse flags not permitted"
               eEncode fSRC1_REG r_data
-            _ -> eFatal "expected one data register"
+            _ -> eFatal "malformed operands"
           --
           return ()
 
@@ -761,7 +903,16 @@ fOPCODE :: Field
 fOPCODE = fi "Opcode" 0 9
 
 fREGFILE :: Field
-fREGFILE = fi "RegFile" 9 3
+fREGFILE = f "RegFile" 9 3 $ \_ v ->
+  case v of
+    1 -> "RRR"
+    2 -> "RRI"
+    3 -> "RRC"
+    4 -> "RIR"
+    5 -> "RCR"
+    6 -> "RUR"
+    7 -> "RRU"
+    _ -> show v ++ "???"
 
 fPREDICATION :: Field
 fPREDICATION = f{fFormat = fmt}
@@ -772,6 +923,16 @@ fABS :: Int -> Int -> Field
 fABS src_ix off = fb ("Src" ++ show src_ix ++ ".AbsVal") off "|..|"
 fNEG :: Int -> Int -> Field
 fNEG src_ix off = fb ("Src" ++ show src_ix ++ ".Negated") off "-(..)"
+
+-- signed immediate field
+fSIMM :: String -> Int -> Int -> (String -> String) -> Field
+fSIMM nm off len fmt = f nm off len fmtS24
+  where fmtS24 _ val = fmt (sign ++ printf "0x%X" (pos_sval .&. mask))
+          where
+                mask = if len == 64 then -1 else ((1`shiftL`len)-1)
+                (sign,pos_sval) = if sval < 0 then ("-",negate sval) else ("",sval)
+                  where sval = fromIntegral val :: Int64
+
 
 fDST_REG :: Field
 fDST_REG = fR "Dst.Reg" 16
@@ -843,8 +1004,6 @@ fSRCCUIX = f "Src.ConstIndex" 32 6 $ \_ val ->
 
 fUNIFORMREG :: Field
 fUNIFORMREG = fb "EnableUniformReg" 91 "uniform registers enabled"
-fUNIFORM_64 :: Field
-fUNIFORM_64 = fl "EnableUniformReg" 90 1 ["ADDR.U32","ADDR.64"]
 
 fDEPINFO_STALLS :: Field
 fDEPINFO_STALLS = f "DepInfo.Stalls" 105 4 $ \_ val -> -- [108:105]
@@ -942,11 +1101,14 @@ fLDST_DATA_TYPE = f "LDST.Data.Type" 73 3 $ \_ val ->
     4 -> "(.32)"
     5 -> ".64"
     6 -> ".128"
-    7 -> ".U.128" -- forbidden in LDS
+    7 -> ".U.128" -- forbidden in LDS/STS
 fLDST_ADDR_IMMOFF :: Field
-fLDST_ADDR_IMMOFF = fi "LDST.Addr.ImmOff" 40 24
-fLDST_ADDR_UROFF :: Field
-fLDST_ADDR_UROFF = fUR "LDST.Addr.UROff" 32
+fLDST_ADDR_IMMOFF = fSIMM "LDST.Addr.ImmOff" 40 24 (\val -> "[..+"++val++"]")
+
+fLD_ADDR_UROFF :: Field
+fLD_ADDR_UROFF = fUR "LD.Addr.UROff" 32
+fST_ADDR_UROFF :: Field
+fST_ADDR_UROFF = fUR "ST.Addr.UROff" 64
 
 -- this is not to be confused with fLDST_DATA_TYPE = 7
 fLDS_U :: Field
@@ -974,8 +1136,15 @@ fLDST_SCOPE = f "LDST.Scope" 77 2 $ \_ val ->
     1 -> ".SM"
     2 -> ".GPU"
     3 -> ".SYS"
-fLDST_ORDERING :: Field
-fLDST_ORDERING = f "LDST.Ordering" 79 2 $ \_ val ->
+fLD_ORDERING :: Field
+fLD_ORDERING = f "LD.Ordering" 79 2 $ \_ val ->
+  case val of
+    0 -> ".CONSTANT"
+    1 -> "(default)"
+    2 -> ".STRONG"
+    3 -> ".MMIO"
+fST_ORDERING :: Field
+fST_ORDERING = f "ST.Ordering" 79 2 $ \_ val ->
   case val of
     0 -> ".INVALID0"
     1 -> "(default)"
@@ -993,6 +1162,11 @@ fLDST_CACHING = f "LDST.Caching" 84 3 $ \_ val ->
     6 -> ".INVALID6"
     7 -> ".INVALID7"
 
+fLDST_UNIFORM_64 :: Field
+fLDST_UNIFORM_64 = fl "EnableUniformReg" 90 1 ["ADDR.U32","ADDR.64"]
+
+
+--------------------------------
 fISETP_DST_PRED :: Field
 fISETP_DST_PRED = fPREG "ISETP.Dst.Reg" 81
 

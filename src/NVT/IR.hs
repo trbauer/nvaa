@@ -66,10 +66,18 @@ oIsInt (Op op) =
   op `elem` ["I2I","I2F","IABS","IADD3","IDP","IMAD","IMMA","IMNMX","ISETP"]
 oIsLD :: Op -> Bool
 oIsLD (Op op) =
-  op `elem` ["LDG","LDS","LD","LDL","LDSM"]
+  op `elem` ["LD","LDC","LDG","LDL","LDS","LDSM"]
 oIsST :: Op -> Bool
 oIsST (Op op) =
-  op `elem` ["STG","STS","ST","STL"]
+  op `elem` ["ST","STG","STL","STS"]
+
+oIsLDST_L :: Op -> Bool
+oIsLDST_L (Op op) =
+  op `elem` ["LDL","STL"]
+oIsLDST_G :: Op -> Bool
+oIsLDST_G (Op op) =
+  op `elem` ["LDG","STG","LD","ST"]
+
 oIsSLM :: Op -> Bool
 oIsSLM (Op op) = op `elem` ["LDS","LDSM","STS"]
 
@@ -94,7 +102,7 @@ instance Syntax Inst where
 iHasInstOpt :: InstOpt -> Inst -> Bool
 iHasInstOpt io = (io`ES.member`) . iOptions
 iLacksInstOpt :: InstOpt -> Inst -> Bool
-iLacksInstOpt io = (io`ES.member`) . iOptions
+iLacksInstOpt io = not . iHasInstOpt io
 
 fmtInstIr :: Inst -> String
 fmtInstIr i =
@@ -384,6 +392,13 @@ msDecorate ms body = prefixes ++ abs_body ++ suffixes
           | m`msElem`ms =
             if m > ModCOMP then msFormatSuffix m else ""
           | otherwise = ""
+instance Syntax Mod where
+  format m =
+    case m of
+      ModABS -> "|..|"
+      ModNEG -> "-"
+      ModCOMP -> "-"
+      _ -> msFormatSuffix m
 
 msFormatSuffix :: Mod -> String
 msFormatSuffix m =
@@ -768,6 +783,7 @@ data InstOpt =
   | InstOptSYS
   | InstOptGPU
   -- memory ordering
+  | InstOptCONSTANT -- .CONSTANT
   | InstOptSTRONG -- .STRONG
   | InstOptMMIO -- .MMIO
   -- caching
@@ -798,7 +814,7 @@ inst_opt_ldst_types = iosFromList [InstOptU8,InstOptS8,InstOptU16,InstOptS16,Ins
 inst_opt_ldst_scope :: InstOptSet
 inst_opt_ldst_scope = iosFromList [InstOptCTA, InstOptSM, InstOptSYS, InstOptGPU]
 inst_opt_ldst_ordering :: InstOptSet
-inst_opt_ldst_ordering = iosFromList [InstOptSTRONG, InstOptMMIO]
+inst_opt_ldst_ordering = iosFromList [InstOptCONSTANT, InstOptSTRONG, InstOptMMIO]
 inst_opt_ldst_caching :: InstOptSet
 inst_opt_ldst_caching = iosFromList [InstOptEF, InstOptEL, InstOptLU, InstOptEU, InstOptNA]
 
@@ -856,14 +872,14 @@ fmtInst fmt_imm i =
           where (st_src_addr,st_src_data) =
                   case splitAt 3 (iSrcs i) of
                     (src_addrs,[src_dat]) ->
-                      (fmtAddrs (iSrcs i),formatSrcWithOpts fmt_imm src_dat)
+                      (fmtAddrs src_addrs,formatSrcWithOpts fmt_imm src_dat)
                     _ -> ("?","?")
 
                 -- we attempt to copy nvdisasm here (at least for LDG/LDS);
                 -- specifically, we omit default values except when all are default;
                 -- then we emit RZ only
                 fmtAddrs :: [Src] -> String
-                fmtAddrs srcs = intercalate "+" $ concatMap fmtSrc srcs
+                fmtAddrs srcs = "[" ++ intercalate "+" (concatMap fmtSrc srcs) ++ "]"
                   where opIsDefault :: Src -> Bool
                         opIsDefault SrcRZ = True
                         opIsDefault SrcURZ = True

@@ -53,9 +53,13 @@ sDir dir = do
   fs <- getSubPaths dir
   concat <$> mapM sFile fs
 sFile :: FilePath -> IO [Sample]
-sFile fp = do
+sFile = sFileK (-1)
+
+sFileK :: Int -> FilePath -> IO [Sample]
+sFileK k fp = do
   -- e.g. 000EE200001EED00`00001000020C7381:        LDG.E.128.SYS R12, [R2+0x10] {!1,+4.W} ; // examples/sm_75/samples\bodysystemcuda.sass:20925
-  flns <- zip [1..] . lines <$> readFile fp
+  let maybeTake = if k < 0 then id else take k
+  flns <- maybeTake . zip [1..] . lines <$> readFile fp
   let parseLine :: (Int,String) -> IO Sample
       parseLine (lno,lnstr) =
         case reads ("0x"++lnstr) of

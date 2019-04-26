@@ -160,10 +160,11 @@ pInst pc = pWhiteSpace >> body
             Op "IMAD" -> do
               dsts <- pDsts op
               pIntTernary loc prd op ios dsts []
-            Op "STG" -> do
-              pST loc prd op ios
-            Op "LDG" -> do
-              pLD loc prd op ios
+
+            ld_st_op
+              | oIsLD op-> pLD loc prd op ios
+              | oIsST op-> pST loc prd op ios
+
             Op "ISETP" -> do
               dst <- pDst
               pSymbol_ ","
@@ -359,7 +360,7 @@ pInstOpts op
           | otherwise = fail "nothing to ignore"
 
         pInstOpt :: PI [InstOpt]
-        pInstOpt = do {t<-pSyntax; return [t]}
+        pInstOpt = pLabel "inst opt" $ do {t<-pSyntax; return [t]}
 
 
 pLop3Expr :: PI Word8
@@ -484,19 +485,19 @@ pSrcCCX = pLabel "const surface" $ P.try pConstInd <|> P.try pConstDir
           return $ SrcCon ms_neg_abs u o
 
 -- rejects 32@hi... and 32@lo...
-pSrcI32 :: Op -> PI Src
-pSrcI32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
-pSrcImmNonBranch32 :: Op -> PI Src
-pSrcImmNonBranch32 op = do
+pSrcI49 :: Op -> PI Src
+pSrcI49 op = pLabel "imm49" $ srcIntern <$> pSrcImmNonBranch49 op
+pSrcImmNonBranch49 :: Op -> PI Src
+pSrcImmNonBranch49 op = do
   imm <- pIntImm64
   P.notFollowedBy (P.char '@')
   pWhiteSpace
   return $ SrcImm (Imm49 imm)
 
-pSrcI49 :: Op -> PI Src
-pSrcI49 op = pLabel "imm49" $ srcIntern <$> pSrcImmNonBranch49 op
-pSrcImmNonBranch49 :: Op -> PI Src
-pSrcImmNonBranch49 op = do
+pSrcI32 :: Op -> PI Src
+pSrcI32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
+pSrcImmNonBranch32 :: Op -> PI Src
+pSrcImmNonBranch32 op = do
     imm <- pVal32
     P.notFollowedBy (P.char '@')
     pWhiteSpace
