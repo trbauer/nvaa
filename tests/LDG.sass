@@ -1,0 +1,58 @@
+// sanity
+000EA200001EE800`0000000002167381:        LDG.SYS            R22, [R2] {!1,+3.W} ; // synthetic
+
+// data types
+000EA200001EE100`0000000002167381:        LDG.E.U8.SYS   R22, [R2] {!1,+3.W} ; // synthetic
+000EA200001EE300`0000000002167381:        LDG.E.S8.SYS   R22, [R2] {!1,+3.W} ; // synthetic
+000EA200001EE500`0000000002047381:        LDG.E.U16.SYS  R4,  [R2] {!1,+3.W} ;     // examples/sm_75/samples\dct8x8.sass:4490
+000EA200001EE700`0000000002047381:        LDG.E.S16.SYS  R4,  [R2] {!1,+3.W} ;     // synthetic
+000EA200001EE900`0000000002167381:        LDG.E.SYS      R22, [R2] {!1,+3.W} ;        // examples/sm_75/samples\dct8x8.sass:4871
+000EA200001EEB00`0000000004047381:        LDG.E.64.SYS   R4,  [R4] {!1,+3.W} ;      // examples/sm_75/samples\alignedTypes.sass:2755
+000EE200001EED00`000000000C087381:        LDG.E.128.SYS  R8,  [R12] {!1,+4.W} ;    // examples/sm_75/samples\alignedTypes.sass:2618
+00052200001E6F00`0000000034040381:  @P0   LDG.E.U.128.CONSTANT.SYS R4, [R52] {!1,+5.W,+3.R} ; // examples/sm_75/libs\cublas64_100-Program.484.sm_75.sass:9047
+
+// predication
+000F2800001EE900`0007840018080381:  @P0   LDG.E.SYS       R8, [R24+0x784] {!4,+5.W} ;  // examples/sm_75/samples\MonteCarlo_kernel.sass:28684
+000F2800001EE900`000790001A294381:  @P4   LDG.E.SYS       R41, [R26+0x790] {!4,+5.W} ; // examples/sm_75/samples\MonteCarlo_kernel.sass:28686
+000EA800001EE900`0000000002028381:  @!P0  LDG.E.SYS       R2, [R2] {!4,+3.W} ;         // examples/sm_75/samples\bisect_large.sass:5865
+
+// imm off
+000EA800001EED00`000010000C047381:        LDG.E.128.SYS   R4, [R12+0x10] {!4,+3.W} ; // examples/sm_75/samples\alignedTypes.sass:2617
+000EE800001EE900`FFFFFC0004117381:        LDG.E.SYS       R17, [R4+-0x4] {!4,+4.W} ;   // examples/sm_75/samples\bisect_small.sass:1746
+
+// uniform registers (need an R1+UR+0x4)
+// NOTE: I have absolutely no examples that include R as well
+000EA8000C1EE900`00000004FF027981:        LDG.E.SYS       R2, [UR4] {!4,+3.W} ;        // examples/sm_75/samples\bisect_large.sass:5798
+000EA8000C1EE900`00000404FF047981:        LDG.E.SYS       R4, [UR4+0x4] {!4,+3.W} ;    // examples/sm_75/samples\bisect_large.sass:5800
+// has
+000EA8000C1EEB00`00000004FF107981:        LDG.E.64.SYS R16, [UR4] {!4,+3.W} ;    // examples/sm_75/samples\BezierLineCDP.sass:2009
+
+// mem semantics
+000EA200001E6900`0000000002167381:        LDG.E.CONSTANT.SYS R22, [R2] {!1,+3.W} ; // synthetic
+000EA200001EE900`0000000002167381:        LDG.E         .SYS R22, [R2] {!1,+3.W} ; // synthetic
+000EA200001F6900`0000000002167381:        LDG.E.STRONG  .SYS R22, [R2] {!1,+3.W} ; // synthetic
+000EA200001FE900`0000000002167381:        LDG.E.MMIO    .SYS R22, [R2] {!1,+3.W} ; // synthetic
+
+// scope
+000EA200001E8900`0000000002167381:        LDG.E.CTA          R22, [R2] {!1,+3.W} ; // synthetic
+000EA200001EA900`0000000002167381:        LDG.E.SM           R22, [R2]  {!1,+3.W} ; // synthetic
+000EA200001EC900`0000000002167381:        LDG.E.GPU          R22, [R2] {!1,+3.W} ; // synthetic
+000EA200001EE900`0000000002167381:        LDG.E.SYS          R22, [R2] {!1,+3.W} ; // synthetic
+
+// zd
+000EA200009CE900`0000000002167381:        LDG.E.SYS.ZD P6,   R22, [R2] {!1,+3.W} ; // synthetic
+
+// private
+000EA200001EF900`0000000002167381:        LDG.E.SYS.PRIVATE  R22, [R2] {!1,+3.W} ; // synthetic
+
+// cache control
+000EA200000EE900`0000000002167381:        LDG.E.EF.SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+000EA200001EE900`0000000002167381:        LDG.E   .SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+000EA200002EE900`0000000002167381:        LDG.E.EL.SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+000EA200003EE900`0000000002167381:        LDG.E.LU.SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+000EA200004EE900`0000000002167381:        LDG.E.EU.SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+000EA200005EE900`0000000002167381:        LDG.E.NA.SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+// 000EA200006EE900`0000000002167381:        LDG.E.INVALID6.SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+// 000EA200007EE900`0000000002167381:        LDG.E.INVALID7.SYS       R22, [R2] {!1,+3.W} ;  // synthetic
+
+000EE800001EE900`FFFFFC0004117381:        LDG.E.SYS R17, [R4+-0x4] {!4,+4.W} ;   // examples/sm_75/samples\bisect_small.sass:1746

@@ -408,21 +408,62 @@ surveyFields fs io_ss = body
           --
           let fmtVal f w = " " ++ fmtValue f w
           --
-          vs <-
+          -- vs :: [[(Field,Word64)]] (each row)
+          fvs_rows <-
             forM (zip ss strs) $ \(s,str) -> do
-              let fvs = map (\f -> (f,getField128 (fOff f) (fLen f) (sBits s))) fs
+              let fvs :: [(Field,Word64)]
+                  fvs = map (\f -> (f,getField128 (fOff f) (fLen f) (sBits s))) fs
               putStrLn $
                 intercalate "  " (map (uncurry fmtValue) fvs) ++ "  " ++ str
-              return $ map snd fvs
-          let fv_vals = transpose vs
+              return fvs
+          let reorderToCols :: [[(Field,Word64)]] -> [(Field,[Word64])]
+              reorderToCols = zipWith (\f col -> (f,map snd col)) fs . transpose
+
+              freqOn :: [Word64] -> Word64 -> Int
+              freqOn ws v = length $ filter (==v) ws
+
+              toHist :: [Word64] -> [(Word64,Int)]
+              toHist ws = doIt ws
+                where freq = freqOn ws
+                      doIt =
+                        reverse .                    -- highest to lowest
+                          sortOn snd .               -- order by freq
+                            map (\v -> (v,freq v)) . -- count it (pairing with value)
+                              nubOrd                 -- for each unique value
+
+              fmtFieldHistogram :: (Field,[Word64]) -> String
               fmtFieldHistogram (f,vs) =
                   fmtFieldHeader f ++ " =\n" ++
-                  concatMap (\(v,n) -> "  " ++ fmtFieldValueBinary f v ++ " => " ++ printf "%5d" n ++ "\n") h
-                where h = sortOn snd (map (\v -> (v,freq v)) (nub vs))
-                      freq v = length (filter (==v) vs)
+                  concatMap fmtH h
+                where h = toHist vs
+                      fmtH (v,n) =
+                        "  " ++ fmtFieldValueBinary f v ++ " => " ++
+                        printf "%5d" n ++ "    " ++ baysian v ++ "\n"
+                      --
+                      baysian v = intercalate ", " (map fmtSubHist baysian_data)
+                        where rows_with_this_v = filter rowHasV fvs_rows
+                                where rowHasV :: [(Field,Word64)] -> Bool
+                                      rowHasV row = find (\(f1,v1) -> f1 == f && v1 == v) row /= Nothing
+                              -- kick f's column out of the data
+                              baysian_data :: [(Field,[Word64])]
+                              baysian_data = filter ((/=f) . fst) (reorderToCols rows_with_this_v)
+
+                              fmtSubHist :: (Field,[Word64]) -> String
+                              fmtSubHist (f,vs) =
+                                  " => " ++ fmtFieldHeader f ++ hist_str
+                                where vs_dom = nubOrd vs
+                                      showFreq v = fmtFieldValueBinary f v ++ ":" ++ show (freqOn vs v)
+                                      hist_str
+                                        | length vs_dom == 1 = " always " ++ show (head vs_dom)
+                                        | otherwise = " ~ {" ++ intercalate ", " (map showFreq vs_dom) ++ "}"
+          --
           putStrLn $
-            concatMap fmtFieldHistogram (zip fs fv_vals)
+            concatMap (fmtFieldHistogram) (reorderToCols fvs_rows)
           return ()
+
+-- use natural order (we could maintain appearance order)
+nubOrd :: Ord a => [a] -> [a]
+nubOrd = map fst . DM.toList . DM.fromList . map (\a -> (a,()))
 
 longestCommonFields :: IO [Sample] -> IO ()
 longestCommonFields io_ss = body

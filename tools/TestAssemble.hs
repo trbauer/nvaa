@@ -71,8 +71,16 @@ testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
 testS2R = testFile "examples\\sm_75\\ops\\S2R.sass"
 testMOV = testFile "examples\\sm_75\\ops\\MOV.sass"
 testISETP = testFile "examples\\sm_75\\ops\\ISETP.sass"
-testSTG = testFile "examples\\sm_75\\ops\\STG.sass"
+--
+testLD = testFile "examples\\sm_75\\ops\\LD.sass"
 testLDG = testFile "examples\\sm_75\\ops\\LDG.sass"
+testLDL = testFile "examples\\sm_75\\ops\\LDL.sass"
+testLDS = testFile "examples\\sm_75\\ops\\LDS.sass"
+--
+testST = testFile "examples\\sm_75\\ops\\ST.sass"
+testSTG = testFile "examples\\sm_75\\ops\\STG.sass"
+testSTL = testFile "examples\\sm_75\\ops\\STL.sass"
+testSTS = testFile "examples\\sm_75\\ops\\STS.sass"
 -- 0041E8000010ED00`0000100402007386:        STG.E.128.SYS [R2+0x10], R4 {!4,+1.R,^3}
 
 -- 000FD80003F04070`727FFFFF0000780C

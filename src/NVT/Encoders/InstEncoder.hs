@@ -600,7 +600,10 @@ eInst i = enc
           --
           eLdStDataType
           --
-          eHandleInstOptBitWhen fLDS_U InstOptU $ oIsSLM (iOp i)
+          -- uglier situation since other ops have .U.128 as a data type
+          -- we'd get a false positive of "you don't support .U"
+          when (oIsSLM (iOp i)) $ -- cheat for now and ues an extra check
+            eHandleInstOptBitWhen fLDS_U InstOptU $ oIsSLM (iOp i)
           --
           eInstOpt fLDST_ADDR_E InstOptE
           --
@@ -660,6 +663,12 @@ eInst i = enc
         --    4     1    1     /=RZ       LDG.E.64.SYS R16, [R254.64+UR0]
         --    4     1    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.64+UR0]
         --
+        -- LD
+        -- [11:9]  [90] [91]  [31:24]
+        --    1     0    0     /=RZ       LD.E.128.SYS R4, [R16]
+        --    4     1    1     ==RZ  LD.E.128.STRONG.SYS R4, [UR4]
+        -- I have no samples that combine R+UR or UR+IMM (in fact only 2 total)
+        --
         -- LDL
         -- [11:9]  [90] [91]  [31:24]
         --    4      0    0     /=RZ      LDL.LU R0, [R1+0x20] {!4,+3.W} ;
@@ -671,7 +680,9 @@ eInst i = enc
         -- [11:9]  [90] [91]  [31:24]
         --    4      0    0      *        LDS.U.S8 R0, [R12]
         --    4      0    1      *        LDS.U.S8 R0, [R12+UR0]
-        --    always uses [11:9] = 4, but [01] enables UR
+        --    4      0    1      RZ       LDS.U R20, [UR4+-0x4]
+        --    always uses [11:9] = 4, but [91] enables UR
+        --    [90] is always 0
         --
         -- LDSM
         -- [11:9]  [90] [91]  [31:24]
@@ -704,6 +715,7 @@ eInst i = enc
         --
         -------------------------------------------------------------
         -- I think the rule is:
+        -- (this is getting stale)
         --   If the uniform register is used at all, then [11:9] = 4 and [91] = 1
         --   otherwise [11:9] = 1; ***EXCEPT*** for shared and local memory
         --   *loads* (not stores), which always use 4 for [11:9]; they still
@@ -715,7 +727,7 @@ eInst i = enc
         --   then we use set [90].
         --
         --   So fairly insane:
-        --    [11:9] = is_lds_lsdm_ldl || uses_ur ? 4 : 1
+        --    [11:9] = is_lds_lsdm_ldl_ld || uses_ur ? 4 : 1
         --    [91] = uses_ur ? 1 : 0
         --    [90] = uses_ur && opIs(LDG,LD,STG,ST) && (.U32 suffix absent)
         --
@@ -724,10 +736,12 @@ eInst i = enc
           case srcs of
             [Src_R r_ms r_addr, Src_UR ur_ms ur, SrcI32 imm] -> do
               --
-              eEncode fSRC0_REG r_addr
+              -- The vector address always goes in the same register
+              eEncode fLDST_ADDR_REG r_addr
               --
-              let is_lds_ldsm = iOp i `elem` map Op ["LDS","LDSM","LDL"]
+              let is_lds_ldsm = iOp i `elem` map Op ["LDS","LDSM","LDL","LD"]
                   uses_ur = ur /= URZ
+                  op_ldg_ld_stg_st = iOp i `elem` map Op ["LDG","LD","STG","ST"]
                   bits_11_9 = if is_lds_ldsm || uses_ur then 4 else 1
               eRegFile uses_ur bits_11_9
               when uses_ur $
@@ -735,14 +749,32 @@ eInst i = enc
               case filter (`elem`[ModU32,Mod64]) (msToList r_ms) of
                 []
                   -- global defaults to A64?
-                --  | oIsLDST_G (iOp i) -> eEncode fLDST_UNIFORM_64 True
+                  | oIsLDST_G (iOp i) -> eEncode fLDST_UNIFORM_64 uses_ur
                   | otherwise -> return ()
                 [io]
                   | oIsLDST_G (iOp i) -> eEncode fLDST_UNIFORM_64 (io==Mod64)
                   | otherwise -> eFatal (format io ++ " not allow here")
                 _ -> eFatal "only one of .U32 or .64 allowed"
-              eSIMM fLDST_ADDR_IMMOFF (fromIntegral (fromIntegral imm :: Int32))
+              let fADDR_IMMOFF
+                    -- LD/ST with UR uses the high 24 only,
+                    -- but otherwise gets the full 24b
+                    -- | iOp i `elem` map Op ["LD","ST"] && not uses_ur = fLD_ADDR_IMMOFF32
+                    | iOp i `elem` map Op ["LD","ST"] && not uses_ur = fLDST_ADDR_IMMOFF32
+                    | otherwise = fLDST_ADDR_IMMOFF24
+              eSIMM fADDR_IMMOFF (fromIntegral (fromIntegral imm :: Int32))
+              --
+              case filter (`elem`[ModX4,ModX8,ModX16]) (msToList r_ms) of
+                [x]
+                  | not (oIsSLM (iOp i)) -> eFatalF fLDSTS_SCALE "field not supported on non-SLM"
+                [] -> do
+                  when (oIsSLM (iOp i)) $
+                    eField fLDSTS_SCALE 0x0
+                [ModX4] -> eField fLDSTS_SCALE 0x1
+                [ModX8] -> eField fLDSTS_SCALE 0x2
+                [ModX16] -> eField fLDSTS_SCALE 0x3
+                _ -> eFatal $ "only one .X parameter supported"
             _ -> eFatal $ "malformed source parameters for " ++ show (iOp i)
+
 
         -----------------------------------------------------------------------
         eLD :: E ()
@@ -762,9 +794,22 @@ eInst i = enc
           --
           eAddrsLDST fLD_ADDR_UROFF (iSrcs i)
 
+        -----------------------------------------------------------------------
+        -- Store layout
+        --
+        -- LD
+        --  [91][90][71:64][63:40][39:32][31:24][23:16][9:3]
+        --  [ 0][ 0][  0  ][    IMM32   ][ADDR ][DATA ][ 4 ]   LD DATA, [REG+IMM32]
+        --  [ 1][ 1][  0  ][IMM24][ UR  ][ADDR ][DATA ][ 4 ]   LD DATA, [REG+UR+IMM24]
+        --
+        -- LDG
+        --  [91][90][71:64][63:40][39:32][31:24][23:16][9:3]
+        --  [ 0][ 0][  0  ][IMM24][  0  ][ADDR ][DATA ][ 1 ]   LDG DATA, [REG+IMM32]
+        --  [ 1][ 1][  0  ][IMM24][ UR  ][ADDR ][DATA ][ 4 ]   LDG DATA, [REG+UR+IMM24]
+        --  [ 1][ 1][  0  ][IMM24][ UR  ][ RZ  ][DATA ][ 4 ]   LDG DATA, [    UR+IMM24]
         eDstLD :: E ()
         eDstLD = do
-          let supports_zd = iOp i `elem` [Op "LDG",Op "LD"]
+          let supports_zd = iOp i `elem` [Op "LDG",Op "LDS"] -- [Op "LDG",Op "LD"]
           eHandleInstOptBitWhen fLD_ZD InstOptZD supports_zd
           case iDsts i of
             [DstP r_prd,DstR r_data] -> do
@@ -773,14 +818,38 @@ eInst i = enc
               eEncode fLD_ZD_PREG r_prd
               eEncode fDST_REG r_data
             [DstR r_data] -> do
-              if supports_zd then eEncode fLD_ZD_PREG PT
-                else if iHasOpt InstOptZD then eFatalF fLD_ZD "missing predicate dst for .ZD"
+              if supports_zd then
+                  when (iOp i /= Op "LDS") $ eEncode fLD_ZD_PREG PT
+                else if iHasOpt InstOptZD
+                  then eFatalF fLD_ZD "missing predicate dst for .ZD"
                 else return ()
               eEncode fDST_REG r_data
             _ -> eFatal "expected one data register"
 
 
         -----------------------------------------------------------------------
+        -- Store layout
+        --
+        -- ST
+        --  [91][90][71:64][63:40][39:32][31:24][9:3]
+        --  [ 0][ 0][DATA ][    IMM32   ][ADDR ][ 1 ]   ST [REG+IMM32], DATA
+        --  [ 1][ 1][  UR ][IMM24][DATA ][ADDR ][ 4 ]   ST [REG+UR+IMM24], DATA
+        --
+        -- STG
+        --  [91][90][71:64][63:40][39:32][31:24][9:3]
+        --  [ 0][ 0][   0 ][IMM24][DATA ][ADDR ][ 1 ]  STG [REG+IMM24], DATA
+        --  [ 1][ 1][  UR ][IMM24][DATA ][ADDR ][ 4 ]  STG [REG+UR+IMM24], DATA
+        --
+        -- STL
+        --  [91][90][71:64][63:40][39:32][31:24][9:3]
+        --  [ 0][ 0][   0 ][IMM24][DATA ][ADDR ][ 1 ]  STL [REG+IMM24], DATA
+        --  [ 1][ 0][  UR ][IMM24][DATA ][ADDR ][ 4 ]  STL [REG+UR+IMM24], DATA
+        --
+        -- STS
+        --  [91][90][71:64][63:40][39:32][31:24][9:3]
+        --  [ 0][ 0][   0 ][IMM24][DATA ][ADDR ][ 1 ]  STS [REG+IMM24], DATA
+        --  [ 1][ 0][  UR ][IMM24][DATA ][ADDR ][ 4 ]  STS [REG+UR+IMM24], DATA
+        --
         eST :: E ()
         eST = do
           case iOp i of
@@ -796,10 +865,17 @@ eInst i = enc
           --
           case splitAt 3 (iSrcs i) of
             (src_addrs,[Src_R ms r_data]) -> do
-              eAddrsLDST fST_ADDR_UROFF src_addrs
+              let ur_used = any isUR src_addrs
+                    where isUR (Src_UR _ ur) = ur /= URZ
+                          isUR _ = False
+                  (fST_DATAREG,fST_UROFF)
+                    | op == Op "ST" && not ur_used = (fST_DATA_REG_HI,error "eST: unreachable")
+                    | otherwise = (fST_DATA_REG_LO,fLDST_ADDR_UROFF_HI)
+              eAddrsLDST fST_UROFF src_addrs
               unless (msNull ms) $
                 eFatal "source modifiers and reuse flags not permitted"
-              eEncode fSRC1_REG r_data
+              --
+              eEncode fST_DATAREG r_data
             _ -> eFatal "malformed operands"
           --
           return ()
@@ -1089,6 +1165,27 @@ fIMAD_SIGNED :: Field
 fIMAD_SIGNED = fl "IMAD.Signed" 73 1 [".U32","(.S32)"]
 
 -------------------------------------------------------------------------------
+fLDST_ADDR_IMMOFF24 :: Field
+fLDST_ADDR_IMMOFF24 = fSIMM "LDST.Addr.ImmOff24" 40 24 (\val -> "[..+"++val++"]")
+-- Generic load starts imm at 32
+fLDST_ADDR_IMMOFF32 :: Field
+fLDST_ADDR_IMMOFF32 = fSIMM "LD.Addr.ImmOff32" 32 32 (\val -> "[..+"++val++"]")
+
+-- evilness: the uniform register ends up high or low depending
+-- on
+fLD_ADDR_UROFF :: Field
+fLD_ADDR_UROFF = fUR "LD.Addr.UROff" 32
+fLDST_ADDR_UROFF_HI :: Field
+fLDST_ADDR_UROFF_HI = fUR "LDST.Addr.UROff" 64
+
+fST_DATA_REG_LO :: Field
+fST_DATA_REG_LO = fR "LDST.Data.Reg" 32
+fST_DATA_REG_HI :: Field
+fST_DATA_REG_HI = fR "LDST.Data.Reg" 64
+fLDST_ADDR_REG :: Field
+fLDST_ADDR_REG = fR "LDST.Addr.Reg" 24
+
+
 fLDST_ADDR_E :: Field
 fLDST_ADDR_E = fb "LDST.Addr.Is64b" 72 ".E"
 fLDST_DATA_TYPE :: Field
@@ -1102,25 +1199,19 @@ fLDST_DATA_TYPE = f "LDST.Data.Type" 73 3 $ \_ val ->
     5 -> ".64"
     6 -> ".128"
     7 -> ".U.128" -- forbidden in LDS/STS
-fLDST_ADDR_IMMOFF :: Field
-fLDST_ADDR_IMMOFF = fSIMM "LDST.Addr.ImmOff" 40 24 (\val -> "[..+"++val++"]")
-
-fLD_ADDR_UROFF :: Field
-fLD_ADDR_UROFF = fUR "LD.Addr.UROff" 32
-fST_ADDR_UROFF :: Field
-fST_ADDR_UROFF = fUR "ST.Addr.UROff" 64
 
 -- this is not to be confused with fLDST_DATA_TYPE = 7
 fLDS_U :: Field
 fLDS_U = fb "LDS.U" 76 ".U"
 -- LDS ... [R12.X4]
 fLDSTS_SCALE :: Field
-fLDSTS_SCALE = f "LDST.Scale" 77 2 $ \_ val ->
+fLDSTS_SCALE = f "LDST.Scale" 78 2 $ \_ val ->
   case val of
     0 -> "(no scale)"
     1 -> ".X4"
     2 -> ".X8"
     3 -> ".X16"
+
 
 fLD_ZD :: Field
 fLD_ZD = fb "LD.ZD" 87 ".ZD"
