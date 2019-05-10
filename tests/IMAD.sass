@@ -1,0 +1,32 @@
+000FE400078E02FF`0000000E080F8224:  @!P0  IMAD          R15, R8,       R14,         RZ {!2} ; // examples/sm_75/samples\bisect_large.sass:6395
+001FE400078E0200`0000000016167A24:        IMAD          R22, R22,      c[0x0][0x0], R0 {!2,^1} ; // examples/sm_75/samples\bilateral_kernel.sass:1032
+001FCA00078E020C`000000010A0A7824:        IMAD.IADD     R10, R10,      0x1,         R12 {!5,Y,^1} ; // examples/sm_75/samples\bisect_large.sass:7866
+000FE200078E0A1D`000000010F0AE824:  @!P6  IMAD.IADD     R10, R15,      0x1,        -R29 {!1} ;   // examples/sm_75/samples\segmentationTree.sass:112156
+004FE4000F8E0204`0000000502027C24:        IMAD          R2,  R2,       UR5,         R4 {!2,^3} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:3083
+000FE400078E00FF`FFFFFF6AFF0E7424:        IMAD.MOV.U32  R14, RZ,       RZ,         -0x96 {!2} ; // examples/sm_75/samples\bisect_large.sass:7877
+0C0FE400078E000B`0000660006047625:        IMAD.WIDE.U32 R4,  R6.reuse, R11.reuse,   c[0x0][0x198] {!2} ; // examples/sm_75/samples\bisect_large.sass:8585
+001FC8000F8E00FF`00000004FF187E24:        IMAD.U32      R24, RZ,       RZ,          UR4 {!4,Y,^1} ;  // examples/sm_75/samples\segmentationTree.sass:122433
+
+// pseudo names
+// 000FE200078E00FF`00000001FF087424:        IMAD.MOV.U32 R8, RZ, RZ, 0x1 {!1} ;    // examples/sm_75/samples\BezierLineCDP.sass:1602
+// 000FCA00078E0200`0000000105057824:        IMAD.IADD R5, R5, 0x1, R0 {!5,Y} ;     // examples/sm_75/samples\BezierLineCDP.sass:1836
+// 000FE400078E00FF`000000040C127824:        IMAD.SHL.U32 R18, R12, 0x4, RZ {!2} ;  // examples/sm_75/samples\bisect_large.sass:5966
+
+
+// .reuse
+0C0FE400078E0005`00006A0004027625:        IMAD.WIDE.U32 R2,  R4.reuse,  R5.reuse, c[0x0][0x1a8] {!2} ; // examples/sm_75/samples\bisect_large.sass:6526
+100FE200078E000E`000000FFFF107224:        IMAD.MOV.U32  R16, RZ,        RZ,       R14.reuse {!1} ; // examples/sm_75/samples\bisect_large.sass:8191
+042FE400078E00FF`000000041F007824:        IMAD.SHL.U32  R0,  R31.reuse, 0x4,      RZ {!2,^2} ; // examples/sm_75/samples\segmentationTree.sass:123745
+140FE400078E0202`000001201B2B7824:        IMAD          R43, R27.reuse, 0x120,    R2.reuse {!2} ; // examples/sm_75/samples\segmentationTree.sass:128188
+
+// .WIDE
+000FC800078E0006`0000580000027625:        IMAD.WIDE.U32 R2, R0, R6, c[0x0][0x160] {!4,Y} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2620
+
+//
+// 000FE200000E0619`000000FFFF057224:        IMAD.X R5, RZ, RZ, R25, P0 {!1} ;      // examples/sm_75/samples\BezierLineCDP.sass:1586
+// 000FC600008E06FF`000000FFFF118224:  @!P0  IMAD.X R17, RZ, RZ, RZ, P1 {!3,Y} ;    // examples/sm_75/samples\bisect_large.sass:7373
+
+// src complement
+// 000FE200000E0E03`0000000105047824:        IMAD.X R4, R5, 0x1, ~R3, P0 {!1} ;     // examples/sm_75/samples\p2pBandwidthLatencyTest.sass:666
+// 000FE200010E06FF`80006B00FF007624:        IMAD.X R0, RZ, RZ, ~c[0x0][0x1ac], P2 {!1} ; // examples/sm_75/samples\segmentationTree.sass:111993
+

@@ -194,7 +194,7 @@ parseRawInst' = parseSyntax . skipWs
 
                 parseMnemonic :: RawInst -> String -> Either String (RawInst,String)
                 parseMnemonic ri sfx =
-                  case span (\c -> isAlphaNum c || c == '.') (skipWs sfx) of
+                  case span (\c -> isAlphaNum c || c == '.' || c`elem`"(~&^|)") (skipWs sfx) of
                     (mne,sfx) -> parseOperands (ri{riMnemonic = mne}) (skipWs sfx)
 
                 parseOperands :: RawInst -> String -> Either String (RawInst,String)
@@ -265,13 +265,21 @@ parseSampleInst s = -- parseLongForm s <|> parseShortForm s
               parseBitsSuffix (SampleInst ri{riOffset = off} (Word128 0 0)) sfx
 
         parseBitsSuffix :: SampleInst -> String -> Either String SampleInst
-        parseBitsSuffix si sfx =
+        parseBitsSuffix si sfx0 =
           case parseDualBitsInSingleComment sfx of
-            Nothing ->
-              case parseBitsInCommentSequence sfx of
-                Nothing -> Left "unable to parse suffix bits"
-                Just (w128,_) -> completeInstruction si{siBits = w128}
-            Just (w128,_) -> completeInstruction si{siBits = w128}
+              Nothing ->
+                case parseBitsInCommentSequence sfx of
+                  Nothing -> Left "unable to parse suffix bits"
+                  Just (w128,_) -> completeInstruction si{siBits = w128}
+              Just (w128,_) -> completeInstruction si{siBits = w128}
+            where sfx
+                    | "/*" `isPrefixOf` dropWhile isSpace sfx0 =
+                      case span (/='*') comment_body of
+                        (body,'*':'/':sfx1)
+                          | any (`isInfixOf`body) ["s0","s1","s2"] -> sfx1
+                        _ -> sfx0
+                    | otherwise = sfx0
+                    where comment_body = drop 2 (dropWhile isSpace sfx0)
 
         completeInstruction :: SampleInst -> Either String SampleInst
         completeInstruction si = return $

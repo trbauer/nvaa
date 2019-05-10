@@ -16,6 +16,7 @@ import Data.List
 import Data.Word
 import Debug.Trace
 import Text.Parsec((<|>),(<?>))
+import Text.Printf
 import qualified Text.Parsec           as P
 
 
@@ -147,7 +148,7 @@ pInst pc = pWhiteSpace >> body
   where body = pWithLoc $ \loc -> do
           prd <- P.option PredNONE pPred
           op <- pOp
-          (ios,mlop3) <- pInstOpts op
+          (ios,m_lop3_opt) <- pInstOpts op
           case op of
             Op "IADD3" -> do
               dsts <- pDsts op
@@ -181,8 +182,42 @@ pInst pc = pWhiteSpace >> body
                 (resolved c_pred:unresolved_srcs)
                 x_pred_srcs
             Op "LOP3" -> do
-              -- use mlop3 potentially in the operand parse
-              return $ error "pInst.LOP3"
+              --  LOP3.LUT             R15, R16, R15,         RZ, 0xfc, !PT  {!2}; // synthetic old form
+              --  LOP3.(s0|s1)         R15, R16, R15,         RZ, 0xfc, !PT {!1}; // examples/sm_75/samples\BlackScholes.sass:1220
+              --  LOP3.(s0&s1)    P2,  RZ,  R35, 0x7fffffff,  RZ, 0xc0, !PT {!4,Y}; // examples/sm_75/samples\bilateral_kernel.sass:1557
+              dst_pred <- P.option [] $ P.try $ do
+                p <- pDstP <* pSymbol ","
+                return [p]
+              dst_reg <- pDstR <* pSymbol ","
+              let dsts = dst_pred ++ [dst_reg]
+              --
+              srcs012 <- pSrcsN 3 pc op <* pSymbol "," -- src0 always reg
+              --
+              -- The optional hex lookup value can be here or elided if present earlier
+              -- However, we normalize the IR to retain it as immediate.
+              src3_lut <-
+                case m_lop3_opt of
+                  -- if they didn't give us an explicit code, it better be here
+                  Nothing -> pSrcI8 <* pSymbol ","
+                  Just lop3_opt -> do
+                    -- if they gave us a code earlier, it better match
+                    -- anything parsed here
+                    loc_hex_lut <- pGetLoc
+                    m_hex_lut <- P.optionMaybe ((pImmA :: PI Word8) <* pSymbol ",")
+                    case m_hex_lut of
+                      Just hex_lut
+                        | hex_lut /= lop3_opt ->
+                          pSemanticError
+                            loc_hex_lut
+                            ("mismatch between inst opt logical option expression and classic-form LUT operand; inst. opt expression evaluates to " ++ printf "0x02X" lop3_opt)
+                      _ -> return () -- better that they omit it
+                    return (SrcImm (Imm32 (fromIntegral lop3_opt)))
+              src_last_pred <- pPredSrcP -- usually !PT
+              let srcs :: [Unresolved Src]
+                  srcs = srcs012 ++ [resolved src3_lut]
+              --
+              pCompleteInst loc prd op ios dsts srcs [src_last_pred]
+
             Op "NOP" -> do
               pCompleteInst loc prd op iosEmpty [] [] []
             _ -> do
@@ -493,6 +528,13 @@ pSrcImmNonBranch49 op = do
   P.notFollowedBy (P.char '@')
   pWhiteSpace
   return $ SrcImm (Imm49 imm)
+
+-- cannot be a label
+pSrcI8 :: PI Src
+pSrcI8 = pLabel "imm8" $ srcIntern <$> pIt
+  where pIt = pLexeme $ do
+          w8 <- pImmA :: PI Word8 -- will fail gracefully on overflow
+          return (SrcImm (Imm32 (fromIntegral w8)))
 
 pSrcI32 :: Op -> PI Src
 pSrcI32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op

@@ -1,0 +1,31 @@
+
+000FE40007FFE0FF`80000013FF127210:        IADD3 R18, RZ, -R19, RZ {!2} ;         // examples/sm_75/samples\bicubicTexture_cuda.sass:2747
+000FC80007FFE0FF`0000000D100D7210:        IADD3 R13, R16, R13, RZ {!4,Y} ;       // examples/sm_75/samples\bicubicTexture_cuda.sass:2760
+000FE20007FFE0FF`00005D00190D7A10:        IADD3 R13, R25, c[0x0][0x174], RZ {!1} ; // examples/sm_75/samples\bilateral_kernel.sass:1190
+000FE20007FFE0FF`80005D0016027A10:        IADD3 R2, R22, -c[0x0][0x174], RZ {!1} ; // examples/sm_75/samples\bilateral_kernel.sass:1052
+000FE20007FFE0FF`0000002013117810:        IADD3 R17, R19, 0x20, RZ {!1} ;        // examples/sm_75/samples\bicubicTexture_cuda.sass:2742
+000FE40007FFE0FF`FFFFFF8124247810:        IADD3 R36, R36, -0x7f, RZ {!2} ;       // examples/sm_75/samples\bilateral_kernel.sass:1577
+000FE2000FFFE0FF`0000000402027C10:        IADD3 R2, R2, UR4, RZ {!1} ;           // examples/sm_75/samples\bitonic.sass:3248
+000FE20007FFE0FF`80005D0016027A10:        IADD3 R2, R22, -c[0x0][0x174], RZ {!1} ; // examples/sm_75/samples\bilateral_kernel.sass:1052
+000FE2000FFFE0FF`80005D0016027A10:        IADD3 R2, R22, -cx[UR0][0x174], RZ {!1} ;     // synthetic
+
+// predicated
+000FD00007FFE0FF`0000000104048810:  @!P0  IADD3 R4, R4, 0x1, RZ {!8,Y} ;         // examples/sm_75/samples\dxtc.sass:5551
+000FD00007FFE0FF`000000400E0E9810:  @!P1  IADD3 R14, R14, 0x40, RZ {!8,Y} ;      // examples/sm_75/samples\flowCUDA.sass:3052
+
+
+// .reuse
+040FE20007FFE0FF`0000000506087210:        IADD3 R8,          R6.reuse,  R5,        RZ {!1} ;       // examples/sm_75/samples\dwtHaar1D.sass:1194
+080FE40007FFE0FF`800000130A0AD210:  @!P5  IADD3 R10,         R10,      -R19.reuse, RZ {!2} ;       // examples/sm_75/samples\Mandelbrot_cuda.sass:11171
+100FE40007C7E000`0000001506157210:        IADD3 R21, P3, P4, R6,        R21,       R0.reuse {!2} ; // examples/sm_75/samples\marchingCubes_kernel.sass:10579
+
+
+// predicate arguments (one or two)
+040FE40007F3E0FF`000068000A087A10:        IADD3   R8, P1,     R10.reuse, c[0x0][0x1a0], RZ          {!2} ; // examples/sm_75/samples\bisect_large.sass:8522
+040FE40007F1E0FF`00005C0004027A10:        IADD3   R2, P0,     R4.reuse,  c[0x0][0x170], RZ          {!2} ; // examples/sm_75/samples\bitonic.sass:3302
+040FE4000791E002`0000580018067A10:        IADD3   R6, P0, P1, R24.reuse, c[0x0][0x160], R2          {!2} ; // examples/sm_75/samples\FunctionPointers_kernels.sass:3189
+000FE4000791E005`0000580000027A10:        IADD3   R2, P0, P1, R0,        c[0x0][0x160], R5          {!2} ; // examples/sm_75/samples\FunctionPointers_kernels.sass:3345
+
+// .X???
+// 000FC400007FE4FF`00005F0005037A10:        IADD3.X R3,         R5,        c[0x0][0x17c], RZ, P0, !PT {!2,Y} ; // examples/sm_75/samples\bisect_small.sass:2265
+// 000FE40000FFE4FF`FFFFFFFF02027810:        IADD3.X R2,         R2,        -0x1,          RZ, P1, !PT {!2} ; // examples/sm_75/samples\particleSystem_cuda.sass:80858

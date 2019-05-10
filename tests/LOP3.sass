@@ -1,0 +1,13 @@
+000FE400078EFCFF`0000000F100F7212:        LOP3.LUT               R15, R16, R15, RZ, 0xfc, !PT  {!2}; // synthetic old form
+
+000FE200078EFCFF`0000000F100F7212:        LOP3.(s0|s1)           R15, R16, R15,           RZ,  0xfc, !PT {!1}; // examples/sm_75/samples\BlackScholes.sass:1220
+000FE400078EC0FF`000000FF03037812:        LOP3.(s0&s1)           R3,  R3,  0xff,          RZ,  0xc0, !PT {!2}; // examples/sm_75/samples\BezierLineCDP.sass:1743
+000FCA00078EC0FF`00005C0005057A12:        LOP3.(s0&s1)           R5,  R5,  c[0x0][0x170], RZ,  0xc0, !PT {!5,Y}; // examples/sm_75/samples\convolutionFFT2D.sass:3466
+
+000FC8000784C0FF`7FFFFFFF23FF7812:        LOP3.(s0&s1)       P2, RZ,  R35, 0x7fffffff,    RZ,  0xc0, !PT {!4,Y}; // examples/sm_75/samples\bilateral_kernel.sass:1557
+000FE400078E4823`8000000025217812:        LOP3.((s0^s2)&s1)      R33, R37, 0x80000000,    R35, 0x48, !PT {!2}; // examples/sm_75/samples\bilateral_kernel.sass:1652
+000FCA00078EFCFF`0008000013121812:  @P1   LOP3.(s0|s1)           R18, R19, 0x80000,       RZ,  0xfc, !PT {!5,Y}; // examples/sm_75/samples\bisect_large.sass:7623
+000FE400078E33FF`00000000FF030212:  @P0   LOP3.(~s1)             R3,  RZ,  R0,            RZ,  0x33, !PT {!2}; // examples/sm_75/samples\oceanFFT_kernel.sass:2803
+001FC600078EE407`0000630004217A12:        LOP3.(s0&s2|s1&~s2)    R33, R4,  c[0x0][0x18c], R7,  0xe4, !PT {!3,Y,^1}; // examples/sm_75/samples\particleSystem_cuda.sass:83849
+000FE400078EFE04`0000000302027212:        LOP3.(s0|s1|s2)        R2,  R2,  R3,            R4,  0xfe, !PT {!2}; // examples/sm_75/libs\cudnn64_7-cudnn64_7.119.sm_75.sass:353686
+

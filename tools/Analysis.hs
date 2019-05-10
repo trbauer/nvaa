@@ -518,6 +518,350 @@ opcodeTest = do
 
 
 
+studyOpcodes :: IO ()
+studyOpcodes = studyOpcodesStartingAt 0x000
+
+studyOpcodesStartingAt :: Word64 -> IO ()
+studyOpcodesStartingAt at = do
+    writeFile "ops.txt" ""
+    writeFile "log.txt" ""
+    writeFile "defs.txt" ""
+    tryOpcodes False [at .. 0x1FF]
+  where tryOpcodes :: Bool -> [Word64] -> IO ()
+        tryOpcodes _ [] = return ()
+        tryOpcodes last_was_valid (op:ops) = do
+            putStrLn "=============================="
+            appendL $
+              printf "OPCODE 0x%03X" op ++ " " ++
+              fmtFieldValueBinary (0,9) op ++ "  " ++ enc128 ++ "\n"
+
+            tryRegFiles
+            -- 000FE80000005800`0000000009027984:        LDS.U R2, [R9.X4] {!4} ;               // examples/sm_75/libs\cudnn64_7-cudnn64_7.776.sm_75.sass:69944
+            -- let lds_bits = Word128 0x000FE80000000000 0x0000000000000984
+          where template_bits = Word128 0x000FE80000000000 0x0000000000000000
+                bits_with_op = putField128 0 10 op template_bits
+                enc128 = drop 2 (show bits_with_op)
+                appendS :: String -> IO ()
+                appendS = appendFile "ops.txt"
+                appendL :: String -> IO ()
+                appendL s = do
+                  appendFile "log.txt" s
+                  putStr s
+                appendD :: String -> IO ()
+                appendD = appendFile "defs.txt"
+
+                badAsm str = "nvdisasm error"`isInfixOf`str
+
+                tryRegFiles = do
+                  let bitss :: [Word128]
+                      bitss = map (uncurry mkBits) all_cases
+                        where mkBits b91 b12_9 =
+                                putField128 91 1 b91 (putField128 9 3 b12_9 bits_with_op)
+                              all_cases = [(b91,b12_9) | b91<-[0..1], b12_9<-[0..7]]
+                  cases <-
+                    zip bitss <$> disBitsRawBatch opts bitss
+                  let good_cases :: [(Word128,String)] -- RF paired with syntax
+                      good_cases = filter (not . badAsm . snd) cases
+                      fmtCase (w128,str) =
+                        printf "  %-12s"
+                          (show (getField128 91 1 w128) ++ "x" ++ show (getField128 9 3 w128)) ++
+                          " ==> " ++ str ++ "\n"
+                  appendL $ concatMap fmtCase good_cases
+
+                  let findAliased :: String -> [Word64]
+                      findAliased s
+                        --
+                        -- OPCODE 0x000 0b000000000
+                        --  0 ==> NOP
+                        -- OPCODE 0x118 0b100011000
+                        --  4 ==> @P0 NOP
+                        | s == "NOP" = [0x000,0x118]
+                        --
+                        -- No official examples of PLOP3
+                        -- The first is probably the most common.
+                        --
+                        -- OPCODE 0x01C 0b000011100
+                        --   4 ==> @P0 PLOP3.LUT P0, P0, P0, P0, P0, 0x0, 0x0
+                        -- OPCODE 0x01D 0b000011101
+                        --   1 ==> @P0 PLOP3.LUT P0, P0, P0, R0.SIGN, P0, 0x0, 0x0
+                        --   5 ==> @P0 PLOP3.LUT P0, P0, P0, c[0x0] [0x0].SIGN, P0, 0x0, 0x0
+                        -- OPCODE 0x01E 0b000011110
+                        --   1 ==> @P0 PLOP3.LUT P0, P0, P0, R0.SIGN, R0.SIGN, 0x0, 0x0
+                        --   5 ==> @P0 PLOP3.LUT P0, P0, P0, c[0x0] [0x0].SIGN, R0.SIGN, 0x0, 0x0
+                        -- OPCODE 0x01F 0b000011111
+                        --   1 ==> @P0 PLOP3.LUT P0, P0, R0.SIGN, R0.SIGN, R0.SIGN, 0x0, 0x0
+                        --   5 ==> @P0 PLOP3.LUT P0, P0, R0.SIGN, c[0x0] [0x0].SIGN, R0.SIGN, 0x0, 0x0
+                        | s == "PLOP3" = [0x01C,0x01D,0x01E,0x01C] -- take the least exotic
+                        --
+                        -- OPCODE 0x024 0b000100100
+                        --   1 ==> @P0 IMAD.U32 R0, R0, R0, R0
+                        --   2 ==> @P0 IMAD.U32 R0, R0, R0, 0x0
+                        --   3 ==> @P0 IMAD.U32 R0, R0, R0, c[0x0][0x0]
+                        --   4 ==> @P0 IMAD.MOV.U32 R0, R0, 0x0, R0
+                        --   5 ==> @P0 IMAD.U32 R0, R0, c[0x0][0x0], R0
+                        -- OPCODE 0x025 0b000100101
+                        --   1 ==> @P0 IMAD.WIDE.U32 R0, P0, R0, R0, R0
+                        --   3 ==> @P0 IMAD.WIDE.U32 R0, P0, R0, R0, c[0x0][0x0]
+                        --   4 ==> @P0 IMAD.WIDE.U32 R0, P0, R0, 0x0, R0
+                        --   5 ==> @P0 IMAD.WIDE.U32 R0, P0, R0, c[0x0][0x0], R0
+                        | s == "IMAD" = [0x024,0x025] -- second one is wide
+                        --
+                        -- OPCODE 0x036 0b000110110
+                        --   1 ==> @P0 HMMA.884.F16.F16.STEP0 R0, R0.ROW, R0.ROW, R0
+                        -- OPCODE 0x03C 0b000111100
+                        --   1 ==> @P0 HMMA.1688.F16 R0, R0, R0, R0
+                        -- OPCODE 0x03D 0b000111101
+                        --   1 ==> @P0 BMMA.88128.XOR.???0 R0, R0.ROW, R0.???0, R0
+                        | s == "HMMA" = [0x036,0x03C]
+                        --
+                        -- OPCODE 0x143 0b101000011
+                        --  1 ==> @P0 CALL.ABS P0, R0
+                        --  4 ==> @P0 CALL.ABS P0, 0x0
+                        --  5 ==> @P0 CALL.ABS P0, c[0x0][0x0]
+                        -- OPCODE 0x144 0b101000100
+                        --  1 ==> @P0 CALL.REL P0, R0 0x10
+                        --  4 ==> @P0 CALL.REL P0, 0x10
+                        | s == "CALL" = [0x143,0x144]
+                        --
+                        -- OPCODE 0x152 0b101010010
+                        --   1 ==> @P0 RPCMOV.32 Rpc.LO, R0
+                        --   4 ==> @P0 RPCMOV.32 Rpc.LO, 0x0
+                        --   5 ==> @P0 RPCMOV.32 Rpc.LO, c[0x0][0x0]
+                        -- OPCODE 0x153 0b101010011
+                        --   1 ==> @P0 RPCMOV.32 R0, Rpc.LO
+                        -- OPCODE 0x154 0b101010100
+                        --   4 ==> @P0 RPCMOV.64 Rpc, 0x0
+                        --   5 ==> @P0 RPCMOV.64 Rpc, c[0x0][0x0]
+                        | s == "RPCMOV" = [0x153,0x154]
+                        --
+                        -- OPCODE 0x155 0b101010101
+                        --  1 ==> @P0 BMOV.32 R0, B0
+                        -- OPCODE 0x156 0b101010110
+                        --   1 ==> @P0 BMOV.32 B0, R0
+                        --   4 ==> @P0 BMOV.32 B0, 0x0
+                        --   5 ==> @P0 BMOV.32 B0, c[0x0][0x0]
+                        --   7 ==> @P0 BMOV.32 B0, B0
+                        -- OPCODE 0x157 0b101010111
+                        --   1 ==> @P0 BMOV.64 ATEXIT_PC, R0
+                        --   4 ==> @P0 BMOV.64 ATEXIT_PC, 0x0
+                        --   5 ==> @P0 BMOV.64 ATEXIT_PC, c[0x0][0x0]
+                        | s == "BMOV" = [0x153,0x154]
+                        --
+                        -- OPCODE 0x18A 0b110001010
+                        --   1 ==> @P0 ATOM.ADD.EF.INVALID0.CTA P0, R0, [R0], R0
+                        -- OPCODE 0x18B 0b110001011
+                        --   1 ==> @P0 ATOM.CAS.EF.INVALID0.CTA P0, R0, [R0], R0, R0
+                        | s == "ATOM" = [0x18C,0x18D]
+                        --
+                        -- OPCODE 0x18C 0b110001100
+                        --   1 ==> @P0 ATOMS.ADD R0, [R0], R0
+                        -- OPCODE 0x18D 0b110001101
+                        --   1 ==> @P0 ATOMS.CAS R0, [R0], R0, R0
+                        | s == "ATOMS" = [0x18C,0x18D]
+                        --
+                        -- OPCODE 0x193 0b110010011
+                        --   2 ==> @P0 SUATOM.D.1D.ADD.EF.INVALID0.CTA.IGN P0, R0, [R0], R0, 0x0, 0x0
+                        --   3 ==> @P0 SUATOM.D.1D.ADD.EF.INVALID0.CTA.IGN P0, R0, [R0], R0, 0x0, 0x0, 0x0
+                        -- OPCODE 0x194 0b110010100
+                        --   1 ==> @P0 SUATOM.D.1D.ADD.EF.INVALID0.CTA.IGN P0, R0, [R0], R0, R0
+                        -- OPCODE 0x195 0b110010101
+                        --   2 ==> @P0 SUATOM.D.1D.CAS.EF.INVALID0.CTA.IGN P0, R0, [R0], R0, 0x0, 0x0
+                        --   3 ==> @P0 SUATOM.D.1D.CAS.EF.INVALID0.CTA.IGN P0, R0, [R0], R0, 0x0, 0x0, 0x0
+                        -- OPCODE 0x196 0b110010110
+                        --   1 ==> @P0 SUATOM.D.1D.CAS.EF.INVALID0.CTA.IGN P0, R0, [R0], R0, R0
+                        | s == "SUATOM" = [0x193 .. 0x196]
+                        --
+                        -- OPCODE 0x197 0b110010111
+                        --   3 ==> @P0 SULD.P.1D.EF.INVALID0.CTA.INVALID0.IGN P0, R0, [R0], 0x0, 0x0, 0x0
+                        --   5 ==> @P0 SULD.P.1D.EF.INVALID0.CTA.INVALID0.IGN P0, R0, [R0], 0x0, 0x0
+                        -- OPCODE 0x198 0b110011000
+                        --   4 ==> @P0 SULD.P.1D.EF.INVALID0.CTA.INVALID0.IGN P0, R0, [R0], R0
+                        -- OPCODE 0x199 0b110011001
+                        --   3 ==> @P0 SULD.D.1D.EF.U8.INVALID0.CTA.IGN P0, R0, [R0], 0x0, 0x0, 0x0
+                        --   5 ==> @P0 SULD.D.1D.EF.U8.INVALID0.CTA.IGN P0, R0, [R0], 0x0, 0x0
+                        -- OPCODE 0x19A 0b110011010
+                        --   4 ==> @P0 SULD.D.1D.EF.U8.INVALID0.CTA.IGN P0, R0, [R0], R0
+                        | s == "SULD" = [0x197 .. 0x19A]
+                        --
+                        -- OPCODE 0x19B 0b110011011
+                        --   3 ==> @P0 SUST.P.1D.EF.INVALID0.CTA.INVALID0.IGN [R0], R0, 0x0, 0x0, 0x0
+                        --   5 ==> @P0 SUST.P.1D.EF.INVALID0.CTA.INVALID0.IGN [R0], R0, 0x0, 0x0
+                        -- OPCODE 0x19C 0b110011100
+                        --   4 ==> @P0 SUST.P.1D.EF.INVALID0.CTA.INVALID0.IGN [R0], R0, R0
+                        -- OPCODE 0x19D 0b110011101
+                        --   3 ==> @P0 SUST.D.1D.EF.U8.INVALID0.CTA.IGN [R0], R0, 0x0, 0x0, 0x0
+                        --   5 ==> @P0 SUST.D.1D.EF.U8.INVALID0.CTA.IGN [R0], R0, 0x0, 0x0
+                        -- OPCODE 0x19E 0b110011110
+                        --   4 ==> @P0 SUST.D.1D.EF.U8.INVALID0.CTA.IGN [R0], R0, R0
+                        | s == "SUST" = [0x19B .. 0x19E]
+                        --
+                        -- OPCODE 0x19F 0b110011111
+                        --   2 ==> @P0 SURED.D.1D.ADD.EF.INVALID0.CTA.IGN [R0], R0, 0x0, 0x0
+                        --   3 ==> @P0 SURED.D.1D.ADD.EF.INVALID0.CTA.IGN [R0], R0, 0x0, 0x0, 0x0
+                        -- OPCODE 0x1A0 0b110100000
+                        --   1 ==> @P0 SURED.D.1D.ADD.EF.INVALID0.CTA.IGN [R0], R0, R0
+                        | s == "SURED" = [0x19F,0x1A0]
+                        --
+                        -- OPCODE 0x1A8 0b110101000
+                        --   1 ==> @P0 ATOMG.ADD.EF.INVALID0.CTA P0, R0, [R0], R0
+                        -- OPCODE 0x1A9 0b110101001
+                        --   1 ==> @P0 ATOMG.CAS.EF.INVALID0.CTA P0, R0, [R0], R0, R0
+                        | s == "ATOMG" = [0x1A8,0x1A9]
+                        | otherwise = []
+
+                  was_valid <-
+                    case good_cases of
+                      ((w128,syn):_)
+                        | null (findAliased mne) || take 1 (findAliased mne) == [op] -> do
+                          appendS "\n"
+                          appendS $ "  | Op" ++ mne
+                          emitDef all_encs mne good_cases
+                          return True
+                        where all_encs = case findAliased mne of {[] -> [op]; ops -> ops}
+                              mne =
+                                case dropWhile ("@"`isPrefixOf`) (words syn) of
+                                  (mne:_) -> takeWhile (/='.') mne
+                      _ -> do
+                        when last_was_valid $
+                          appendS "\n"
+                        appendS $ " | " ++ printf "OpINVALID_0x%X" op
+                        return False
+                  putStrLn ""
+                  tryOpcodes was_valid ops
+
+                emitDef :: [Word64] -> String -> [(Word128,String)] -> IO ()
+                emitDef all_encs mne good_cases = do
+                    str_lat <- findLatency
+                    appendD $
+                      " , mk  " ++ intercalate " " [
+                                      str_mne
+                                    , str_encs
+                                    , str_fmts
+                                    , str_lat
+                                    , str_pipe
+                                    , str_attrs
+                                    ]
+                     ++ "\n"
+                  where str_mne = printf "%-12s" ("Op" ++ mne)
+                        str_encs = printf "%-12s" ("[" ++ intercalate "," (map (printf "0x%03X") all_encs) ++ "]")
+                        str_fmts = "..formats.."
+
+                        findLatency :: IO String
+                        findLatency = do
+                          putStrLn "  finding latency ...."
+                          let f = "examples/sm_75/ops/" ++ mne ++ ".sass"
+                          z <- doesFileExist f
+                          if not z then do
+                              putStrLn "     => no samples: using hardcoded latency"
+                              return useHardcodedLatency
+                            else do
+                              let processLns :: Bool -> Bool -> Int -> [String] -> IO String
+                                  processLns uses_barrier always_yield longest [] = do
+                                    putStrLn $ "  longest observed stall count is " ++ show longest
+                                    if uses_barrier then return "OpLatencyVariable"
+                                      else return ("(OpLatencyFixed " ++ show longest ++ ")")
+                                  processLns uses_barrier always_yield longest (ln:lns) = do
+                                    let badLine why = do
+                                          putStrLn $ why ++ ": BAD LATENCY LINE: " ++ ln
+                                          processLns uses_barrier always_yield longest lns
+                                    case span (/=':') ln of
+                                      (_,"") -> badLine "no :"
+                                      (pfx,':':_) ->
+                                        case reads ("0x"++pfx) :: [(Word128,String)] of
+                                          [(w128,"")] -> do
+                                            let new_longest = longest `max` (fromIntegral (getField128 105 4 w128))
+                                                new_yield = always_yield && getField128 109 1 w128 == 0
+                                                new_barrier = uses_barrier ||
+                                                  getField128 110 3 w128 /= 7 ||
+                                                  getField128 113 3 w128 /= 7
+                                            processLns new_barrier new_yield new_longest lns
+                                          _ -> badLine "no reads"
+
+                              lns <- take 10000 . lines <$> readFile f
+                              processLns False True (-1) lns
+
+                        str_pipe
+                          | flt64 || flt16 || flt32 = "OP_FLT"
+                          | int = "OP_INT"
+                          | tpu = "OP_TPU"
+                          | load || store || surface || texture || atomic || mne`elem`["SHFL"] = "OP_LSU"
+                          | uniform = "OP_UNI"
+                          | otherwise = "OP_UNK"
+                        useHardcodedLatency
+                          | is_var = "OpLatencyVariable"
+                          | otherwise = "(OpLatencyFixed (-1))"
+                          where is_var =
+                                    slm || load || store || atomic ||
+                                    surface || texture || branch ||
+                                    flt64 || flt16 ||
+                                    other_var_op
+                                other_var_op = mne`elem`["SHLF","PRMT","S2R"]
+                                -- TODO: look up based on samples
+                        str_attrs = "[" ++ intercalate "," (map ("OpAttr"++) attrs) ++ "]"
+                          where syntaxHas :: String -> Bool
+                                syntaxHas tok = any (`isInfixOf`tok) (map snd good_cases)
+                                attrs =
+                                     cond (syntaxHas "@") "PREDICATED"
+                                  ++ cond slm "SHMEM"
+                                  ++ cond movement "MOVEMENT"
+                                  ++ cond flt16 "FLT16"
+                                  ++ cond flt32 "FLT32"
+                                  ++ cond flt64 "FLT64"
+                                  ++ cond int "INT"
+                                  ++ cond bitwise "BITWISE"
+                                  ++ cond setp "SETP"
+                                  ++ cond load "LOAD"
+                                  ++ cond store "STORE"
+                                  ++ cond surface "SURFACE"
+                                  ++ cond texture "TEXTURE"
+                                  ++ cond branch "BRANCH"
+                                  ++ cond tpu "TPU"
+                                  ++ cond uniform "UNIFORM"
+
+                        cond :: Bool -> a -> [a]
+                        cond z a = if z then [a] else []
+
+                        slm :: Bool
+                        slm = mne `elem` ["LDS","LDSM","STS"]
+                        bitwise = mne`elem`["LOP3","PLOP3","SHL","SHR","SHF","FLO","BREV","POPC"]
+                        logical = mne`elem`["LOP3","PLOP3","UPLOP3"]
+                        flt16 :: Bool
+                        flt16 = mne `elem` ["HADD2","HFMA2","HMUL2","HSET2","HSETP2"]
+                        flt32 :: Bool
+                        flt32 = mne `elem` ["F2I","F2FP","FADD","FFMA","FCHK","FMNMX","FMUL","FSEL","FSET","FSETP","FSWZADD","MUFU"]
+                        flt64 :: Bool
+                        flt64 = mne `elem` ["DADD","DFMA","DMUL","DSETP","MUFU"]
+                        int :: Bool
+                        int = mne `elem` ["SGXT","LEA","I2I","I2F","IABS","IADD3","IDP","IMAD","IMMA","IMNMX","ISETP"]
+                        setp :: Bool
+                        setp = mne `elem` ["ISETP","FSET","FSETP","DSETP"]
+                        load :: Bool
+                        load = mne `elem` ["LD","LDC","LDG","LDL","LDS","LDSM"]
+                        store :: Bool
+                        store = mne `elem` ["ST","STG","STL","STS"]
+                        atomic :: Bool
+                        atomic = mne `elem` ["ATOM","ATOMG","ATOMS","RED","SUATOM"]
+                        surface :: Bool
+                        surface = mne `elem` ["SUATOM","SULD","SUST","SURED"]
+                        texture :: Bool
+                        texture = mne `elem` ["TEX","TLD","TLD4","TLD","TMML","TXD","TXQ"]
+                        branch :: Bool
+                        branch = mne `elem` ["BPT","BRA","BRX","CALL","KILL","NANOTRAP","RET","RTT"]
+                        movement :: Bool
+                        movement = mne `elem` ["MOV","MOVM","SHFL","PRMT","P2R","S2R"]
+                        tpu = mne `elem` ["HMMA","BMMA","IMMA"]
+                        uniform = mne `elem` ["ULDC","UPLOP3","S2UR"]
+
+
+
+studyDependencies :: Word64 -> FilePath -> IO ()
+studyDependencies op sample_file =
+  -- load file
+  -- for each instance with op (op)
+  --   adhoc find dst and preds written
+  --   scan ahead up to K ops for consumer
+  --   analyze dependency (stalls+yield)
+  return ()
 
 ------------------------------------------------------------
 -- The goal is to emit formats by looking at initial syntax

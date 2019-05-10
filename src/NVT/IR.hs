@@ -4,6 +4,7 @@ module NVT.IR where
 import NVT.Bits
 import NVT.Encoders.Codable
 import NVT.Loc
+import NVT.Lop3
 import NVT.Floats
 import qualified NVT.EnumSet as ES
 
@@ -285,7 +286,7 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
 
 data Imm =
     Imm32 !Word32
-  | Imm49 !Word64
+  | Imm49 !Word64 -- for branches
   deriving (Show,Eq,Ord)
 data Surf =
     SurfImm !Int
@@ -861,7 +862,10 @@ fmtInst fmt_imm i =
                       isPow2Gt1 _ = False
               _ -> ""
           -- unless I choose to use the LUT as syntax
-          | iOp i == Op "LOP3" || iOp i == Op "PLOP3" = ".LUT"
+          | iOp i == Op "LOP3" && length (iSrcs i) == 4 =
+            case drop 3 (iSrcs i) of
+              [SrcI32 imm] -> ".(" ++ fmtLop3 (fromIntegral imm) ++ ")"
+          | iOp i == Op "PLOP3" = ".LUT"
           | otherwise = ""
 
         opnds_str :: String
@@ -905,6 +909,7 @@ fmtInst fmt_imm i =
                       SrcPT:SrcPT:sfx -> sfx
                       SrcPT:sfx -> sfx
                       sfx -> sfx
+                  | iOp i == Op "LOP3" = take 3 (iSrcs i)
                   | otherwise = iSrcs i
                 ext_pred_srcs = map (drop 1 . format) (iSrcPreds i) -- drop 1 for the @ format produces
 

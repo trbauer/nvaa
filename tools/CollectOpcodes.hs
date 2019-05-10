@@ -30,12 +30,15 @@ collectOps = body
           createDirectoryIfMissing True output_root
           let filterSassOnly = filter (".sass"`isSuffixOf`)
           --
-          samples_sass_files <-  filterSassOnly <$> getSubPaths "examples/sm_75/samples"
-          mapM_ processFile (samples_sass_files)
+--          samples_sass_files <-  filterSassOnly <$> getSubPaths "examples/sm_75/samples"
+--          mapM_ processFile (samples_sass_files)
           --
-          library_dirs <- getSubPaths "examples/sm_75/libs" >>= filterM doesDirectoryExist
-          libraries_sass_files <- filterSassOnly . concat <$> mapM getSubPaths library_dirs
-          mapM_ processFile (libraries_sass_files)
+          -- library_dirs <- getSubPaths "examples/sm_75/libs" >>= filterM doesDirectoryExist
+          -- libraries_sass_files <- filterSassOnly . concat <$> mapM getSubPaths library_dirs
+          -- mapM_ processFile library_dirs
+
+          root_sass_files <- filterSassOnly <$> getSubPaths "examples/sm_75/libs"
+          mapM_ processFile root_sass_files
           return ()
 
         output_root = "examples/sm_75/ops"
@@ -50,12 +53,15 @@ collectOps = body
         processLine fp lno lnstr =
             case parseSampleInst lnstr of
               Left _ -> return ()
-              Right si -> do
-                let syntax =
-                      printf "%016X`%016X:  " (wHi64 (siBits si)) (wLo64 (siBits si)) ++
-                      fmtRawInst (siRawInst si)
-                    source_info = fp ++ ":" ++ show lno
-                let base_op = takeWhile (/='.') (riMnemonic (siRawInst si))
-                appendFile (output_root ++ "/" ++ base_op ++ ".sass") $
-                   printf "%-80s" syntax ++ " // " ++ source_info ++ "\n"
+              Right si -> handle si
+                -- | getField128 0 9 (siBits si) == 0x012 -> handle si
+                -- | otherwise -> return ()
+          where handle si = do
+                  let syntax =
+                        printf "%016X`%016X:  " (wHi64 (siBits si)) (wLo64 (siBits si)) ++
+                        fmtRawInst (siRawInst si)
+                      source_info = fp ++ ":" ++ show lno
+                  let base_op = takeWhile (/='.') (riMnemonic (siRawInst si))
+                  appendFile (output_root ++ "/" ++ base_op ++ ".sass") $
+                     printf "%-80s" syntax ++ " // " ++ source_info ++ "\n"
 
