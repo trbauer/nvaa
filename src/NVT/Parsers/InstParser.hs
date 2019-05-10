@@ -151,16 +151,18 @@ pInst pc = pWhiteSpace >> body
           (ios,m_lop3_opt) <- pInstOpts op
           case op of
             Op "IADD3" -> do
-              dsts <- pDsts op
+              dst <- pDst <* pSymbol ","
               (p0,p1) <-
                 P.option (sRC_PT,sRC_PT) $ P.try $ do
-                  p0 <- pSymbol "," >> pSrcP
-                  p1 <- P.option sRC_PT (P.try $ pSymbol "," >> pSrcP)
+                  p0 <- pSrcP <* pSymbol ","
+                  p1 <- P.option sRC_PT (P.try $ pSrcP <* pSymbol ",")
                   return (p0,p1)
-              pIntTernary loc prd op ios dsts (resolveds [p0, p1])
+              pIntTernary loc prd op ios [dst] (resolveds [p0, p1])
+
             Op "IMAD" -> do
-              dsts <- pDsts op
-              pIntTernary loc prd op ios dsts []
+              dsts <- pDsts op <* pSymbol ","
+              p0 <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
+              pIntTernary loc prd op ios dsts [resolved p0]
 
             ld_st_op
               | oIsLD op-> pLD loc prd op ios
@@ -238,7 +240,6 @@ pInst pc = pWhiteSpace >> body
           -- sources, we can store them separate
           -- TODO: fix the instruction formatter if I remove these
           --
-          pSymbol ","
           unresolved_srcs <- pSrcsN 3 pc op
           x_pred_srcs <- pOptPreds
             -- if InstOptX`elem`opts then do
@@ -548,24 +549,31 @@ pSrcImmNonBranch32 op = do
           | oIsFP op = pFltImm32 <|> pIntImm32
           | otherwise = pIntImm32
 
-pNegationNumericOpt :: PI ModSet
-pNegationNumericOpt = P.option msEmpty $
-  (pSymbol "-" >> return (msSingleton ModNEG)) <|>
-  (pSymbol "~" >> return (msSingleton ModCOMP))
+pNegationBitwise :: PI ModSet
+pNegationBitwise =
+  pSymbol "-" >> return (msSingleton ModANEG)
+pNegationNumeric :: PI ModSet
+pNegationNumeric =
+  pSymbol "~" >> return (msSingleton ModBNEG)
 pNegationLogical :: PI ModSet
-pNegationLogical = P.option msEmpty (pSymbol "!" >> return (msSingleton ModNEG))
+pNegationLogical = P.option msEmpty $
+  pSymbol "!" >> return (msSingleton ModLNEG)
+
+pNegationBitwiseOrNumericOpt :: PI ModSet
+pNegationBitwiseOrNumericOpt = P.option msEmpty $
+  pNegationNumeric <|> pNegationBitwise
 
 -- how to make this work with <$>...<*>...<*>...
 -- pWithNegAbsC :: PI a -> PI (Bool -> Bool -> PI a)
 
 pWithNegAbs :: PI a -> PI (a,ModSet)
 pWithNegAbs pBody = do
-  ms_neg <- pNegationNumericOpt
+  ms_neg <- pNegationBitwiseOrNumericOpt
   let pWithAbs = do
-          pSymbol "|"
-          r <- pBody
-          pSymbol "|"
-          return (r,True)
+        pSymbol "|"
+        r <- pBody
+        pSymbol "|"
+        return (r,True)
   (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
   let char x a = if x then msSingleton a else msEmpty
   let ms = msIntern $ msUnion ms_neg $ char abs ModABS
@@ -692,7 +700,7 @@ evalLExpr lix = eval
             --
             LExprLabel loc sym ->
               case sym `lookup` lix of
-                Nothing -> err loc "unbound symbol"
+                Nothing -> err loc $ sym ++ ": unbound symbol"
                 Just val -> return (fromIntegral val)
 
         applyBin = applyBinG False

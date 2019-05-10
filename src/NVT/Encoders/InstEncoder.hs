@@ -222,7 +222,7 @@ eInst i = enc
 
         ensureNoNegAbs :: ModSet -> E ()
         ensureNoNegAbs ms = do
-          when (ModNEG`msElem`ms || ModCOMP`msElem`ms) $
+          when (msHasNegation ms) $
             eFatal "unary instructions don't support src negation modifier"
           when (ModABS`msElem`ms) $
             eFatal "unary instructions don't support src aboslute-value modifier"
@@ -253,7 +253,7 @@ eInst i = enc
               ensureNoNegAbs ms
               eEncode fSRC1_REUSE (ModREU`msElem`ms) -- use Src1.Reuse
             [SrcCon ms six soff] -> do
-              let neg = msElem ModNEG ms || msElem ModCOMP ms
+              let neg = msHasNegation ms
               case six of
                 SurfImm imm -> do
                   eRegFile False 0x5
@@ -269,7 +269,7 @@ eInst i = enc
             [SrcReg ms (RegUR ur)] -> do
               eRegFile True 0x6
               eEncode fSRC1_UREG ur
-              eEncode fSRC1_NEG (ModNEG`msElem`ms)
+              eEncode fSRC1_NEG (msHasNegation ms)
               eEncode fSRC1_ABS (ModABS`msElem`ms)
             [_] -> eFatal "wrong kind of source operand"
             _ -> eFatal "wrong number of source operands"
@@ -280,11 +280,12 @@ eInst i = enc
         eSrc2C = eSrcXC (fSRC2_NEG,fSRC2_ABS,fSRC2_CIX,fSRC2_UREG,fSRC2_COFF)
         -- eSrc2C_IMAD :: Src -> E ()
         -- eSrc2C_IMAD = eSrcXC (Nothing,fSRC2_ABS,fSRC2_CIX,fSRC2_UREG,fSRC2_COFF)
+        -- encodes the "floating source"
         eSrcXC :: (Field,Field,Field,Field,Field) -> Src -> E ()
         eSrcXC  (fSRC_NEG,fSRC_ABS,fSRC_CIX,fSRC_UREG,fSRC_COFF) src = do
           case src of
             SrcCon ms six soff -> do
-              eEncode fSRC_NEG (ModNEG`msElem`ms)
+              eEncode fSRC_NEG (msHasNegation ms)
               eEncode fSRC_ABS (ModABS`msElem`ms)
               case six of
                 SurfReg ur -> eEncode fSRC_UREG ur
@@ -294,7 +295,11 @@ eInst i = enc
 
         eSrc_R :: Int -> (Maybe Field,Maybe Field,Field,Field) -> Src -> E ()
         eSrc_R src_ix (mfNEG,mfABS,fREU,fREG) (SrcReg ms (RegR r)) = do
-          eMaybeNegAbs src_ix (mfNEG,mfABS) (ModNEG`msElem`ms) (ModABS`msElem`ms)
+          eMaybeNegAbs
+            src_ix
+            (mfNEG,mfABS)
+            (msHasNegation ms)
+            (ModABS`msElem`ms)
           eEncode fREU (ModREU`msElem`ms)
           eEncode fREG r
 
@@ -321,10 +326,13 @@ eInst i = enc
         eSrc1R = eSrc_R 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
         eSrc2R :: Src -> E ()
         eSrc2R = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
+        eSrc1InSrc2 :: Src -> E () -- at least in IMAD's case the .reuse stays in syntax order
+        eSrc1InSrc2 = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC1_REUSE,fSRC2_REG)
+
 
         eSrcUR :: Int -> (Field,Maybe Field,Maybe Field) -> Src -> E ()
         eSrcUR src_ix (fSRC_UREG,mfSRC_NEG,mfSRC_ABS) (Src_UR ms ur) = do
-          eMaybeNegAbs src_ix (Nothing,Nothing) (ModNEG`msElem`ms) (ModABS`msElem`ms)
+          eMaybeNegAbs src_ix (Nothing,Nothing) (msHasNegation ms) (ModABS`msElem`ms)
           eEncode fSRC_UREG ur
         eSrc1UR_NN :: Src -> E ()
         eSrc1UR_NN = eSrcUR 1 (fSRC1_UREG,Nothing,Nothing)
@@ -364,12 +372,22 @@ eInst i = enc
         -----------------------------------------------------------------------
         eIMAD :: E ()
         eIMAD = do
-          eField fOPCODE (if iHasInstOpt InstOptWIDE i then 0x025 else 0x024)
+          let encoding
+                | iHasInstOpt InstOptWIDE i = 0x025
+                | iHasInstOpt InstOptHI i = 0x027
+                | otherwise = 0x024
+          eField fOPCODE encoding
           ePredication
           eEncode fINSTOPT_X (iHasInstOpt InstOptX i)
           eDstRegR
           eEncode fIMAD_SIGNED (not (iHasInstOpt InstOptU32 i))
-          case iSrcs i of
+          -- this might be a predicate destination
+          let (p0,srcs) =
+                case iSrcs i of
+                  (Src_P p0_ms p0:sfx) -> (p0,sfx)
+                  srcs -> (PT,srcs)
+          eEncode fINT_SRCPRED0 p0
+          case srcs of
             [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_R _ _)] -> do
               -- imad__RRR_RRR
               eRegFile False 0x1
@@ -383,7 +401,7 @@ eInst i = enc
               --
               eSrc0R_NN s0
               eField fSRC1_IMM (fromIntegral imm)
-              eSrc2R s1
+              eSrc1InSrc2 s1
             [s0@(Src_R _ _),s1@(Src_R _ _),s2@(SrcCon _ six _)] -> do
               -- imad__RRC_RRC
               -- imad__RRCx_RRCx
@@ -392,7 +410,7 @@ eInst i = enc
               --
               eSrc0R_NN s0
               eSrc1C s2
-              eSrc2R s1
+              eSrc1InSrc2 s1
             [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
               -- imad__RsIR_RIR
               eRegFile False 0x4
@@ -425,16 +443,18 @@ eInst i = enc
               eSrc2UR_NN s2
             [_,_,_] -> eFatal "wrong type of arguments to instruction"
             _ -> eFatal "wrong number of arguments to instruction"
-          eEncode fIADD3_SRCPRED0 PT
           case iSrcPreds i of
-            [] -> ePredicationSrc fIADD3_X_SRCPRED1 (PredP True PT)
+            [] -> ePredicationSrc fIMAD_X_SRCPRED1 (PredP True PT)
             [pt]
-              | iHasInstOpt InstOptX i -> ePredicationSrc fIADD3_X_SRCPRED1 pt
+              | iHasInstOpt InstOptX i -> ePredicationSrc fIMAD_X_SRCPRED1 pt
             _ -> eFatal "wrong number of predicate arguments"
 
         -----------------------------------------------------------------------
         eIADD3 :: E ()
         eIADD3 = do
+          let eIADD3_Src0R :: Src -> E ()
+              eIADD3_Src0R = eSrc_R 0 (Just fIADD3_SRC0_NEG,Nothing,fSRC0_REUSE,fSRC0_REG)
+
           eField fOPCODE 0x010
           ePredication
           eDstRegR
@@ -444,11 +464,11 @@ eInst i = enc
           (p0,p1,srcs) <-
             case iSrcs i of
               (Src_P p0_ms p0:Src_P p1_ms p1:sfx)
-                | ModNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
-                | ModNEG`msElem`p1_ms -> eFatal "predicate negation not support on extra predicate source (1)"
+                | ModLNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
+                | ModLNEG`msElem`p1_ms -> eFatal "predicate negation not support on extra predicate source (1)"
                 | otherwise -> return (p0,p1,sfx)
               (Src_P p0_ms p0:sfx)
-                | ModNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
+                | ModLNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
                 | otherwise -> return (p0,PT,sfx)
               sfx -> return (PT,PT,sfx)
           eEncode fIADD3_SRCPRED0 p0
@@ -458,7 +478,7 @@ eInst i = enc
               -- iadd3_noimm__RRR_RRR
               eRegFile False 0x1
               --
-              eSrc0R s0
+              eIADD3_Src0R s0
               eSrc1R s1
               eSrc2R s2
             [s0@(Src_R _ _),s1@(SrcCon _ six _),s2@(Src_R _ _)] -> do
@@ -467,21 +487,21 @@ eInst i = enc
               let is_ind = case six of {SurfReg _ -> True; _ -> False}
               eRegFile is_ind 0x5
               --
-              eSrc0R s0
+              eIADD3_Src0R s0
               eSrc1C s1
               eSrc2R s2
             [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
               -- iadd3_imm__RsIR_RIR
               eRegFile False 0x4
               --
-              eSrc0R s0
+              eIADD3_Src0R s0
               eField fSRC1_IMM (fromIntegral imm)
               eSrc2R s2
             [s0@(Src_R _ _),s1@(Src_UR _ _),s2@(Src_R _ _)] -> do
               -- iadd3_noimm__RUR_RUR
               eRegFile True 0x6
               --
-              eSrc0R s0
+              eIADD3_Src0R s0
               eSrc1UR_NN s1
               eSrc2R s2
             [_,_,_] -> eFatal "unsupported operand kinds to IADD3"
@@ -501,10 +521,8 @@ eInst i = enc
                 -- _ -> eFatal "IADD3 takes exactly two extra predicates"
                 [] -> return (PredP True PT,PredP True PT)
                 -- _ -> eFatal "IADD3 without .X forbids extra predicates"
-          ePredicationSrc fIADD3_X_SRCPRED0 ext_pred0
-          ePredicationSrc fIADD3_X_SRCPRED1 ext_pred1
-            -- eField (fi "IADD.UNKNOWN76_80" 76 5) 0x1E -- probably [80:77] = 0xF !PT
-            -- eField (fi "IADD.UNKNOWN90_87" 87 4) 0xF
+          ePredicationSrc fIADD3_X_SRCPRED2 ext_pred0
+          ePredicationSrc fIADD3_X_SRCPRED3 ext_pred1
           return ()
 
         -----------------------------------------------------------------------
@@ -539,7 +557,7 @@ eInst i = enc
             _ ->  eFatal "malformed destination"
           case iSrcs i of
             [Src_P c_ms c_pr, src0@(Src_R _ _), src1] -> do
-              let c_neg = ModNEG`msElem`c_ms
+              let c_neg = ModLNEG`msElem`c_ms
               when c_neg $
                 eFatalF fISETP_SRC0_PRED "src0 predicate cannot be negated"
               ePredicationSrc fISETP_SRC0_PRED (PredP False c_pr)
@@ -1020,6 +1038,10 @@ fSRC0_ABS :: Field
 fSRC0_ABS = fABS 0 72
 fSRC0_NEG :: Field
 fSRC0_NEG = fNEG 0 73
+-- WTF!?! IADD3 and IMAD use different source 0 negation
+fIADD3_SRC0_NEG :: Field
+fIADD3_SRC0_NEG =
+  fb ("IADD3.Src0.Negated") 72 "-(..)"
 
 
 fSRC1_REG :: Field
@@ -1150,16 +1172,22 @@ fINSTOPT_X = fi "IADD3.X" 74 1
 -- I am starting to wonder if these are srcs or dests;
 -- since they have no signs and reject PT from syntax (hide),
 -- it's fishy
+fINT_SRCPRED0 :: Field -- this appears in IMAD and IADD3 (no sign)
+fINT_SRCPRED0 = fPREG "INT.SrcPred0" 81
+
+fIMAD_X_SRCPRED1 :: Field
+fIMAD_X_SRCPRED1 = fPREDSRC "IADD3.SrcPred1" 87
+
+
 fIADD3_SRCPRED0 :: Field
 fIADD3_SRCPRED0 = fPREG "IADD3.SrcPred0" 81
 fIADD3_SRCPRED1 :: Field
 fIADD3_SRCPRED1 = fPREG "IADD3.SrcPred1" 84
--- bit 4
 
-fIADD3_X_SRCPRED0 :: Field
-fIADD3_X_SRCPRED0 = fPREDSRC "IADD3.X.SrcPred0" 77
-fIADD3_X_SRCPRED1 :: Field
-fIADD3_X_SRCPRED1 = fPREDSRC "IADD3.X.SrcPred1" 87
+fIADD3_X_SRCPRED2 :: Field -- yep, the first (syntactically) goes in higher bits
+fIADD3_X_SRCPRED2 = fPREDSRC "IADD3.X.SrcPred2" 87
+fIADD3_X_SRCPRED3 :: Field -- yep, 77, not 87
+fIADD3_X_SRCPRED3 = fPREDSRC "IADD3.X.SrcPred3" 77
 
 fIMAD_SIGNED :: Field
 fIMAD_SIGNED = fl "IMAD.Signed" 73 1 [".U32","(.S32)"]
@@ -1171,8 +1199,8 @@ fLDST_ADDR_IMMOFF24 = fSIMM "LDST.Addr.ImmOff24" 40 24 (\val -> "[..+"++val++"]"
 fLDST_ADDR_IMMOFF32 :: Field
 fLDST_ADDR_IMMOFF32 = fSIMM "LD.Addr.ImmOff32" 32 32 (\val -> "[..+"++val++"]")
 
--- evilness: the uniform register ends up high or low depending
--- on
+-- UR can occasionally go in 64 in certain cases
+-- So generic LD and ST can have IMM32
 fLD_ADDR_UROFF :: Field
 fLD_ADDR_UROFF = fUR "LD.Addr.UROff" 32
 fLDST_ADDR_UROFF_HI :: Field

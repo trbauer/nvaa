@@ -43,11 +43,10 @@ sStringPure str =
     [(s,"")] -> Sample s
     _ -> error ("sFromBits: syntax error: " ++ show str)
 sAllOps :: String -> IO [Sample]
-sAllOps opname =
-  sFile ("examples/" ++ oArch opts ++ "/ops/" ++ map toUpper opname++".sass")
+sAllOps = sAllOpsK (-1)
 sAllOpsK :: Int -> String -> IO [Sample]
-sAllOpsK k opname = maybeTakePrefix <$> sAllOps opname
-  where maybeTakePrefix = if k < 0 then id else take k
+sAllOpsK k opname =
+  sFileK k ("examples/" ++ oArch opts ++ "/ops/" ++ map toUpper opname++".sass")
 sDir :: FilePath -> IO [Sample]
 sDir dir = do
   fs <- getSubPaths dir
@@ -60,12 +59,16 @@ sFileK k fp = do
   -- e.g. 000EE200001EED00`00001000020C7381:        LDG.E.128.SYS R12, [R2+0x10] {!1,+4.W} ; // examples/sm_75/samples\bodysystemcuda.sass:20925
   let maybeTake = if k < 0 then id else take k
   flns <- maybeTake . zip [1..] . lines <$> readFile fp
-  let parseLine :: (Int,String) -> IO Sample
+  let parseLine :: (Int,String) -> IO [Sample]
       parseLine (lno,lnstr) =
-        case reads ("0x"++lnstr) of
-          [(w128,_)] -> return (Sample w128)
-          _ -> fail ("sFile ("++fp++"): error on line " ++ show lno)
-  mapM parseLine flns
+        case dropWhile isSpace lnstr of
+          "" -> return []
+          '/':'/':_ -> return []
+          str ->
+            case reads ("0x"++lnstr) of
+              [(w128,_)] -> return [Sample w128]
+              _ -> fail ("sFile "++show fp++": error on line " ++ show lno)
+  concat <$> mapM parseLine flns
 
 
 (+++) :: IO [Sample] -> IO [Sample] -> IO [Sample]

@@ -75,7 +75,7 @@ collectSampleIsa filter_str os_raw = body
                , D.oSaveCuBin = cubin_output
                , D.oSavePtx = ptx_output
                , D.oExtraArgs = ["-I"++samples_inc_dir]
-               , D.oInputFile = src_cu_file}
+               , D.oInputFile = src_cu_file
           let handler :: Bool -> SomeException -> IO ()
               handler double_fault e
                 | "user interrupt" `isInfixOf` show e = do
@@ -99,9 +99,6 @@ collectSampleIsa filter_str os_raw = body
           -- copies the .cu file
           let dst_cu_file = base_output_dir ++ "/" ++ takeFileName src_cu_file
           copyFile src_cu_file dst_cu_file
-          -- TODO: copy and .cuh files
-          -- TODO: map source lines
-
           -- for the last .cu file, copy any .cuh files too
           when (null fs) $ do
             cuh_files <- filter ((".cuh"`isSuffixOf`)) <$> D.getSubPaths (takeDirectory src_cu_file)

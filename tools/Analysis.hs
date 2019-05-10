@@ -440,7 +440,7 @@ surveyFields fs io_ss = body
                         "  " ++ fmtFieldValueBinary f v ++ " => " ++
                         printf "%5d" n ++ "    " ++ baysian v ++ "\n"
                       --
-                      baysian v = intercalate ", " (map fmtSubHist baysian_data)
+                      baysian v = intercalate "; " (map fmtSubHist baysian_data)
                         where rows_with_this_v = filter rowHasV fvs_rows
                                 where rowHasV :: [(Field,Word64)] -> Bool
                                       rowHasV row = find (\(f1,v1) -> f1 == f && v1 == v) row /= Nothing
@@ -455,7 +455,7 @@ surveyFields fs io_ss = body
                                       showFreq v = fmtFieldValueBinary f v ++ ":" ++ show (freqOn vs v)
                                       hist_str
                                         | length vs_dom == 1 = " always " ++ show (head vs_dom)
-                                        | otherwise = " ~ {" ++ intercalate ", " (map showFreq vs_dom) ++ "}"
+                                        | otherwise = " ~ {" ++ intercalate "," (map showFreq vs_dom) ++ "}"
           --
           putStrLn $
             concatMap (fmtFieldHistogram) (reorderToCols fvs_rows)

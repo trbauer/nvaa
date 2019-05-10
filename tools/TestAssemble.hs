@@ -193,25 +193,32 @@ testAllG fail_fast = do
   putStrLn $ replicate 70 '*'
   let runTestFiles rs [] = return (reverse rs)
       runTestFiles rs (sass_f:sass_fs) = do
-        putStr $ printf "  %-32s" (sass_f++":") ++ "  "
-        -- putStrLn $ "************ TESTING " ++ sass_f ++ " ************"
-        ior <- newIORef ([] :: [IO ()])
-        let recordIO :: IO () -> IO ()
-            recordIO act = modifyIORef ior ((act:))
-        (np,nt) <- testFileG recordIO ("tests/"++sass_f)
-        if np == nt then putStrGreen "SUCCESS" >> putStrLn ("  (" ++ show nt ++ " tests)")
-          else do
-            putStrRed "FAILED\n"
-            racts <- readIORef ior
-            sequence_ (reverse racts)
-        if (fail_fast && np /= nt) then return ((np,nt):rs)
+        (np,nt) <- testOneInstFile ("tests/"++sass_f)
+        if fail_fast && np /= nt then return ((np,nt):rs)
           else runTestFiles ((np,nt):rs) sass_fs
-
+  --
   sass_fs <- filter (".sass"`isSuffixOf`) <$> listDirectory "tests"
   (nps,nts) <- unzip <$> runTestFiles [] sass_fs
   let (np,nt) = (sum nps,sum nts)
   putStrLn $ "******** passed " ++ show np ++ " of " ++ show nt ++ " ********"
   return $ np == nt
+
+testMnemonic :: String -> IO (Int,Int)
+testMnemonic mne = testOneInstFile ("tests/" ++ mne ++ ".sass")
+testOneInstFile :: FilePath -> IO (Int,Int)
+testOneInstFile sass_f = do
+  putStr $ printf "  %-32s" (sass_f++":") ++ "  "
+  -- putStrLn $ "************ TESTING " ++ sass_f ++ " ************"
+  ior <- newIORef ([] :: [IO ()])
+  let recordIO :: IO () -> IO ()
+      recordIO act = modifyIORef ior ((act:))
+  (np,nt) <- testFileG recordIO sass_f
+  if np == nt then putStrGreen "SUCCESS" >> putStrLn ("  (" ++ show nt ++ " tests)")
+    else do
+      putStrRed "FAILED\n"
+      racts <- readIORef ior
+      sequence_ (reverse racts)
+  return (np,nt)
 
 testFile :: FilePath -> IO (Int,Int)
 testFile = testFileGK id (-1)
@@ -219,6 +226,7 @@ testFileG :: (IO () -> IO ()) -> FilePath -> IO (Int,Int)
 testFileG emit_io = testFileGK emit_io (-1)
 testFileGK ::  (IO () -> IO ()) -> Int -> FilePath -> IO (Int,Int)
 testFileGK emit_io k fp = do
+  flns <- lines <$> readFile fp
   let testLoop (np,nt) [] = return (np,nt)
       testLoop (np,nt) ((lno,ln):lns)
         | null skipped_spaces || "//"`isPrefixOf`skipped_spaces = testLoop (np,nt) lns
@@ -228,7 +236,7 @@ testFileGK emit_io k fp = do
           case parseUnresolvedInst 0 fp 1 syntax of
             Left err -> do
               -- putStrLn $ "==> " ++ show ln
-              let fmtDiag = dFormatWithLines (lines syntax)
+              let fmtDiag = dFormatWithLines flns
               emit_io $ putStrLn "ERROR: parsed SampleInst, but InstParser failed"
               emit_io $ putStrLn $ fmtDiag err
               return (np,nt+1)
@@ -250,8 +258,7 @@ testFileGK emit_io k fp = do
                   testLoop (np+1,nt+1) lns
         where skipped_spaces = dropWhile isSpace ln
   let takePrefix = if k >= 0 then take k else id
-  flns <- takePrefix . lines <$> readFile fp
-  testLoop (0,0) $ zip [1..] flns
+  testLoop (0,0) $ zip [1..] (takePrefix flns)
 
 -- 000FE40000000F00`0000000000147802:        MOV R20, 32@lo((_Z21computeBezierLinesCDPP10BezierLinei + .L_4@srel)) {!2} ; // examples/sm_75/samples\BezierLineCDP.sass:1526
 -- 000FD00000000F00`0000000000157802:        MOV R21, 32@hi((_Z21computeBezierLinesCDPP10BezierLinei + .L_4@srel)) {!8,Y} ; // examples/sm_75/samples\BezierLineCDP.sass:1527
@@ -262,7 +269,11 @@ instHasLabels ln = any (`isInfixOf`ln) ["32@lo(","32@hi(","`(","@srel"]
 
 testSampleInst :: (IO () -> IO ()) -> Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool -- (Int,Int)
 testSampleInst emit_io verbose si (fp,lno) syntax = do
-  let fmtDiag = dFormatWithLines (lines syntax)
+  let fmtDiag d = dFormatWithLines syntax_lines d
+        -- insert empty lines in "syntax" so the context can be shown
+        -- (this function only gets a single line from a bigger file)
+        -- this way we get both the right line number
+        where syntax_lines = replicate (lno-1) "\n" ++ [syntax]
       emitLn = emit_io . putStrLn
       emitLnRed = emit_io . putStrRed
   case parseInst 0 fp lno syntax of
@@ -273,6 +284,8 @@ testSampleInst emit_io verbose si (fp,lno) syntax = do
     Right (i,ws) -> do
       emit_io $ mapM_ (putStrLn . fmtDiag) ws
       let i_formatted = format i
+          -- move the line number for "line 1" since we only get
+          -- a line at a time
       case parseInst 0 fp lno i_formatted of
         Left err -> do
           emitLn $ fp ++ ":"++ show lno ++ ": " ++ syntax

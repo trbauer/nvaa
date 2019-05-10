@@ -56,11 +56,12 @@ collectOps = body
               Right si -> handle si
                 -- | getField128 0 9 (siBits si) == 0x012 -> handle si
                 -- | otherwise -> return ()
-          where handle si = do
+          where fixSlashes = map (\c -> if c == '\\' then '/' else c) -- so cut and past into literal strings do not need escapes
+                handle si = do
                   let syntax =
                         printf "%016X`%016X:  " (wHi64 (siBits si)) (wLo64 (siBits si)) ++
                         fmtRawInst (siRawInst si)
-                      source_info = fp ++ ":" ++ show lno
+                      source_info = fixSlashes fp ++ ":" ++ show lno
                   let base_op = takeWhile (/='.') (riMnemonic (siRawInst si))
                   appendFile (output_root ++ "/" ++ base_op ++ ".sass") $
                      printf "%-80s" syntax ++ " // " ++ source_info ++ "\n"

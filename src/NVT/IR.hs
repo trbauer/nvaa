@@ -205,9 +205,9 @@ sRC_P0 = SrcReg msEmpty (RegP P0)
 sRC_P1 :: Src
 sRC_P1 = SrcReg msEmpty (RegP P1)
 sRC_NP0 :: Src
-sRC_NP0 = SrcReg (msSingleton ModNEG) (RegP P0)
+sRC_NP0 = SrcReg (msSingleton ModLNEG) (RegP P0)
 sRC_NP1 :: Src
-sRC_NP1 = SrcReg (msSingleton ModNEG) (RegP P1)
+sRC_NP1 = SrcReg (msSingleton ModLNEG) (RegP P1)
 sRC_RZ :: Src
 sRC_RZ = SrcReg msEmpty (RegR RZ)
 sRC_URZ :: Src
@@ -326,8 +326,10 @@ formatSrcWithOpts fmt_imm src =
 data Mod =
   -- prefix modifiers
     ModABS   -- |R12|
-  | ModNEG   -- -R12 or !P1
-  | ModCOMP  -- ~R12
+  | ModLNEG  -- !R12 (logical negation)
+  | ModANEG  -- -R12 (arithmetic negation)
+  | ModBNEG  -- ~R12 (bitwise negation)
+  -- NOTE: we assume everything after BNEG is a suffix decorator
   --
   -- suffix modifiers
   --
@@ -357,6 +359,8 @@ msNonNull :: ModSet -> Bool
 msNonNull = not . ES.null
 msUnion :: ModSet -> ModSet -> ModSet
 msUnion = ES.union
+msHasNegation :: ModSet -> Bool
+msHasNegation ms = any (`msElem`ms) [ModLNEG,ModANEG,ModBNEG]
 msToList :: ModSet -> [Mod]
 msToList = ES.toList
 msFromList :: [Mod] -> ModSet
@@ -375,7 +379,8 @@ mMutuallyExclusive m1 m2 = m1 == m2 || check sets
         sets :: [ModSet]
         sets = map msFromList
           [
-            [ModX4,ModX8,ModX16]
+            [ModLNEG,ModANEG,ModBNEG]
+          , [ModX4,ModX8,ModX16]
           , [ModH0_H0,ModH1_H1]
           , [ModROW,ModCOL]
           , [ModU32,Mod64]
@@ -384,21 +389,23 @@ mMutuallyExclusive m1 m2 = m1 == m2 || check sets
 msDecorate :: ModSet -> String -> String
 msDecorate ms body = prefixes ++ abs_body ++ suffixes
   where abs_body = if has ModABS then ("|" ++ body ++ "|") else body
-        prefixes = neg ++ comp
-          where neg = if has ModNEG then "-" else ""
-                comp = if has ModCOMP then "~" else ""
+        prefixes = neg ++ comp ++ pneg
+          where neg = if has ModANEG then "-" else ""
+                comp = if has ModBNEG then "~" else ""
+                pneg = if has ModLNEG then "!" else ""
         suffixes = concatMap fmtSfx (msToList ms)
         has = (`msElem`ms)
         fmtSfx m
           | m`msElem`ms =
-            if m > ModCOMP then msFormatSuffix m else ""
+            if m > ModBNEG then msFormatSuffix m else ""
           | otherwise = ""
 instance Syntax Mod where
   format m =
     case m of
       ModABS -> "|..|"
-      ModNEG -> "-"
-      ModCOMP -> "-"
+      ModANEG -> "-"
+      ModBNEG -> "~"
+      ModLNEG -> "!"
       _ -> msFormatSuffix m
 
 msFormatSuffix :: Mod -> String
