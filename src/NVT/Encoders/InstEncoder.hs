@@ -4,6 +4,7 @@ import NVT.Bits
 import NVT.Loc
 import NVT.Diagnostic
 import NVT.IR
+import NVT.Lop3
 import NVT.Encoders.Codable
 
 import Control.Applicative
@@ -176,6 +177,8 @@ eInst i = enc
               eRegFile False 0x4
               ePredication
               return ()
+            "LOP3" -> do
+              eLOP3
             s -> eFatal $ "unsupported operation"
           eDepInfo (iDepInfo i)
 
@@ -324,10 +327,14 @@ eInst i = enc
         eSrc0R_NNA = eSrc_R 0 (Nothing,Nothing,fSRC0_REUSE,fSRC0_REG)
         eSrc1R :: Src -> E ()
         eSrc1R = eSrc_R 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
-        eSrc2R :: Src -> E ()
-        eSrc2R = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
-        eSrc1InSrc2 :: Src -> E () -- at least in IMAD's case the .reuse stays in syntax order
-        eSrc1InSrc2 = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC1_REUSE,fSRC2_REG)
+        eSrc1R_NNA :: Src -> E ()
+        eSrc1R_NNA = eSrc_R 1 (Nothing,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
+        eSrc2R_NA :: Src -> E ()
+        eSrc2R_NA = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
+        eSrc2R_NNA :: Src -> E ()
+        eSrc2R_NNA = eSrc_R 2 (Nothing,Nothing,fSRC2_REUSE,fSRC2_REG)
+        eSrc1InSrc2_NA :: Src -> E () -- at least in IMAD's case the .reuse stays in syntax order
+        eSrc1InSrc2_NA = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC1_REUSE,fSRC2_REG)
 
 
         eSrcUR :: Int -> (Field,Maybe Field,Maybe Field) -> Src -> E ()
@@ -394,14 +401,14 @@ eInst i = enc
               --
               eSrc0R_NN s0
               eSrc1R    s1
-              eSrc2R    s2
+              eSrc2R_NA s2
             [s0@(Src_R _ _),s1@(Src_R _ _),SrcI32 imm] -> do
               -- imad__RRsI_RRI
               eRegFile False 0x2
               --
               eSrc0R_NN s0
               eField fSRC1_IMM (fromIntegral imm)
-              eSrc1InSrc2 s1
+              eSrc1InSrc2_NA s1
             [s0@(Src_R _ _),s1@(Src_R _ _),s2@(SrcCon _ six _)] -> do
               -- imad__RRC_RRC
               -- imad__RRCx_RRCx
@@ -410,14 +417,14 @@ eInst i = enc
               --
               eSrc0R_NN s0
               eSrc1C s2
-              eSrc1InSrc2 s1
+              eSrc1InSrc2_NA s1
             [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
               -- imad__RsIR_RIR
               eRegFile False 0x4
               --
               eSrc0R_NN s0
               eField fSRC1_IMM (fromIntegral imm)
-              eSrc2R s2
+              eSrc2R_NA s2
             [s0@(Src_R _ _),s1@(SrcCon _ six _),s2@(Src_R _ _)] -> do
               -- imad__RCR_RCR
               -- imad__RCxR_RCxR
@@ -426,20 +433,20 @@ eInst i = enc
               --
               eSrc0R_NN s0
               eSrc1C s1
-              eSrc2R s2
+              eSrc2R_NA s2
             [s0@(Src_R _ _),s1@(Src_UR _ _),s2@(Src_R _ _)] -> do
               -- imad__RUR_RUR
               eRegFile True 0x6
               --
               eSrc0R_NN s0
               eSrc1UR_NN s1
-              eSrc2R s2
+              eSrc2R_NA s2
             [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_UR _ _)] -> do
               -- imad__RRU_RRU
               eRegFile True 0x7
               --
               eSrc0R_NN s0
-              eSrc2R s1
+              eSrc2R_NA s1
               eSrc2UR_NN s2
             [_,_,_] -> eFatal "wrong type of arguments to instruction"
             _ -> eFatal "wrong number of arguments to instruction"
@@ -480,7 +487,7 @@ eInst i = enc
               --
               eIADD3_Src0R s0
               eSrc1R s1
-              eSrc2R s2
+              eSrc2R_NA s2
             [s0@(Src_R _ _),s1@(SrcCon _ six _),s2@(Src_R _ _)] -> do
               -- iadd3_noimm__RCR_RCR
               -- iadd3_noimm__RCxR_RCxR
@@ -489,21 +496,21 @@ eInst i = enc
               --
               eIADD3_Src0R s0
               eSrc1C s1
-              eSrc2R s2
+              eSrc2R_NA s2
             [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
               -- iadd3_imm__RsIR_RIR
               eRegFile False 0x4
               --
               eIADD3_Src0R s0
               eField fSRC1_IMM (fromIntegral imm)
-              eSrc2R s2
+              eSrc2R_NA s2
             [s0@(Src_R _ _),s1@(Src_UR _ _),s2@(Src_R _ _)] -> do
               -- iadd3_noimm__RUR_RUR
               eRegFile True 0x6
               --
               eIADD3_Src0R s0
               eSrc1UR_NN s1
-              eSrc2R s2
+              eSrc2R_NA s2
             [_,_,_] -> eFatal "unsupported operand kinds to IADD3"
             _ -> eFatal "wrong number of operands to IADD3"
           -- these are the extra source predicate expressions
@@ -524,6 +531,40 @@ eInst i = enc
           ePredicationSrc fIADD3_X_SRCPRED2 ext_pred0
           ePredicationSrc fIADD3_X_SRCPRED3 ext_pred1
           return ()
+
+        eLOP3 :: E ()
+        eLOP3 = do
+          eField fOPCODE 0x012
+          ePredication
+          eDstRegR
+          --
+          when (length (iSrcs i) /= 4) $
+            eFatal "malformed IR: expected 4 srcs"
+          --
+          case take 1 (iSrcs i) of
+            [s0@(Src_R _ _)] -> do
+              eSrc0R_NNA s0
+            _ -> eFatal "malformed IR: src0 should be Reg"
+          --
+          case drop 3 (iSrcs i) of
+            [SrcI32 lut] | lut <= 255 -> do
+              let fLOP3_LUT = f "Lop3.Function" 72 8 fmt
+                    where fmt _ = fmtLop3 . fromIntegral
+              eField fLOP3_LUT (fromIntegral lut)
+            _ -> eFatal "malformed IR: src3 should be imm8 (lut)"
+          case take 2 (drop 1 (iSrcs i)) of
+            [s1@(Src_R _ _),s2@(Src_R _ _)] -> do
+              eRegFile False 0x1
+              eSrc1R_NNA s1
+              eSrc2R_NNA s2
+            [s1@(SrcCon _ six _),s2@(Src_R _ _)] -> do
+              let is_ind = case six of {SurfReg _ -> True; _ -> False}
+              eRegFile is_ind 0x5
+              eSrc1C s1
+              eSrc2R_NA s2
+            _ -> eFatal "malformed IR: src0/src1 should be RR, RC, RCx, RI, or RU"
+
+
 
         -----------------------------------------------------------------------
         eISETP :: E ()
