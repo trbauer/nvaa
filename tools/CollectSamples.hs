@@ -13,14 +13,33 @@ import System.Exit
 import System.IO
 import System.Process
 
+cPP_FILT :: FilePath
+cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.3\\mingw\\bin\\c++filt.exe"
+
+cUDA_SAMPLES_ROOT :: FilePath
+cUDA_SAMPLES_ROOT = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples"
 
 -- "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.0\bin\"
 main :: IO ()
 main = do
+  checkSetup
 --  collectSampleIsa        "" D.dft_opts_61
-  -- collectSampleIsa        "" D.dft_opts_75
-  collectLibrarySampleIsa "" D.dft_opts_75
+  collectSampleIsa        "" D.dft_opts_75
+--  collectLibrarySampleIsa "" D.dft_opts_75
   return ()
+
+
+
+checkSetup :: IO ()
+checkSetup = do
+  let checkFile f = do
+        z <- doesFileExist f
+        unless z $ error $ f ++ ": file not found"
+  let checkDir f = do
+        z <- doesDirectoryExist f
+        unless z $ error $ f ++ ": dir not found"
+  checkFile cPP_FILT
+  checkDir cUDA_SAMPLES_ROOT
 
 collectSampleIsa :: String -> D.Opts -> IO ()
 collectSampleIsa filter_str os_raw = body
@@ -76,6 +95,7 @@ collectSampleIsa filter_str os_raw = body
                , D.oSavePtx = ptx_output
                , D.oExtraArgs = ["-I"++samples_inc_dir]
                , D.oInputFile = src_cu_file
+               }
           let handler :: Bool -> SomeException -> IO ()
               handler double_fault e
                 | "user interrupt" `isInfixOf` show e = do
@@ -94,8 +114,8 @@ collectSampleIsa filter_str os_raw = body
                   print e
                   -- throwIO e
                   return ()
-          D.runWithOpts
-            nvcc_os `catch` handler False
+          --
+          D.runWithOpts nvcc_os `catch` handler False
           -- copies the .cu file
           let dst_cu_file = base_output_dir ++ "/" ++ takeFileName src_cu_file
           copyFile src_cu_file dst_cu_file
@@ -107,7 +127,7 @@ collectSampleIsa filter_str os_raw = body
           walkCuFiles fs
 
 findCudaSamplesDir :: IO FilePath
-findCudaSamplesDir = tryPathVers ["v10.1","v10.0","v9.1","v9.0","v8.0"]
+findCudaSamplesDir = tryPathVers ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0"]
   where tryPathVers [] = return ""
         tryPathVers (p:ps) = do
           z <- doesDirectoryExist (mkCudaSampleDir p)
@@ -115,8 +135,7 @@ findCudaSamplesDir = tryPathVers ["v10.1","v10.0","v9.1","v9.0","v8.0"]
             else tryPathVers ps
 
         mkCudaSampleDir :: String -> FilePath
-        mkCudaSampleDir ver =
-          "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples\\" ++ ver
+        mkCudaSampleDir ver = cUDA_SAMPLES_ROOT ++ "\\" ++ ver
 
 
 collectLibrarySampleIsa :: String -> D.Opts -> IO ()
@@ -220,8 +239,9 @@ collectLibrarySampleIsaFromDir os_raw full_dll = body
               , D.oTextOnly = True
               -- , D.oExtraArgs = D.oExtraArgs os ++ ["--dump-resource-usage"]
               }
+
             res <- readProcess cuod_exe ["--dump-resource-usage", elf_cubin] ""
-            res_cpp <- readProcess ("C:\\Bin\\Haskell\\8.4.3\\mingw\\bin\\c++filt.exe") [] res
+            res_cpp <- readProcess cPP_FILT [] res
             writeFile (replaceExtension dst_elf_cubin "txt") res_cpp
             renameFile elf_cubin dst_elf_cubin
             return ()
