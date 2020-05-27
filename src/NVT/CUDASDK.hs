@@ -61,7 +61,43 @@ findCudaTool os exe_raw =
           warningLn os $ "findCudaToolDir: falling back to $PATH prefix (could not find $CUDA_PATH)"
           return exe
 
+------- finds a CUDA executable
+findCudaRoot :: IO FilePath
+findCudaRoot =
+    tryEnvs
+      [
+        "CUDA_PATH"
+      , "CUDA_PATH_V11_0"
+      , "CUDA_PATH_V10_2"
+      , "CUDA_PATH_V10_1"
+      , "CUDA_PATH_V10_0"
+      , "CUDA_PATH_V9_0"
+      , "CUDA_PATH_V9_1"
+      , "CUDA_PATH_V8_0"
+      , "CUDA_PATH_V7_5"
+      ]
+  where tryEnvs (e:es) = do
+          mv <- lookupEnv e
+          case mv of
+            Nothing -> tryEnvs es
+            Just d -> tryDir d (tryEnvs es)
+#ifdef mingw32_HOST_OS
+        tryEnvs [] =
+          tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) vers)
+            where vers = ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0","v7.5"]
+#else
+        -- TODO: /opt/nvidia/nvcc ?
+        tryEnvs [] = tryFixedPaths ["/usr/local/cuda/bin"]
+#endif
+        tryFixedPaths (d:ds) = tryDir d (tryFixedPaths ds)
+        tryFixedPaths [] = giveUp
 
+        tryDir d keep_looking = do
+          z <- doesFileExist (d </> "bin" </> mkExe "nvcc")
+          if not z then keep_looking else return d
+
+        giveUp :: IO FilePath
+        giveUp = fatal "findCudaToolDir: failed to find CUDA SDK"
 -- setupEnv :: IO [(String,String)]
 -- setupEnv =
 -- DevEnvDir=C:\Program Files (x86)\Microsoft Visual Studio 14.0\Common7\IDE\
@@ -83,42 +119,83 @@ findExtraNvccOpts :: Opts -> IO [String]
 findExtraNvccOpts _ = return []
 #else
 -- C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\INCLUDE
-findExtraNvccOpts os =
-    tryDir ["C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC"]
-  where tryDir [] = return []
-        tryDir (vs_dir:ds) = do
-          z <- doesDirectoryExist (vs_dir ++ "\\BIN")
-          if not z then tryDir ds
-            else do
-              nvcc_exe <- findCudaTool os "nvcc"
-              let cuda_include_dir = takeDirectory (takeDirectory nvcc_exe) ++ "\\include"
-              z <- doesDirectoryExist cuda_include_dir
-              unless z $
-                fatal "can't find $CUDA include directory"
-              windows_kits_dirs <- findWindowsKitsInclude
-              return $ [
+findExtraNvccOpts os = body
+  where body :: IO [String]
+        body = do
+          cuda_root <- findCudaRoot
+          vs_dir <- findVsDir
+          --
+          let cuda_include_dir = cuda_root ++ "\\include"
+          z <- doesDirectoryExist cuda_include_dir
+          unless z $
+            fatal "can't find $CUDA include directory"
+          let cuda_args =
+                [
                   "--compiler-bindir", vs_dir
-                -- TODO: need to look these up
-                -- , "-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\include"
+                --
                 , "-I" ++ cuda_include_dir
-                --
-                -- , "-IC:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\INCLUDE"
-                , "-I" ++ vs_dir ++ "\\INCLUDE"
-                , "-I" ++ vs_dir ++ "\\ATL\\INCLUDE"
-                --
-                -- Windows Kits
-                -- , "-IC:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\ucrt"
-                -- ....
-                ] ++ windows_kits_dirs
+                ]
+          -- Windows Kits includes
+          -- e.g. "-IC:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.15063.0\\ucrt"
+          -- ....
+          windows_kits_dirs <- findWindowsKitsInclude
+          --
+          return $ cuda_args ++ windows_kits_dirs
+
+
+findVsDir :: IO FilePath
+findVsDir = do
+    mnew <- findNewVsDir
+    case mnew of
+      Just new -> return new
+      Nothing -> do
+        mold <- findOldVsDir
+        case mold of
+          Nothing -> fatal "cannot find an appropriate Visual Studio directory"
+          Just old -> return old
+  where -- VS 2017/2019
+        findNewVsDir :: IO (Maybe FilePath)
+        findNewVsDir =
+            srch [
+                -- C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\VC\Tools\MSVC
+                "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Professional\\VC\\Tools\\MSVC"
+                -- C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional\VC\Tools\MSVC
+              , "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Professional\\VC\\Tools\\MSVC"
+              ]
+          where srch [] = return Nothing
+                srch (dir:dirs) = do
+                  z <- doesDirectoryExist dir
+                  if not z then srch dirs
+                    else do
+                      es <- listDirectory dir -- e.g. "14.23.28105"
+                      let mkClPath ver = dir ++ "\\" ++ ver ++ "\\bin\\Hostx64\\x64\\cl.exe"
+                      eds <- filterM (doesFileExist . mkClPath) es
+                      -- pick the newest
+                      case sortOn Down eds of
+                        [] -> srch dirs
+                        (ver:_) -> return $ Just $ takeDirectory (mkClPath ver)
+
+        findOldVsDir :: IO (Maybe FilePath)
+        findOldVsDir =
+            srch [
+              "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC"
+            , "C:\\Program Files (x86)\\Microsoft Visual Studio 12.0\\VC"
+            ]
+          where srch (dir:ds) = do
+                  z <- doesDirectoryExist (dir ++ "\\BIN")
+                  if not z then srch ds
+                    else do
+                      return $ Just dir
+                srch [] = return Nothing
+
+
 -- pick the newest child of:
---   C:\Program Files (x86)\Windows Kits\10\include
-#endif
-
-
+--   C:\Program Files (x86)\Windows Kits\10\include\
 findWindowsKitsInclude :: IO [String]
 findWindowsKitsInclude = do
-  z <- doesDirectoryExist "C:\\Program Files (x86)\\Windows Kits\\10\\Include"
-  if not z then return []
+  let windows_kits_root = "C:\\Program Files (x86)\\Windows Kits\\10\\Include"
+  z <- doesDirectoryExist windows_kits_root
+  if not z then fatal $ windows_kits_root ++ ": cannot find Windows SDK"
     -- e.g. ["10.0.10586.0","10.0.16299.0"]
     else do
       let isKitVersionedDir :: FilePath -> IO Bool
@@ -129,7 +206,8 @@ findWindowsKitsInclude = do
               if not z then return False
                 else doesDirectoryExist (fp </> "ucrt")
       --
-      ds <- getSubPaths "C:\\Program Files (x86)\\Windows Kits\\10\\Include" >>= filterM isKitVersionedDir
+      ds0 <- map ((windows_kits_root++"/")++) <$> listDirectory windows_kits_root
+      ds <- filterM isKitVersionedDir ds0
       case sortOn (Down . takeFileName) ds of
         (newest_kit:_) -> return
           [
@@ -138,6 +216,8 @@ findWindowsKitsInclude = do
           , "-I" ++ newest_kit </> "um"
           , "-I" ++ newest_kit </> "winrt"
           ]
+#endif
+
 
 
 
