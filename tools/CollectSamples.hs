@@ -9,6 +9,7 @@ import Control.Exception
 import Data.List
 import System.Directory
 import System.FilePath
+import System.Environment
 import System.Exit
 import System.IO
 import System.Process
@@ -23,11 +24,14 @@ cUDA_SAMPLES_ROOT = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples"
 main :: IO ()
 main = do
   checkSetup
---  collectSampleIsa        "" D.dft_opts_61
-  collectSampleIsa        "" D.dft_opts_75
---  collectLibrarySampleIsa "" D.dft_opts_75
-  return ()
+  getArgs >>= run
 
+run :: [String] -> IO ()
+run as =
+  case as of
+    ["samples"] -> collectSampleIsa "" D.dft_opts_75
+    ["libs"] -> collectLibrarySampleIsa "" D.dft_opts_75
+    _ -> die "usage: collect (samples|libs)"
 
 
 checkSetup :: IO ()
@@ -40,6 +44,7 @@ checkSetup = do
         unless z $ error $ f ++ ": dir not found"
   checkFile cPP_FILT
   checkDir cUDA_SAMPLES_ROOT
+
 
 collectSampleIsa :: String -> D.Opts -> IO ()
 collectSampleIsa filter_str os_raw = body
@@ -222,23 +227,40 @@ collectLibrarySampleIsaFromDir os_raw full_dll = body
           putStrLn $ "  dumping " ++ elf_cubin
           let dst_elf_cubin = output_dir ++ "/" ++ elf_cubin
           z <- doesFileExist dst_elf_cubin
+          when z $
+            putStrLn "... skipping (already dumped)"
           unless z $ do
+            putStrLn $ "  % cuobjdump --extract-elf  " ++ elf_cubin ++ "  " ++ full_dll
             readProcess cuod_exe ["--extract-elf", elf_cubin, full_dll] ""
-            -- oup <- readProcess nvdis_exe [
-            --           "--no-vliw"
-            --         , "--no-dataflow"
-            --         , "--print-line-info"
-            --         , "--print-instruction-encoding"
-            --         , elf
-            --         ] ""
-            --  appendFile (output_prefix ++ ".sass") oup
+            --
+            -- disasm to file (will be huge)
+            let tmp_sass = takeFileName elf_cubin ++ "-tmp.sass"
+            putStrLn $ "  % nvdisasm ... extract raw sass"
+            withFile tmp_sass WriteMode $ \h_out -> do
+              D.runCudaToolToHandle D.dft_opts_75 "nvdisasm" [
+                        "--no-vliw"
+                      , "--no-dataflow"
+                      , "--print-line-info"
+                      , "--print-instruction-encoding"
+                      , elf_cubin
+                      ] h_out
+             --
+            putStrLn $ "  % nva ... filtering assembly output"
             D.runWithOpts
               os {
-                D.oInputFile = elf_cubin
+                D.oInputFile = tmp_sass
               , D.oOutputFile = output_dir ++ "/" ++ dropExtension elf_cubin ++ ".sass"
-              , D.oTextOnly = True
-              -- , D.oExtraArgs = D.oExtraArgs os ++ ["--dump-resource-usage"]
               }
+            removeFile tmp_sass
+
+            --  appendFile (output_prefix ++ ".sass") oup
+            -- D.runWithOpts
+            --   os {
+            --     D.oInputFile = elf_cubin
+            --   , D.oOutputFile = output_dir ++ "/" ++ dropExtension elf_cubin ++ ".sass"
+            --   , D.oTextOnly = True
+            --   -- , D.oExtraArgs = D.oExtraArgs os ++ ["--dump-resource-usage"]
+            --   }
 
             res <- readProcess cuod_exe ["--dump-resource-usage", elf_cubin] ""
             res_cpp <- readProcess cPP_FILT [] res

@@ -1,7 +1,16 @@
-000FE20004701070`00005A0002007A0C:        ISETP.LT.U32.AND P0, PT, R2, c[0x0][0x168], !P0 {!1} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2219
-000FE20003F03270`00005E00FF007A0C:        ISETP.LE.AND P0, PT, RZ, c[0x0][0x178], PT {!1} ; // examples/sm_75/samples\boxFilter_kernel.sass:8720
-000FD80003F06270`00005C0000007A0C:        ISETP.GE.AND P0, PT, R0, c[0x0][0x170], PT {!12,Y} ; // examples/sm_75/samples\alignedTypes.sass:2611
-000FD80003F04070`727FFFFF0000780C:        ISETP.GT.U32.AND P0, PT, R0, 0x727fffff, PT {!12,Y} ; // examples/sm_75/samples\BezierLineCDP.sass:1524
-000FD80000702670`00005C00FF007A0C:        ISETP.EQ.OR P0, PT, RZ, c[0x0][0x170], P0 {!12,Y} ; // examples/sm_75/samples\bisect_small.sass:1761
-000FD80003F05300`000000FF0300720C:        ISETP.NE.AND.EX P0, PT, R3, RZ, PT, P0 {!12,Y} ; // examples/sm_75/samples\BezierLineCDP.sass:1575
-000FE2000BF26270`0000000410007C0C:        ISETP.GE.AND P1, PT, R16, UR4, PT {!1} ; // examples/sm_75/samples\boxFilter_kernel.sass:12377
+000FE40003F45270`000000FF0800720C:        ISETP.NE    .AND     P2, PT,  R8,  RZ,            PT {!2} ; // examples/sm_75/samples\BezierLineCDP.sass:1820
+000FE20003F04270`000000040F00720C:        ISETP.GT    .AND     P0, PT,  R15, R4,            PT {!1} ; // examples/sm_75/samples\binomialOptions_kernel.sass:2648
+000FE20004701070`00005A0002007A0C:        ISETP.LT.U32.AND     P0, PT,  R2,  c[0x0][0x168], !P0 {!1} ; // examples/sm_75/samples\bicubicTexture_cuda.sass:2219
+000FE20003F03270`00005E00FF007A0C:        ISETP.LE    .AND     P0, PT,  RZ,  c[0x0][0x178], PT {!1} ; // examples/sm_75/samples\boxFilter_kernel.sass:8720
+000FD80003F06270`00005C0000007A0C:        ISETP.GE    .AND     P0, PT,  R0,  c[0x0][0x170], PT {!12,Y} ; // examples/sm_75/samples\alignedTypes.sass:2611
+000FD80003F04070`727FFFFF0000780C:        ISETP.GT.U32.AND     P0, PT,  R0,  0x727fffff,    PT {!12,Y} ; // examples/sm_75/samples\BezierLineCDP.sass:1524
+000FD80000702670`00005C00FF007A0C:        ISETP.EQ    .OR      P0, PT,  RZ,  c[0x0][0x170], P0 {!12,Y} ; // examples/sm_75/samples\bisect_small.sass:1761
+000FD80003F05300`000000FF0300720C:        ISETP.NE    .AND.EX  P0, PT,  R3,  RZ,            PT, P0 {!12,Y} ; // examples/sm_75/samples\BezierLineCDP.sass:1575
+000FE2000BF26270`0000000410007C0C:        ISETP.GE    .AND     P1, PT,  R16, UR4,           PT {!1} ; // examples/sm_75/samples\boxFilter_kernel.sass:12377
+
+
+000FE40002782A70`000000575D00520C:  @P5   ISETP.EQ    .XOR     P4, PT,  R93, R87,           P4 {!2} ; // examples/sm_75/libs\cublas64_100-Program.1210.sm_75.sass:11399
+040FE20001761270`FFFFFFF05400780C:        ISETP.LT    .AND     P3, PT,  R84.reuse, -0x10,   P2 {!1} ; // examples/sm_75/libs\cublas64_100-Program.1210.sm_75.sass:12375
+000FC800077A5350`00005F00FF007A0C:        ISETP.NE    .AND.EX  P5, PT,  RZ,  c[0x0][0x17c], !P6, P5 {!4,Y} ; // examples/sm_75/libs\cudnn64_7-cudnn64_7.119.sm_75.sass:641689
+
+000FE40006785360`00006300FF007A0C:        ISETP.NE.AND.EX P4, PT, RZ, c[0x0][0x18c], !P4, P6 {!2} ; // examples/sm_75/libs\cudnn64_7-cudnn64_7.105.sm_75.sass:654721

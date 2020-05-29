@@ -25,7 +25,7 @@ import qualified Data.ByteString as S
 --                     .ptx -> .sass
 --           .cubin ->      -> .sass
 spec :: PA.Spec Opts
-spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
+spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Translator " ++ nvt_version) 0
             [ -- options
               PA.optF spec "v" "verbose"
                 "the verbosity level" ""
@@ -50,7 +50,7 @@ spec = PA.mkSpecWithHelpOpt "nvt" ("NVidia Translator " ++ nvt_version) 0
                 (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
             , PA.opt spec "a" "arch" "ARCH"
                 "sets the device architecture (e.g. -a=sm_72)" ""
-                (\a o -> (o {oArch = a}))
+                (\a o -> (o {oArch = a})) # PA.OptAttrAllowUnset
 
             , PA.opt spec "" "save-cubin" "PATH"
                 "saves the intermediate .cubin file to this path" ""
@@ -116,6 +116,8 @@ runWithOpts os = processFile (oInputFile os)
         -- foo.cu --> $temp.cubin and disassembles it that file
         processCuFile :: FilePath -> IO ()
         processCuFile fp = do
+          when (null (oArch os)) $
+            fatal $ fp ++ ": requires --arch argument"
           z <- doesFileExist fp
           when (not z) $
             fatal $ fp ++ ": file not found"
@@ -160,7 +162,19 @@ runWithOpts os = processFile (oInputFile os)
           removeFile cubin_file
 
         processSassFile :: FilePath -> IO ()
-        processSassFile fp = error "processSassFile: todo"
+        processSassFile fp
+          | oFilterAssembly os = readFile fp >>= processSassToOutput
+          | otherwise = error "processSassFile: with --no-filter-asm"
+
+        processSassToOutput :: String -> IO ()
+        processSassToOutput inp
+          | null (oOutputFile os) = processSassIO stdout inp
+          | otherwise = withFile (oOutputFile os) WriteMode $ \h -> processSassIO h inp
+        processSassIO :: Handle -> String -> IO ()
+        processSassIO h_out =
+          if oSourceMapping os
+            then filterAssemblyWithInterleavedSrcIO (oNoBits os) h_out (oArch os)
+            else hPutStr h_out . filterAssembly (oNoBits os) (oArch os)
 
         emitOutput :: String -> IO ()
         emitOutput
@@ -190,14 +204,7 @@ runWithOpts os = processFile (oInputFile os)
           --
           nvdis_out <- runCudaTool os "nvdisasm" (["--print-line-info"] ++ nvdis_args_no_lines)
             `catch` tryNvdisasmWithoutLineNumbers
-          let maybeFilterAsmIO :: String -> IO String
-              maybeFilterAsmIO
-                | oFilterAssembly os = do
-                  if oSourceMapping os
-                    then filterAssemblyWithInterleavedSrcIO (oNoBits os) (oArch os)
-                    else return . filterAssembly (oNoBits os) (oArch os)
-                | otherwise = return
-          maybeFilterAsmIO nvdis_out >>= emitOutput
+          processSassToOutput nvdis_out
           --
           -- cuod_res <- runCudaTool os "cuobjdump" ["--dump-resource-usage", cubin_file]
           -- appendOutput cuod_res

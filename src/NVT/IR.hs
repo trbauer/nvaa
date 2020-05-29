@@ -90,6 +90,7 @@ data Inst =
   , iOp :: !Op
   , iOptions :: !InstOptSet -- the mnemonic '.' suffixes
   , iDsts :: ![Dst]
+  -- iDstPred :: !(Maybe PR) (or use PT?)
   , iSrcs :: ![Src]
   , iSrcPreds :: ![Pred] -- e.g. IADD3.X has two extra predicate expressions
   , iDepInfo :: !DepInfo
@@ -752,6 +753,8 @@ data InstOpt =
   --
   | InstOptX -- IADD3.X
   --
+  | InstOptPAND -- LOP3.LUT.PAND
+  --
   | InstOptL -- SHF.L
   | InstOptR -- SHF.R
   --
@@ -800,6 +803,7 @@ data InstOpt =
   | InstOptLU
   | InstOptEU
   | InstOptNA
+  --
   -- WARNING: this mustn't exceed 64 or we need to change our EnumSet
   deriving (Show,Eq,Ord,Enum)
 instance Syntax InstOpt where

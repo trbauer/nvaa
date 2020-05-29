@@ -187,6 +187,7 @@ pInst pc = pWhiteSpace >> body
               --  LOP3.LUT             R15, R16, R15,         RZ, 0xfc, !PT  {!2}; // synthetic old form
               --  LOP3.(s0|s1)         R15, R16, R15,         RZ, 0xfc, !PT {!1}; // examples/sm_75/samples\BlackScholes.sass:1220
               --  LOP3.(s0&s1)    P2,  RZ,  R35, 0x7fffffff,  RZ, 0xc0, !PT {!4,Y}; // examples/sm_75/samples\bilateral_kernel.sass:1557
+              --  LOP3.LUT.PAND R15 ...
               dst_pred <- P.option [] $ P.try $ do
                 p <- pDstP <* pSymbol ","
                 return [p]

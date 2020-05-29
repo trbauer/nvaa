@@ -230,42 +230,49 @@ mkExe fp
 mkExe fp = fp
 #endif
 
+
+runCudaTool :: Opts -> String -> [String] -> IO String
+runCudaTool os tool args = do
+  (ec,out,err) <- runCudaToolWithExitCode os tool args
+  case ec of
+    ExitFailure ex_val -> do
+      fatal $ labelLines ("[" ++ mkExe tool ++ "] ") $
+        err ++ out ++ "\n" ++ "[exited " ++ show ex_val ++ "]"
+    ExitSuccess -> do
+      unless (null err) $
+        hPutStrLn stderr $
+          unlines (map (\ln -> "[" ++ mkExe tool ++ "] " ++ ln) (lines err))
+      return out
+
+runCudaToolWithExitCode :: Opts -> String -> [String] -> IO (ExitCode,String,String)
+runCudaToolWithExitCode os tool args = do
+  tool_exe <- findCudaTool os (mkExe tool)
+  debugLn os $ "% " ++ tool_exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
+  r@(ec,_,_) <- readProcessWithExitCode tool_exe args ""
+  debugLn os $ "  ==> " ++ show ec
+  return r
+
+
+runCudaToolToHandle :: Opts -> String -> [String] -> Handle -> IO ()
+runCudaToolToHandle os tool args h_out = do
+  tool_exe <- findCudaTool os (mkExe tool)
+  debugLn os $ "% " ++ tool_exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
+  ph <- runProcess tool_exe args Nothing Nothing Nothing (Just h_out) (Just stderr)
+  ec <- waitForProcess ph
+  debugLn os $ "  ==> " ++ show ec
+  case ec of
+    ExitFailure ex_val -> do
+      fatal $ labelLines ("[" ++ tool_exe ++ "] ") $ "[exited " ++ show ex_val ++ "]"
+    ExitSuccess -> return ()
+
+
+labelLines :: String -> String -> String
+labelLines pfx = unlines . map (pfx++) . lines
+
+
 getSubPaths :: FilePath -> IO [FilePath]
 getSubPaths dir =
   reverse .
     map (dir </>) .
       filter ((/=".") . take 1) <$> getDirectoryContents dir
 
-runCudaTool :: Opts -> String -> [String] -> IO String
-runCudaTool os tool args = do
-  tool_exe <- findCudaTool os (mkExe tool)
-  execProcess os tool_exe args
-
-runCudaToolWithExitCode :: Opts -> String -> [String] -> IO (ExitCode,String,String)
-runCudaToolWithExitCode os tool args = do
-  tool_exe <- findCudaTool os (mkExe tool)
-  execProcessWithExitCode os tool_exe args
-
-execProcess :: Opts -> FilePath -> [String] -> IO String
-execProcess os exe args = do
-  (ec,out,err) <- execProcessWithExitCode os exe args
-  case ec of
-    ExitFailure ex_val -> do
-      let lbl = "[" ++ dropExtension (takeFileName exe) ++ "] "
-      fatal $ labelLines lbl $
-        err ++ out ++ "\n" ++ "[exited " ++ show ex_val ++ "]"
-    ExitSuccess -> do
-      unless (null err) $
-        hPutStrLn stderr $
-          unlines (map (\ln -> "[" ++ dropExtension (takeFileName exe) ++ "] " ++ ln) (lines err))
-      return out
-
-execProcessWithExitCode :: Opts -> FilePath -> [String] -> IO (ExitCode,String,String)
-execProcessWithExitCode os exe args = do
-  debugLn os $ "% " ++ exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
-  ret@(ec,out,err) <- readProcessWithExitCode exe args ""
-  debugLn os $ "% " ++ show ec
-  return ret
-
-labelLines :: String -> String -> String
-labelLines pfx = unlines . map (pfx++) . lines

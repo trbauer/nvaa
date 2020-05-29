@@ -172,13 +172,12 @@ eInst i = enc
             "LDG" -> eLD
             "LDL" -> eLD
             "LDS" -> eLD
+            "LOP3" -> eLOP3
             "NOP" -> do
               eField fOPCODE 0x118
               eRegFile False 0x4
               ePredication
               return ()
-            "LOP3" -> do
-              eLOP3
             s -> eFatal $ "unsupported operation"
           eDepInfo (iDepInfo i)
 
@@ -320,15 +319,17 @@ eInst i = enc
         eSrc0R :: Src -> E ()
         eSrc0R = eSrc_R 0 (Just fSRC0_NEG,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
         -- e.g. .U32 of IMAD overlaps Src0.Negated
-        -- "NN" means no negation
-        eSrc0R_NN :: Src -> E ()
+        --
+        eSrc0R_NN :: Src -> E () -- NN: no negation
         eSrc0R_NN = eSrc_R 0 (Nothing,Just fSRC0_ABS,fSRC0_REUSE,fSRC0_REG)
-        eSrc0R_NNA :: Src -> E ()
+        eSrc0R_NNA :: Src -> E () -- NNA: no negation or abs
         eSrc0R_NNA = eSrc_R 0 (Nothing,Nothing,fSRC0_REUSE,fSRC0_REG)
+        --
         eSrc1R :: Src -> E ()
         eSrc1R = eSrc_R 1 (Just fSRC1_NEG,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
-        eSrc1R_NNA :: Src -> E ()
+        eSrc1R_NNA :: Src -> E () -- NN: no negation or abs
         eSrc1R_NNA = eSrc_R 1 (Nothing,Just fSRC1_ABS,fSRC1_REUSE,fSRC1_REG)
+        --
         eSrc2R_NA :: Src -> E ()
         eSrc2R_NA = eSrc_R 2 (Just fSRC2_NEG,Nothing,fSRC2_REUSE,fSRC2_REG)
         eSrc2R_NNA :: Src -> E ()
@@ -343,6 +344,12 @@ eInst i = enc
           eEncode fSRC_UREG ur
         eSrc1UR_NN :: Src -> E ()
         eSrc1UR_NN = eSrcUR 1 (fSRC1_UREG,Nothing,Nothing)
+        eSrc1UR_NNA :: Src -> E ()
+        eSrc1UR_NNA (Src_UR ms ur) = do
+          when (msEmpty /= ms) $
+            eFatal $ "malformed IR: Src1 forbids modifiers"
+          eEncode fSRC1_UREG ur
+
         eSrc2UR_NN :: Src -> E ()
         eSrc2UR_NN = eSrcUR 2 (fSRC2_UREG,Nothing,Nothing) -- still targets [37:32] (just changes fName)
 
@@ -532,11 +539,28 @@ eInst i = enc
           ePredicationSrc fIADD3_X_SRCPRED3 ext_pred1
           return ()
 
+
         eLOP3 :: E ()
         eLOP3 = do
           eField fOPCODE 0x012
+          --
+          let fLOP3_PAND :: Field
+              fLOP3_PAND = fb "Lop3CombineFunc" 80 ".PAND"
+          eEncode fLOP3_PAND (iHasInstOpt InstOptPAND i)
+          --
           ePredication
-          eDstRegR
+          --
+          let fLOP3_DST_PRED :: Field
+              fLOP3_DST_PRED = fPREG "Dst.PReg" 81
+          --
+          case iDsts i of
+            [DstP pr,DstR r] -> do
+              eEncode fLOP3_DST_PRED pr
+              eEncode fDST_REG r
+            [DstR r] -> do
+              eEncode fLOP3_DST_PRED PT
+              eEncode fDST_REG r
+            _ -> eFatal "malformed IR: expected rdst or (pdst, rdst)"
           --
           when (length (iSrcs i) /= 4) $
             eFatal "malformed IR: expected 4 srcs"
@@ -557,12 +581,28 @@ eInst i = enc
               eRegFile False 0x1
               eSrc1R_NNA s1
               eSrc2R_NNA s2
+            [s1@(SrcI32 imm),s2@(Src_R _ _)] -> do
+              eRegFile False 0x4
+              eField     fSRC1_IMM (fromIntegral imm)
+              eSrc2R_NNA  s2
             [s1@(SrcCon _ six _),s2@(Src_R _ _)] -> do
               let is_ind = case six of {SurfReg _ -> True; _ -> False}
               eRegFile is_ind 0x5
-              eSrc1C s1
-              eSrc2R_NA s2
-            _ -> eFatal "malformed IR: src0/src1 should be RR, RC, RCx, RI, or RU"
+              eSrc1C    s1
+              eSrc2R_NNA s2
+            [s1@(Src_UR _ _),s2@(Src_R _ _)] -> do
+              eRegFile True 0x6
+              eSrc1UR_NNA s1
+              eSrc2R_NNA s2
+            _ -> eFatal "malformed IR: src1/src2 should be RR, RC, RCx, RI, or RU"
+          --
+          let fLOP3_SRC4_PRED :: Field
+              fLOP3_SRC4_PRED = fPREDSRC "Src4.Pred" 87
+          case iSrcPreds i of
+            [] -> ePredicationSrc fLOP3_SRC4_PRED (PredP True PT)
+            [pr] -> ePredicationSrc fLOP3_SRC4_PRED pr
+            _ -> eFatal "malformed IR: wrong number of predicate sources"
+
 
 
 
@@ -1106,7 +1146,7 @@ fSRC1_NEG = fNEG 1 63
 
 
 fSRC2_REG :: Field
-fSRC2_REG = fR "Src0.Reg" 64
+fSRC2_REG = fR "Src2.Reg" 64
 fSRC2_UREG :: Field
 fSRC2_UREG = fSRC1_UREG{fName = "Src2.UReg"}
 --
@@ -1152,8 +1192,8 @@ fDEPINFO_YIELD :: Field
 fDEPINFO_YIELD = after fDEPINFO_STALLS "DepInfo.NoYield" 1 $ -- [109]
   \val ->
     if val == 1
-      then "no yield: prefer same warp"
-      else "yield: prefer another warp"
+      then "prefer same warp"
+      else "prefer another warp"
 fDEPINFO_WRBAR :: Field
 fDEPINFO_WRBAR = fRWBAR fDEPINFO_YIELD "DepInfo.WrBar" -- [112:110]
 fDEPINFO_RDBAR :: Field
@@ -1264,7 +1304,7 @@ fLDST_DATA_TYPE = f "LDST.Data.Type" 73 3 $ \_ val ->
     1 -> ".S8"
     2 -> ".U16"
     3 -> ".S16"
-    4 -> "(.32)"
+    4 -> "[.32]"
     5 -> ".64"
     6 -> ".128"
     7 -> ".U.128" -- forbidden in LDS/STS
@@ -1300,21 +1340,21 @@ fLD_ORDERING :: Field
 fLD_ORDERING = f "LD.Ordering" 79 2 $ \_ val ->
   case val of
     0 -> ".CONSTANT"
-    1 -> "(default)"
+    1 -> "[default]"
     2 -> ".STRONG"
     3 -> ".MMIO"
 fST_ORDERING :: Field
 fST_ORDERING = f "ST.Ordering" 79 2 $ \_ val ->
   case val of
     0 -> ".INVALID0"
-    1 -> "(default)"
+    1 -> "[default]"
     2 -> ".STRONG"
     3 -> ".MMIO"
 fLDST_CACHING :: Field
 fLDST_CACHING = f "LDST.Caching" 84 3 $ \_ val ->
   case val of
     0 -> ".EF (evict first)"
-    1 -> "(default)"
+    1 -> "[default]"
     2 -> ".EL (evict last)"
     3 -> ".LU (last use / invalidate after read)"
     4 -> ".EU (evict ...)"
@@ -1338,10 +1378,10 @@ fISETP_SRC4_PRED :: Field
 fISETP_SRC4_PRED = fPREDSRC "ISETP.Src4.PredExpr" 68
 
 fISETP_EX :: Field
-fISETP_EX = fb "ISETP.IsU32" 72 ".EX" -- 64b
+fISETP_EX = fb "ISETP.IsEX" 72 ".EX" -- 64b
 
 fISETP_U32 :: Field
-fISETP_U32 = fl "ISETP.IsU32" 73 1 [".U32","(.S32)"]
+fISETP_U32 = fl "ISETP.IsU32" 73 1 [".U32","[.S32]"]
 
 fISETP_COMBINING_FUNCTION :: Field
 fISETP_COMBINING_FUNCTION = fl "ISETP.CombiningFunction" 74 2 [".AND",".OR",".XOR",".INVALID3"]

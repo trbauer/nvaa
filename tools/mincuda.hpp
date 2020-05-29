@@ -2,8 +2,10 @@
 #define MIN_CUDA
 
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <random>
+#include <ostream>
 #include <sstream>
 #include <string>
 
@@ -228,6 +230,17 @@ template <typename R>
 static init<R> init_random(R _rnd_lo, R _rnd_hi) {return init<R>(_rnd_lo,_rnd_hi);}
 
 
+template <typename T> static inline const char *type_name() {return "???";}
+template <> static inline const char *type_name<int8_t>() {return "int8_t";}
+template <> static inline const char *type_name<int16_t>() {return "int16_t";}
+template <> static inline const char *type_name<int32_t>() {return "int32_t";}
+template <> static inline const char *type_name<int64_t>() {return "int64_t";}
+template <> static inline const char *type_name<uint8_t>() {return "uint8_t";}
+template <> static inline const char *type_name<uint16_t>() {return "uint16_t";}
+template <> static inline const char *type_name<uint32_t>() {return "uint32_t";}
+template <> static inline const char *type_name<uint64_t>() {return "uint64_t";}
+template <> static inline const char *type_name<float>() {return "float";}
+template <> static inline const char *type_name<double>() {return "double";}
 
 template <typename T>
 class umem // "unified memory"
@@ -260,15 +273,70 @@ public:
 
   template <typename R>
   void apply(const init<R> &i) {
-    i.apply<T>(mem,elems);
+    i.apply<T>(mem, elems);
   }
-  size_t size() const{return elems;}
+  size_t size() const {return elems;}
 
   // elements
   operator       T *()       {return mem;}
   operator const T *() const {return mem;}
         T &operator[](size_t ix)       {return mem[ix];}
   const T &operator[](size_t ix) const {return mem[ix];}
+
+  template <typename T>
+  static void format_elem(std::ostream &os, T t, int prec) {
+    if (prec >= 0)
+      os << std::fixed  << std::setprecision(prec) << t;
+    else
+      os << t;
+  }
+
+  template <>
+  static void format_elem(std::ostream &os, uint16_t t, int prec) {
+    os << "0x" << fmtHexDigits(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, uint32_t t, int prec) {
+    os << "0x" << fmtHexDigits(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, uint64_t t, int prec) {
+    os << "0x" << fmtHexDigits(t);
+  }
+
+  template <typename T>
+  static std::string fmtHexDigits(T t, int cw = -1) {
+    cw = cw <= 0 ? 2*sizeof(t) : cw;
+    std::stringstream ss;
+    ss << std::setfill('0') << std::setw(cw) << std::hex << t;
+    return ss.str();
+  }
+
+  void str(std::ostream &os = std::cout, int elems_per_line = -1, int prec = -1) const {
+    os << type_name<T>() << "[" << elems << "]: " <<
+      "0x" << fmtHexDigits<uint64_t>((uintptr_t)mem) << ":\n";
+    elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
+    prec = prec < 0 ? 3 : prec;
+    int addr_size =
+      sizeof(T)*elems <= 0xFFFFull ? 4 :
+      sizeof(T)*elems <= 0xFFFFFFFFull ? 8 :
+      -1;
+    size_t i = 0;
+    while (i < elems) {
+      os << fmtHexDigits<uint64_t>(i, addr_size) << ": ";
+      for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
+        os << "  ";
+        format_elem(os, mem[i], prec);
+        os.flush();
+      }
+      os << "\n";
+    }
+  }
+  std::string str(int elems_per_line = -1, int prec = -1) const {
+    std::stringstream ss;
+    formt(os, elems_per_line, prec);
+    return ss.str();
+  }
 }; // struct umem
 
 
