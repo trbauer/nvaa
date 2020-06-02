@@ -153,11 +153,11 @@ pInst pc = pWhiteSpace >> body
             Op "IADD3" -> do
               dst <- pDst <* pSymbol ","
               (p0,p1) <-
-                P.option (sRC_PT,sRC_PT) $ P.try $ do
-                  p0 <- pSrcP <* pSymbol ","
-                  p1 <- P.option sRC_PT (P.try $ pSrcP <* pSymbol ",")
+                P.option (dST_PT,dST_PT) $ P.try $ do
+                  p0 <- pDstP <* pSymbol ","
+                  p1 <- P.option dST_PT (P.try $ pDstP <* pSymbol ",")
                   return (p0,p1)
-              pIntTernary loc prd op ios [dst] (resolveds [p0, p1])
+              pIntTernary loc prd op ios [dst,p0,p1] []
 
             Op "IMAD" -> do
               dsts <- pDsts op <* pSymbol ","

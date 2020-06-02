@@ -1,15 +1,19 @@
-#ifndef MIN_CUDA
-#define MIN_CUDA
+#ifndef MINCU_HPP
+#define MINCU_HPP
 
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+// #include <memory>
 #include <random>
 #include <ostream>
 #include <sstream>
 #include <string>
 
 #include <cuda_runtime_api.h>
+
+namespace mincu
+{
 
 template <typename...Ts>
 static void format_to(std::stringstream &os) { }
@@ -212,6 +216,7 @@ struct init {
     case init_type::NONE:
       return;
     case init_type::CONST:
+      // TODO: use device kernel
       for (size_t k = 0; k < elems; k++)
         vals[k] = (T)val_const;
       return;
@@ -242,46 +247,89 @@ template <> static inline const char *type_name<uint64_t>() {return "uint64_t";}
 template <> static inline const char *type_name<float>() {return "float";}
 template <> static inline const char *type_name<double>() {return "double";}
 
-template <typename T>
-class umem // "unified memory"
-{
-  T            *mem;
-public:
-  const size_t  elems;
 
+struct umem_alloc {
+  void *mem;
+  size_t mem_size;
+
+  umem_alloc(size_t size) : mem_size(size) {
+    // std::cout << "allocating " << size << "B\n";
+    CUDA_API(cudaMallocManaged,(void **)&mem, size);
+  }
+  ~umem_alloc() {
+    if (mem) {
+      CUDA_API(cudaFree, mem);
+      mem = nullptr;
+      mem_size = 0x0;
+    }
+  }
+};
+
+template <typename E>
+class umem // unified memory buffer
+{
+  // FIXME: we need to reset the value if a dispatch fails
+  std::shared_ptr<umem_alloc> ptr;
+  size_t                      elems;
+
+  E *get_ptr() {
+    return const_cast<E *>(get_cptr());
+  }
+  const E *get_cptr() const {
+    return (const E *)ptr.get()->mem;
+  }
+
+public:
   umem(size_t _elems)
     : elems(_elems)
+    , ptr(std::make_shared<umem_alloc>(_elems*sizeof(E)))
   {
-    CUDA_API(cudaMallocManaged,(void **)&mem, _elems*sizeof(*mem));
   }
+  umem(std::shared_ptr<umem_alloc> &_ptr, size_t elems)
+    : elems(_elems)
+    , ptr(_ptr)
+  {
+  }
+
   template <typename R>
   umem(size_t _elems, const init<R> &i)
-    : umem<T>(_elems)
+    : umem<E>(_elems)
   {
     apply<R>(i);
   }
   ~umem() {
-    if (mem) {
-      CUDA_API(cudaFree, mem);
-      mem = nullptr;
-    }
+    // destructs ptr, which deallocs umem_alloc, if it's the last ref
   }
 
-  void prefetch() const {
-    CUDA_API(cudaMemPrefetchAsync, mem, elems*sizeof(*mem));
+  size_t size() const {return elems;}
+
+  // template <typename U>
+  // umem<U> as() {
+  //   return umem<U>(ptr, elems*sizeof(E)/sizeof(U));
+  // }
+
+  void prefetch_to_device() const {
+    CUDA_API(cudaMemPrefetchAsync, get_cptr(), 0, elems*sizeof(E));
   }
+  void prefetch_to_host() const {
+    CUDA_API(cudaMemPrefetchAsync, get_cptr(), cudaCpuDeviceId, elems*sizeof(E));
+  }
+
 
   template <typename R>
   void apply(const init<R> &i) {
-    i.apply<T>(mem, elems);
+    i.apply<E>(get_ptr(), size());
+    // prefetch_to_device();
   }
-  size_t size() const {return elems;}
 
-  // elements
-  operator       T *()       {return mem;}
-  operator const T *() const {return mem;}
-        T &operator[](size_t ix)       {return mem[ix];}
-  const T &operator[](size_t ix) const {return mem[ix];}
+
+   // elements
+   operator       E *()       {return get_ptr();}
+   operator const E *() const {return get_ptr();}
+   //      E &operator[](size_t ix)       {return get_ptr()[ix];}
+   //const E &operator[](size_t ix) const {return get_ptr()[ix];}
+
+
 
   template <typename T>
   static void format_elem(std::ostream &os, T t, int prec) {
@@ -303,30 +351,54 @@ public:
   static void format_elem(std::ostream &os, uint64_t t, int prec) {
     os << "0x" << fmtHexDigits(t);
   }
+  template <>
+  static void format_elem(std::ostream &os, int16_t t, int prec) {
+    os << fmtDec(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, int32_t t, int prec) {
+    os << fmtDec(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, int64_t t, int prec) {
+    os << fmtDec(t);
+  }
+
 
   template <typename T>
   static std::string fmtHexDigits(T t, int cw = -1) {
     cw = cw <= 0 ? 2*sizeof(t) : cw;
     std::stringstream ss;
-    ss << std::setfill('0') << std::setw(cw) << std::hex << t;
+    ss << std::setw(cw) << std::uppercase << std::setfill('0')
+      << std::hex << t;
+    return ss.str();
+  }
+  template <typename T>
+  static std::string fmtDec(T t, int cw = -1) {
+    cw = cw <= 0 ? 2*sizeof(t) : cw;
+    std::stringstream ss;
+    ss << std::setw(cw) << std::dec << t;
     return ss.str();
   }
 
-  void str(std::ostream &os = std::cout, int elems_per_line = -1, int prec = -1) const {
-    os << type_name<T>() << "[" << elems << "]: " <<
-      "0x" << fmtHexDigits<uint64_t>((uintptr_t)mem) << ":\n";
+  void str(
+    std::ostream &os = std::cout,
+    int elems_per_line = -1, int prec = -1) const
+  {
+    os << type_name<E>() << "[" << elems << "]: " <<
+      "0x" << fmtHexDigits<uint64_t>((uintptr_t)get_cptr()) << ":\n";
     elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
     prec = prec < 0 ? 3 : prec;
     int addr_size =
-      sizeof(T)*elems <= 0xFFFFull ? 4 :
-      sizeof(T)*elems <= 0xFFFFFFFFull ? 8 :
+      sizeof(E)*elems <= 0xFFFFull ? 4 :
+      sizeof(E)*elems <= 0xFFFFFFFFull ? 8 :
       -1;
     size_t i = 0;
     while (i < elems) {
       os << fmtHexDigits<uint64_t>(i, addr_size) << ": ";
       for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
         os << "  ";
-        format_elem(os, mem[i], prec);
+        format_elem(os, get_cptr()[i], prec);
         os.flush();
       }
       os << "\n";
@@ -377,5 +449,6 @@ OPERATORS(int)
 */
 
 
+} // namespace mincu::
 
 #endif

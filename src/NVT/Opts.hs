@@ -17,7 +17,8 @@ data Opts =
   , oTextOnly :: !Bool
   , oRDC :: !Bool
   , oNoBits :: !Bool
-  , oExtraArgs :: [String]
+  , oStdinIs :: !StdinIs
+  , oExtraArgs :: ![String]
   } deriving Show
 dft_opts :: Opts
 dft_opts =
@@ -34,10 +35,20 @@ dft_opts =
   , oTextOnly = False
   , oRDC = False
   , oNoBits = False
+  , oStdinIs = StdinIsUnknown
   , oExtraArgs = []
   }
+
+data StdinIs =
+    StdinIsUnknown
+  | StdinIsCu
+  | StdinIsPtx
+  | StdinIsSass
+  deriving (Show,Eq)
+
 dft_opts_75 :: Opts
 dft_opts_75 = dft_opts{oArch = "sm_75"}
+
 
 --------------
 debugLn :: Opts -> String -> IO ()

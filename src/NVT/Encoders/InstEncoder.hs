@@ -392,7 +392,7 @@ eInst i = enc
                 | otherwise = 0x024
           eField fOPCODE encoding
           ePredication
-          eEncode fINSTOPT_X (iHasInstOpt InstOptX i)
+          eEncode fINT_INSTOPT_X (iHasInstOpt InstOptX i)
           eDstRegR
           eEncode fIMAD_SIGNED (not (iHasInstOpt InstOptU32 i))
           -- this might be a predicate destination
@@ -467,27 +467,27 @@ eInst i = enc
         eIADD3 :: E ()
         eIADD3 = do
           let eIADD3_Src0R :: Src -> E ()
-              eIADD3_Src0R = eSrc_R 0 (Just fIADD3_SRC0_NEG,Nothing,fSRC0_REUSE,fSRC0_REG)
+              eIADD3_Src0R =
+                eSrc_R 0 (Just fIADD3_SRC0_NEG,Nothing,fSRC0_REUSE,fSRC0_REG)
 
           eField fOPCODE 0x010
           ePredication
-          eDstRegR
-          eInstOpt fINSTOPT_X InstOptX
-          -- the first two operands may be predicate sources,
-          -- if they are omitted, we encode PT (0x7); neither has a sign
-          (p0,p1,srcs) <-
-            case iSrcs i of
-              (Src_P p0_ms p0:Src_P p1_ms p1:sfx)
-                | ModLNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
-                | ModLNEG`msElem`p1_ms -> eFatal "predicate negation not support on extra predicate source (1)"
-                | otherwise -> return (p0,p1,sfx)
-              (Src_P p0_ms p0:sfx)
-                | ModLNEG`msElem`p0_ms -> eFatal "predicate negation not support on extra predicate source (0)"
-                | otherwise -> return (p0,PT,sfx)
-              sfx -> return (PT,PT,sfx)
-          eEncode fIADD3_SRCPRED0 p0
-          eEncode fIADD3_SRCPRED1 p1
-          case srcs of
+
+          case iDsts i of
+            [DstR r] -> do
+              eEncode fDST_REG r
+              eEncode fIADD3_CARRYOUT0 PT
+              eEncode fIADD3_CARRYOUT1 PT
+            [DstR r,DstP p0,DstP p1] -> do
+              eEncode fDST_REG r
+              eEncode fIADD3_CARRYOUT0 p0
+              eEncode fIADD3_CARRYOUT1 p1
+            [_] -> eFatal "wrong kind of destination operand"
+            _ -> eFatal "wrong number of destination operands"
+
+          eInstOpt fINT_INSTOPT_X InstOptX
+
+          case iSrcs i of
             [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_R _ _)] -> do
               -- iadd3_noimm__RRR_RRR
               eRegFile False 0x1
@@ -522,7 +522,7 @@ eInst i = enc
             _ -> eFatal "wrong number of operands to IADD3"
           -- these are the extra source predicate expressions
           -- for the .X case
-          (ext_pred0,ext_pred1) <- do
+          (carry_in0,carry_in1) <- do
             if iHasOpt InstOptX then
               case iSrcPreds i of
                 [sp0,sp1] -> return (sp0,sp1)
@@ -535,8 +535,8 @@ eInst i = enc
                 -- _ -> eFatal "IADD3 takes exactly two extra predicates"
                 [] -> return (PredP True PT,PredP True PT)
                 -- _ -> eFatal "IADD3 without .X forbids extra predicates"
-          ePredicationSrc fIADD3_X_SRCPRED2 ext_pred0
-          ePredicationSrc fIADD3_X_SRCPRED3 ext_pred1
+          ePredicationSrc fIADD3_X_CARRYIN0 carry_in0
+          ePredicationSrc fIADD3_X_CARRYIN1 carry_in1
           return ()
 
 
@@ -1121,8 +1121,7 @@ fSRC0_NEG :: Field
 fSRC0_NEG = fNEG 0 73
 -- WTF!?! IADD3 and IMAD use different source 0 negation
 fIADD3_SRC0_NEG :: Field
-fIADD3_SRC0_NEG =
-  fb ("IADD3.Src0.Negated") 72 "-(..)"
+fIADD3_SRC0_NEG = fb ("IADD3.Src0.Negated") 72 "-(..)"
 
 
 fSRC1_REG :: Field
@@ -1239,8 +1238,8 @@ fMOV_SRC_CHEN4 = f "Mov.ChEn4" 72 4 fmt
 fS2R_SRC0 :: Field
 fS2R_SRC0 = fi "S2R.Src0" 72 8
 
-fINSTOPT_X :: Field
-fINSTOPT_X = fi "IADD3.X" 74 1
+fINT_INSTOPT_X :: Field
+fINT_INSTOPT_X = fi "INT.X" 74 1
 
 -- IADD3 R4, P0, P5, R24, 0x18, RZ   000FE40007D1E0FF`0000001818047810
 --           ^^  ^^ these
@@ -1250,28 +1249,25 @@ fINSTOPT_X = fi "IADD3.X" 74 1
 -- one solution is to always print the first (as PT)
 -- if the second is set (not PT)
 --
--- I am starting to wonder if these are srcs or dests;
--- since they have no signs and reject PT from syntax (hide),
--- it's fishy
 fINT_SRCPRED0 :: Field -- this appears in IMAD and IADD3 (no sign)
 fINT_SRCPRED0 = fPREG "INT.SrcPred0" 81
 
 fIMAD_X_SRCPRED1 :: Field
-fIMAD_X_SRCPRED1 = fPREDSRC "IADD3.SrcPred1" 87
+fIMAD_X_SRCPRED1 = fPREDSRC "IMAD.SrcPred1" 87
 
 
-fIADD3_SRCPRED0 :: Field
-fIADD3_SRCPRED0 = fPREG "IADD3.SrcPred0" 81
-fIADD3_SRCPRED1 :: Field
-fIADD3_SRCPRED1 = fPREG "IADD3.SrcPred1" 84
+fIADD3_CARRYOUT0 :: Field
+fIADD3_CARRYOUT0 = fPREG "IADD3.CarryOut0" 81
+fIADD3_CARRYOUT1 :: Field
+fIADD3_CARRYOUT1 = fPREG "IADD3.CarryOut1" 84
 
-fIADD3_X_SRCPRED2 :: Field -- yep, the first (syntactically) goes in higher bits
-fIADD3_X_SRCPRED2 = fPREDSRC "IADD3.X.SrcPred2" 87
-fIADD3_X_SRCPRED3 :: Field -- yep, 77, not 87
-fIADD3_X_SRCPRED3 = fPREDSRC "IADD3.X.SrcPred3" 77
+fIADD3_X_CARRYIN0 :: Field -- yep, the first (syntactically) goes in higher bits
+fIADD3_X_CARRYIN0 = fPREDSRC "IADD3.X.CarryIn0" 87
+fIADD3_X_CARRYIN1 :: Field -- yep, 77, not 87
+fIADD3_X_CARRYIN1 = fPREDSRC "IADD3.X.CarryIn1" 77
 
 fIMAD_SIGNED :: Field
-fIMAD_SIGNED = fl "IMAD.Signed" 73 1 [".U32","(.S32)"]
+fIMAD_SIGNED = fl "IMAD.Signed" 73 1 [".U32","[.S32]"]
 
 -------------------------------------------------------------------------------
 fLDST_ADDR_IMMOFF24 :: Field

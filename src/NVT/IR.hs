@@ -179,8 +179,6 @@ pattern DstUP up = Dst (RegUP up)
 instance Syntax Dst where
   format (Dst r) = format r
 
-
-
 data Src =
     SrcReg !ModSet !Reg
   | SrcCon !ModSet !Surf !Int
@@ -205,18 +203,32 @@ sRC_P0 :: Src
 sRC_P0 = SrcReg msEmpty (RegP P0)
 sRC_P1 :: Src
 sRC_P1 = SrcReg msEmpty (RegP P1)
+sRC_P2 :: Src
+sRC_P2 = SrcReg msEmpty (RegP P2)
+sRC_P3 :: Src
+sRC_P3 = SrcReg msEmpty (RegP P3)
+--
+sRC_NPT :: Src
+sRC_NPT = SrcReg (msSingleton ModLNEG) (RegP PT)
 sRC_NP0 :: Src
 sRC_NP0 = SrcReg (msSingleton ModLNEG) (RegP P0)
 sRC_NP1 :: Src
 sRC_NP1 = SrcReg (msSingleton ModLNEG) (RegP P1)
+sRC_NP2 :: Src
+sRC_NP2 = SrcReg (msSingleton ModLNEG) (RegP P2)
+sRC_NP3 :: Src
+sRC_NP3 = SrcReg (msSingleton ModLNEG) (RegP P3)
+--
 sRC_RZ :: Src
 sRC_RZ = SrcReg msEmpty (RegR RZ)
 sRC_URZ :: Src
 sRC_URZ = SrcReg msEmpty (RegUR URZ)
+--
 sRC_SR_CTAID_X :: Src
 sRC_SR_CTAID_X = SrcReg msEmpty (RegSR SR_CTAID_X)
 sRC_SR_TID_X :: Src
 sRC_SR_TID_X = SrcReg msEmpty (RegSR SR_TID_X)
+--
 sRC_IMM_0 :: Src
 sRC_IMM_0 = SrcI32 0
 sRC_IMM_1 :: Src
@@ -224,21 +236,31 @@ sRC_IMM_1 = SrcI32 1
 sRC_C00 :: Src
 sRC_C00 = SrcCon msEmpty (SurfImm 0) 0
 
+dST_PT :: Dst
+dST_PT = DstP PT
 
 sHARED_DSTS :: DM.Map Dst Dst
 sHARED_DSTS = DM.fromList $ map (\x -> (x,x)) $
   [
     DstP P0
   , DstP P1
+  , DstP P2
+  , DstP P3
+  , DstP PT
   --
   , DstR R0
   , DstR R1
   , DstR R2
   , DstR R3
   , DstR R4
+  , DstR R5
+  , DstR R6
+  , DstR R7
   --
   , DstUR UR0
   , DstUR UR1
+  , DstUR UR2
+  , DstUR UR3
   ]
 
 dstIntern :: Dst -> Dst
@@ -252,15 +274,20 @@ internLookup m a =
     Just a1 -> a1
     Nothing -> a
 --
--- TODO: use a tree
 sHARED_SRCS :: DM.Map Src Src
 sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   [
     sRC_PT
   , sRC_P0
   , sRC_P1
+  , sRC_P2
+  , sRC_P3
+  --
+  , sRC_NPT
   , sRC_NP0
   , sRC_NP1
+  , sRC_NP2
+  , sRC_NP3
   --
   , sRC_RZ
   , SrcReg msEmpty (RegR R0)
@@ -268,21 +295,28 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   , SrcReg msEmpty (RegR R2)
   , SrcReg msEmpty (RegR R3)
   , SrcReg msEmpty (RegR R4)
+  , SrcReg msEmpty (RegR R5)
+  , SrcReg msEmpty (RegR R6)
+  , SrcReg msEmpty (RegR R7)
   --
   , sRC_URZ
   , SrcReg msEmpty (RegUR UR0)
   , SrcReg msEmpty (RegUR UR1)
+  , SrcReg msEmpty (RegUR UR2)
+  , SrcReg msEmpty (RegUR UR3)
   --
   , SrcI32 0xFFFFFFFF
   , sRC_IMM_0
   , sRC_IMM_1
-  , SrcI32 0x2
-  , SrcI32 0x4
-  , SrcI32 0x8
+  , SrcI32 0x02
+  , SrcI32 0x04
+  , SrcI32 0x08
   , SrcI32 0x10
   --
   , sRC_SR_TID_X
   , sRC_SR_CTAID_X
+  --
+  , sRC_C00
   ]
 
 data Imm =

@@ -18,6 +18,7 @@ import System.Process
 import System.Exit
 import System.Environment(lookupEnv)
 import System.IO
+import Text.Printf
 import qualified Data.ByteString as S
 
 -------------------------------------------------------------------------------
@@ -66,7 +67,7 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Translator " ++ nvt_version) 0
             [ -- arguments
                 PA.arg spec "PATH"
                   "The file to read from" ""
-                  (\f o -> (o {oInputFile = f}))
+                  (\f o -> (o {oInputFile = f})) # PA.OptAttrAllowUnset
             ]
 nvt_version :: String
 nvt_version = "1.0.0"
@@ -94,9 +95,49 @@ findEnvInfo :: Opts -> IO EnvInfo
 findEnvInfo = ...
 -}
 
+getTemporaryFile :: String -> IO FilePath
+getTemporaryFile sfx = try 0
+  where try :: Int -> IO FilePath
+        try n = do
+          let fp = printf "%02d-" ++ sfx
+          z <- doesFileExist fp
+          if z then try (n+1)
+            else return fp
+
 runWithOpts :: Opts -> IO ()
-runWithOpts os = processFile (oInputFile os)
-  where processFile :: FilePath -> IO ()
+runWithOpts os
+  | null (oInputFile os) = getContents >>= processStdin (oStdinIs os)
+  | otherwise = processFile (oInputFile os)
+  where processStdin :: StdinIs -> String -> IO ()
+        processStdin stdin_fmt stdin_str
+          | stdin_fmt == StdinIsUnknown =
+              case inferStdin stdin_str of
+                StdinIsUnknown -> fatal "cannot infer stdin format"
+                x -> handleInpFmt x
+          | otherwise = handleInpFmt stdin_fmt
+          where handleInpFmt fmt =
+                  case fmt of
+                    StdinIsCu -> useTempFile "tmp.cu"
+                    StdinIsPtx -> useTempFile "tmp.ptx"
+                    StdinIsSass -> processSassToOutput stdin_str
+
+                useTempFile fp_sfx = do
+                 tmp_fp <- getTemporaryFile fp_sfx
+                 writeFile tmp_fp stdin_str
+                 runWithOpts (os{oInputFile = tmp_fp})
+                 removeFile tmp_fp
+
+        inferStdin :: String -> StdinIs
+        inferStdin stdin_str
+          | any (".headerflags"`isInfixOf`) pfx_lns = StdinIsSass
+          | any (".version"`isPrefixOf`) pfx_lns = StdinIsPtx
+          | any (".target"`isPrefixOf`) pfx_lns = StdinIsPtx
+          | any ("#include"`isPrefixOf`) pfx_lns = StdinIsCu
+          | any ("#define"`isPrefixOf`) pfx_lns = StdinIsCu
+          | otherwise = StdinIsUnknown
+          where pfx_lns = take 32 (lines stdin_str)
+
+        processFile :: FilePath -> IO ()
         processFile fp = do
           debugLn os $ show os
           case takeExtension fp of
@@ -104,7 +145,6 @@ runWithOpts os = processFile (oInputFile os)
             ".cubin" -> processCubinFile fp
             ".ptx" -> processPtxFile fp  -- (use NVCC)
             ".sass" -> processSassFile fp
-          -- TODO: support .ptx (ptx -> .cubin -> .nva)
           -- TODO: support .nva (ELF -> .cubin)
           -- TODO: figure out how to turn a .cubin into a .obj or .exe and run it
           --       is there an API to load a .cubin with?
@@ -171,10 +211,12 @@ runWithOpts os = processFile (oInputFile os)
           | null (oOutputFile os) = processSassIO stdout inp
           | otherwise = withFile (oOutputFile os) WriteMode $ \h -> processSassIO h inp
         processSassIO :: Handle -> String -> IO ()
-        processSassIO h_out =
-          if oSourceMapping os
-            then filterAssemblyWithInterleavedSrcIO (oNoBits os) h_out (oArch os)
-            else hPutStr h_out . filterAssembly (oNoBits os) (oArch os)
+        processSassIO h_out
+          | null (oArch os) = const $ fatal "--arch required for this mode"
+          | otherwise =
+            if oSourceMapping os
+              then filterAssemblyWithInterleavedSrcIO (oNoBits os) h_out (oArch os)
+              else hPutStr h_out . filterAssembly (oNoBits os) (oArch os)
 
         emitOutput :: String -> IO ()
         emitOutput

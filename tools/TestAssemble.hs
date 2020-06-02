@@ -1,3 +1,5 @@
+module TestAssemble where
+
 import NVT.RawInst
 
 import Analysis
