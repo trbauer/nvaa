@@ -44,7 +44,7 @@ int main(int argc, const char* argv[])
     std::string arg(argv[ai]);
     auto eq_ix = arg.find('=');
     std::string key = eq_ix != std::string::npos ?
-      arg.substr(eq_ix+1) : arg;
+      arg.substr(0,eq_ix+1) : arg;
     std::string val = eq_ix != std::string::npos ?
       arg.substr(eq_ix+1) : "";
 

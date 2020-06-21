@@ -5,7 +5,10 @@ import qualified NVT.Driver as D
 import qualified NVT.Opts as D
 
 import Control.Monad
+import Control.Concurrent
+import Control.Concurrent.MVar
 import Control.Exception
+import Data.IORef
 import Data.List
 import System.Directory
 import System.FilePath
@@ -29,8 +32,8 @@ main = do
 run :: [String] -> IO ()
 run as =
   case as of
-    ["samples"] -> collectSampleIsa "" D.dft_opts_75
-    ["libs"] -> collectLibrarySampleIsa "" D.dft_opts_75
+    ["samples"] -> collectSampleIsa "" D.dft_opts_80
+    ["libs"] -> collectLibrarySampleIsa "" D.dft_opts_80
     _ -> die "usage: collect (samples|libs)"
 
 
@@ -74,62 +77,115 @@ collectSampleIsa filter_str os_raw = body
           ss <- filterNonNvrtc <$> D.getSubPaths dir -- e.g. asyncAPI
           filterM doesDirectoryExist ss >>= walkSamples
 
+        clobber :: Bool
+        clobber = False
+
+        fail_fast :: Bool
+        fail_fast = False
+
+        parallelism :: Int
+        parallelism = 8
+
         walkSamples :: [FilePath] -> IO ()
         walkSamples [] = return ()
-        walkSamples (d:ds) = do
-          fs <- D.getSubPaths d
-          -- TODO: should also take .cpp and .c files that #include .cuh files
-          let cu_files = filter ((==".cu") . takeExtension) fs
-          walkCuFiles (filter (filter_str`isInfixOf`) cu_files)
-          walkSamples ds
+        walkSamples (d:ds)
+          | parallelism == 1 = do
+            putStrLn $ d
+            walkSample putStr d `catch` serialHandler
+            walkSamples ds
+          | otherwise = parallelWalk
+          where serialHandler :: SomeException -> IO ()
+                serialHandler se = do
+                  putStrLn $ "  ==> " ++ show se
+                  if fail_fast then throwIO se
+                    else putStrLn "continuing (fail_fast not set)"
 
-        walkCuFiles :: [FilePath] -> IO ()
-        walkCuFiles [] = return ()
-        walkCuFiles (src_cu_file:fs) = do
-          putStrLn src_cu_file
-          let output_no_ext = base_output_dir ++ "/" ++ dropExtension (takeFileName src_cu_file)
-          let sass_output = output_no_ext ++ ".sass"
-          let ptx_output = output_no_ext ++ ".ptx"
-          let cubin_output = output_no_ext ++ ".cubin"
+                parallelWalk :: IO ()
+                parallelWalk = do
+                  case splitAt parallelism ds of
+                    (ds_par,ds_sfx) -> do
+                      mapM_ (\d -> putStrLn ("spawning " ++ d ++ " ...")) ds_par
+                      iors <- sequence $ replicate (length ds_par) (newIORef [])
+                      let prs = map (\ior -> \msg -> modifyIORef ior (msg:)) iors
+                      mvs <- sequence $ replicate (length ds_par) newEmptyMVar
+                      let runOne (d_par,pr,mv) = do
+                            let childHandler :: SomeException -> IO ()
+                                childHandler se = do
+                                  pr $ "exiting on exception: " ++ show se
+                                  putMVar mv (Just se)
+                            forkIO $ do
+                              (walkSample pr d_par >> putMVar mv Nothing) `catch` childHandler
+
+                      mapM_ runOne (zip3 ds_par prs mvs)
+                      ses <- mapM takeMVar mvs
+                      forM_ (zip3 ds_par iors ses) $ \(d_par,ior,mse) -> do
+                        msgs <- concat . reverse <$> readIORef ior
+                        putStrLn d_par
+                        putStrLn msgs
+                        case mse of
+                          Just (SomeException se) -> serialHandler (SomeException se)
+                          Nothing -> return ()
+                      walkSamples ds_sfx
+
+        walkSample :: (String -> IO ()) -> FilePath -> IO ()
+        walkSample pr d = do
+          d_fs <- D.getSubPaths d
+          -- TODO: should also take .cpp and .c files that #include .cuh files
+          let cu_files = filter ((==".cu") . takeExtension) d_fs
+          mapM_ (walkCuFile pr) (filter (filter_str`isInfixOf`) cu_files)
           --
-          samples_inc_dir <- (++"\\common\\inc") <$> findCudaSamplesDir
-          --
-          let nvcc_os = os
-               { D.oOutputFile = sass_output
-               , D.oSaveCuBin = cubin_output
-               , D.oSavePtx = ptx_output
-               , D.oExtraArgs = ["-I"++samples_inc_dir]
-               , D.oInputFile = src_cu_file
-               }
-          let handler :: Bool -> SomeException -> IO ()
-              handler double_fault e
-                | "user interrupt" `isInfixOf` show e = do
-                  putStrLn $  "=== interrupt ==="
-                  throwIO e
-                --
-                -- | "requires separate compilation mode" `isInfixOf` show e && not (D.oRDC os) = do
-                | "ExitFailure" `isInfixOf` show e && not double_fault = do
-                -- D.runWithOpts will exit non-zero, the separate compilation mode
-                -- output goes to our stderr and it exits (which is an exception).
-                  putStrLn "  ====> re-trying with -rdc=true"
-                  D.runWithOpts
-                    nvcc_os{D.oRDC = True} `catch` handler True
-                | otherwise = do
-                  putStrLn "=== caught other exception ==="
-                  print e
-                  -- throwIO e
-                  return ()
-          --
-          D.runWithOpts nvcc_os `catch` handler False
-          -- copies the .cu file
-          let dst_cu_file = base_output_dir ++ "/" ++ takeFileName src_cu_file
-          copyFile src_cu_file dst_cu_file
-          -- for the last .cu file, copy any .cuh files too
-          when (null fs) $ do
-            cuh_files <- filter ((".cuh"`isSuffixOf`)) <$> D.getSubPaths (takeDirectory src_cu_file)
-            forM_ cuh_files $ \cuh_file -> do
-              copyFile cuh_file (replaceFileName dst_cu_file (takeFileName cuh_file))
-          walkCuFiles fs
+          -- copy any .cuh files too from this sample too
+          let cuh_files = filter (".cuh"`isSuffixOf`) d_fs
+          forM_ cuh_files $ \cuh_file -> do
+            pr $ "  copying " ++ cuh_file ++ "\n"
+            copyFile cuh_file (base_output_dir ++ "/" ++ takeFileName cuh_file)
+
+        walkCuFile ::  (String -> IO ()) ->FilePath -> IO ()
+        walkCuFile pr src_cu_file = do
+            all_exist <- and <$> mapM doesFileExist [sass_output, ptx_output, cubin_output]
+            if all_exist && not clobber then skipIt
+              else buildIt
+          where output_no_ext = base_output_dir ++ "/" ++ dropExtension (takeFileName src_cu_file)
+                sass_output = output_no_ext ++ ".sass"
+                ptx_output = output_no_ext ++ ".ptx"
+                cubin_output = output_no_ext ++ ".cubin"
+
+                skipIt = do
+                  pr "   ==> already built\n"
+
+                buildIt = do
+                  pr "   ==> building\n"
+                  samples_inc_dir <- (++"\\common\\inc") <$> findCudaSamplesDir
+                  --
+                  let nvcc_os =
+                        os {
+                          D.oOutputFile = sass_output
+                        , D.oSaveCuBin = cubin_output
+                        , D.oSavePtx = ptx_output
+                        , D.oExtraArgs = ["-I"++samples_inc_dir]
+                        , D.oInputFile = src_cu_file
+                        }
+                  let handler :: Bool -> SomeException -> IO ()
+                      handler double_fault e
+                        | "user interrupt" `isInfixOf` show e = do
+                          putStrLn $  "=== interrupt ==="
+                          throwIO e
+                        --
+                        -- | "requires separate compilation mode" `isInfixOf` show e && not (D.oRDC os) = do
+                        | "ExitFailure" `isInfixOf` show e && not double_fault = do
+                        -- D.runWithOpts will exit non-zero, the separate compilation mode
+                        -- output goes to our stderr and it exits (which is an exception).
+                          pr "  ====> re-trying with -rdc=true\n"
+                          D.runWithOpts
+                            nvcc_os{D.oRDC = True} `catch` handler True
+                        | otherwise =
+                          throwIO e -- propagate up
+                  --
+                  D.runWithOpts nvcc_os `catch` handler False
+                  -- copies the .cu file
+                  let dst_cu_file = base_output_dir ++ "/" ++ takeFileName src_cu_file
+                  copyFile src_cu_file dst_cu_file
+                  pr $ "  ==> done; copied " ++ dst_cu_file
 
 findCudaSamplesDir :: IO FilePath
 findCudaSamplesDir = tryPathVers ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0"]
@@ -161,26 +217,33 @@ collectLibrarySampleIsa substr os_raw = body
           where body = do
                   putStrLn $ "EMITTING LIBS FROM: " ++ dll_dir
 
-                  dumpLib "nppial64_10.dll"     --   9 MB
-                  dumpLib "nppicc64_10.dll"     --   3 MB
-                  dumpLib "nppicom64_10.dll"    --   3 MB
-                  dumpLib "nppidei64_10.dll"    --
-                  dumpLib "nppif64_10.dll"      --
-                  dumpLib "nppig64_10.dll"      --
-                  dumpLib "nppim64_10.dll"      --
-                  dumpLib "nppist64_10.dll"     --
-                  -- dumpLib "nppisu64_10.dll"     -- no device code
-                  dumpLib "nppitc64_10.dll"     --
-                  dumpLib "npps64_10.dll"       --
+                  tryLib "nppial64"     --   9 MB
+                  tryLib "nppicc64"     --   3 MB
+                  tryLib "nppicom64"    --   3 MB
+                  tryLib "nppidei64"    --
+                  tryLib "nppif64"      --
+                  tryLib "nppig64"      --
+                  tryLib "nppim64"      --
+                  tryLib "nppist64"     --
+                  tryLib "nppisu64"     -- no device code
+                  tryLib "nppitc64"     --
+                  tryLib "npps64"       --
+                  tryLib "nvjpeg64"     --   3 MB
 
-                  dumpLib "curand64_10.dll"     --  48 MB
-                  dumpLib "cusparse64_10.dll"   --  55 MB
-                  dumpLib "cublas64_10.dll"     --  65 MB
-                  -- dumpLib "cublasLt64_10.dll" --  65 MB
-                  -- dumpLib "cuinj64_101.dll"   -- 4.6 MB no device code
-                  dumpLib "nvgraph64_10.dll"    --  68 MB
-                  dumpLib "cufft64_10.dll"      --  99 MB
-                  dumpLib "cusolver64_10.dll"   -- 125 MB
+                  tryLib "curand64"     --  48 MB
+                  tryLib "cusparse64"   --  55 MB
+                  tryLib "cublas64"     --  65 MB
+                  tryLib "nvgraph64"    --  68 MB
+                  tryLib "cufft64"      --  99 MB
+                  tryLib "cusolver64"   -- 125 MB
+
+                tryLib :: String -> IO ()
+                tryLib lib = tryExts ["_11.dll","_10.dll"]
+                  where tryExts [] = return ()
+                        tryExts (e:es) = do
+                          z <- doesFileExist (dll_dir ++ "/" ++ lib ++ e)
+                          if z then dumpLib (lib ++ e)
+                            else tryExts es
 
                 dumpLib :: String -> IO ()
                 dumpLib lib
@@ -237,7 +300,7 @@ collectLibrarySampleIsaFromDir os_raw full_dll = body
             let tmp_sass = takeFileName elf_cubin ++ "-tmp.sass"
             putStrLn $ "  % nvdisasm ... extract raw sass"
             withFile tmp_sass WriteMode $ \h_out -> do
-              D.runCudaToolToHandle D.dft_opts_75 "nvdisasm" [
+              D.runCudaToolToHandle D.dft_opts{D.oArch = D.oArch os} "nvdisasm" [
                         "--no-vliw"
                       , "--no-dataflow"
                       , "--print-line-info"

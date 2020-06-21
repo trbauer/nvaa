@@ -56,10 +56,9 @@ filterAssemblyWithInterleavedSrcIO no_bits h_out arch = processLns . zip [1..] .
         emitLn :: String -> IO ()
         emitLn = hPutStrLn h_out
 
-        -- Volta and Turing
+        -- Volta, Turing, and Ampere
         processLns128B :: FilterProcessorIO
         processLns128B _ [] = do
-          putStrLn "**************************** END"
           return ()
         processLns128B dict lns@((_,ln0str):(_,ln1str):lns_sfx) =
           case parseSampleInst (ln0str ++ ln1str) of
