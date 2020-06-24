@@ -185,7 +185,7 @@ parseRawInst' = parseSyntax . skipWs
               , riDepInfo = []
               }
           where parsePredication :: RawInst -> String -> Either String (RawInst,String)
-                parsePredication ri sfx =
+                parsePredication ri sfx = -- F2FP.BF16.PACK_AB
                   case skipWs sfx of
                     '@':sfx ->
                       case span (\c -> c == '!' || isAlphaNum c) sfx of
@@ -194,7 +194,7 @@ parseRawInst' = parseSyntax . skipWs
 
                 parseMnemonic :: RawInst -> String -> Either String (RawInst,String)
                 parseMnemonic ri sfx =
-                  case span (\c -> isAlphaNum c || c == '.' || c`elem`"(~&^|)") (skipWs sfx) of
+                  case span (\c -> isAlphaNum c || c == '.' || c`elem`"_(~&^|)") (skipWs sfx) of
                     (mne,sfx) -> parseOperands (ri{riMnemonic = mne}) (skipWs sfx)
 
                 parseOperands :: RawInst -> String -> Either String (RawInst,String)
