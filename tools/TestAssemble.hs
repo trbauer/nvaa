@@ -7,6 +7,7 @@ import Analysis
 import NVT.Bits
 import NVT.IR
 import NVT.Loc
+import NVT.CUDASDK
 import NVT.Diagnostic
 import NVT.Encoders.Codable
 import NVT.Encoders.InstEncoder
@@ -23,11 +24,11 @@ import Data.List
 import Data.Word
 import Debug.Trace
 import System.Directory
+import System.Exit
+import System.FilePath
 import System.IO
 import Text.Printf
 
--- currently:
---   * first SI test passes!!!!!!!!!!!!!!!!!
 
 --   => make nvaa handle .exe and .dll files
 {-
@@ -63,13 +64,10 @@ import Text.Printf
 --    4     0    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
 --    4     1    1     /=RZ       LDG.E.64.SYS R16, [R254.64+UR0]
 --    4     1    1     ==RZ       LDG.E.64.SYS R16, [UR0]  // probably [RZ.U32+UR0]
-
-
+--
 -- 000EE200001EEB00`0000000018107381:        LDG.E.64.SYS R16, [R24] {!1,+4.W} ;
 -- 000EE2000C1EEB00`00000004FF107981:        LDG.E.64.SYS R16, [UR4] {!1,+4.W} ;
-
 --
-
 testIADD3 = testFile "examples\\sm_75\\ops\\IADD3.sass"
 testIMAD = testFile "examples\\sm_75\\ops\\IMAD.sass"
 testISETP = testFile "examples\\sm_75\\ops\\ISETP.sass"
@@ -94,28 +92,9 @@ testSTS = testFile "examples\\sm_75\\ops\\STS.sass"
 --        96|  80|
 -- t = testInst "000FD80003F04070`727FFFFF0000780C:        ISETP.GT.U32.AND P0, PT, R0, 0x727fffff, PT {!12,Y} ;"
 -- t = testInst "000FC00000000000`0000000000007918:        NOP  {Y} ;"
-t = testInst "0003E8000C10E904`0000000FFF007986:        STG.E.SYS [UR4], R15 {!4,+2.R} ;"
-
-tld = testInst "000EE800001EE900`FFFFFC0012127381:        LDG.E.SYS R18, [R18+-0x4] {!4,+4.W} ;"
-
-
-
-s0 = "/*0000*/       MOV              R1, c[0x0][0x28] {!8,Y};                   /* 000FD00000000F00`00000A0000017A02 */"
-s1 = "/*0000*/       IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};           /* 000FD000078E00FF`00000A00FF017624 */"
-ia3 = "000FC80007F1E0FF`00005A0000027A10:        IADD3 R2, P0, R0, c[0x0][0x168], RZ {!4,Y} ; // examples/sm_75/samples\alignedTypes.sass:3122"
 ---         IADD3 R2, P0, R0, c[0x0][0x168], RZ {!4,Y} ;
 -- |........|........|........|........|........|........
 -- 1        11       21       31       41       51
-imad_mov_u32 = "000FD000078E00FF`00000A00FF017624: IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};"
-
-
-imad = testInst "000FE200078E0A06`0000000105067824:        IMAD.IADD R6, R5, 0x1, -R6 {!1};"
-
-testB =
-  testBlocks $
-    "IMAD.MOV.U32     R1, RZ, RZ, c[0x0][0x28] {!8,Y};\n" ++
-    "S2R              R0, SR_CTAID.X {!1,+1.W};\n"++
-    ""
 
 
 help :: IO ()
@@ -149,21 +128,41 @@ testInst syntax =
     Left err ->
       putStrLn $ show 1 ++ ". " ++ err ++ ": malformed sample instruction\n"
     Right si -> do
-      let syntax_x = stripPrefixBits syntax
+      let syntax_x = dropPrefixBits syntax
       testSampleInst id True si ("<interactive>",1) syntax_x
       return ()
+
+splitPrefixBits :: String -> (String,String)
+splitPrefixBits ln =
+  case span (/=':') ln of
+    (pfx_bs,':':sfx) ->
+      case span (/='`') pfx_bs of
+        (hi_str,'`':lo_str)
+          | length hi_str == 16 && length lo_str == 16 && all isHexDigit (lo_str++hi_str) ->
+              (pfx_bs++":",sfx)
+          | otherwise -> ("",ln)
+        _ -> ("",ln)
+    _ -> ("",ln)
+
+dropPrefixBits :: String -> String
+dropPrefixBits = snd . splitPrefixBits
+
 
 testParseInst :: String -> IO ()
 testParseInst syntax = do
   let fmtDiag = dFormatWithLines (lines syntax)
-  case parseInst 0 "" 1 syntax of
+  case parseUnresolvedInst 0 "<interactive>" 1 syntax of
     Left err -> do
       putStrLn "ERROR: parsed SampleInst, but InstParser failed"
       putStrLn $ fmtDiag err
-    Right (i,ws) -> do
-      mapM_ (putStrLn . fmtDiag) ws
-      putStrLn $ fmtInstIr i
-
+    Right (ui,lrefs,ws) -> do
+      unless (null ws) $ do
+        putStrLn "WARNING:"
+        mapM_ (putStrLn . fmtDiag) ws
+      let lbls = map (\(_,lbl) -> (lbl,0)) lrefs
+      case ui lbls of
+        Left err -> putStrLn $ fmtDiag err
+        Right i -> putStrLn $ fmtInstIr i
 
 
 main :: IO ()
@@ -171,6 +170,7 @@ main = do
   flns <- drop 1 . lines <$> readFile "bs-raw.sass"
   putStrLn $ parseLines flns
   writeFile "test-file.sass" $ parseLines flns
+
 
 parseLines :: [String] -> String
 parseLines [] = ""
@@ -180,18 +180,54 @@ parseLines (ln0:ln1:lns) =
     Right si ->
       fmtSampleInst si ++ "\n" ++ parseLines lns
 
+-- slog :: String -> Int -> IO ()
+-- slog f k = parseAllOpsInDir f k "examples\\sm_80.1\\ops"
+slog :: IO ()
+slog = parseAllOpsInFile "tests\\sm_80\\instructions.sass"
 
-stripPrefixBits :: String -> String
-stripPrefixBits ln =
-  case span (/=':') ln of
-    (pfx,':':sfx) ->
-      case span (/='`') pfx of
-        (hi_str,'`':lo_str)
-          | length hi_str == 16 && length lo_str == 16 && all isHexDigit (lo_str++hi_str) -> sfx
-          | otherwise -> ln
-        _ -> ln
-    _ -> ln
+parseAllOpsInDir :: String -> Int -> FilePath -> IO ()
+parseAllOpsInDir filt k dir = do
+  sass_fs <- filter (".sass"`isSuffixOf`) <$> getSubPaths dir
+  mapM_ (parseAllOpsInFileK k) (filter ((>=filt) . takeFileName) sass_fs)
 
+parseAllOpsInFile :: FilePath -> IO ()
+parseAllOpsInFile = parseAllOpsInFileK (-1)
+
+parseAllOpsInFileK :: Int -> FilePath -> IO ()
+parseAllOpsInFileK k fp = do
+    putStrLn ""
+    putStrLn $ takeFileName fp ++ ": ===================================="
+    flns <- zip [1..] . lines <$> readFile fp
+    let maybeTakePrefix = if k < 0 then id else take k
+    parse (maybeTakePrefix flns)
+  where parse [] = return ()
+        parse ((lno,ln):lns)
+          | let ln_pfx = dropWhile isSpace ln in null ln_pfx || "//" `isPrefixOf` ln_pfx = parse lns
+          | otherwise = do
+            let (bits,syntax) = splitPrefixBits ln
+                stripTrailingComment = go
+                  where go [] = ""
+                        go ('/':'/':sfx) = ""
+                        go (c:cs) = c:go cs
+            case parseUnresolvedInst ((lno-1)*16) fp lno syntax of
+              Left d ->
+                die $
+                  ln ++ "\n" ++
+                  dFormatWithCurrentLine (lno,syntax) d ++ "\n\n" ++
+                  "%  testParseInst " ++ show (dropWhile isSpace (stripTrailingComment syntax)) ++ "\n"
+              Right (ui,lrefs,ws) -> do
+                when (not (null ws)) $ do
+                  putStrLn "WARNINGS:"
+                  mapM_ print ws
+                unless (null lrefs) $
+                  putStrLn $ "induces labels: " ++ show lrefs
+                -- create some fake label references so branches print
+                let lbls = map (\(_,lbl) -> (lbl,0)) lrefs
+                case ui lbls of
+                  Left d -> putStrLn $ dFormat d
+                  Right i -> putStrLn $ fmtInstIr i
+                putStrLn ln
+                parse lns
 
 
 testAllG :: Bool -> IO Bool
@@ -208,6 +244,7 @@ testAllG fail_fast = do
   let (np,nt) = (sum nps,sum nts)
   putStrLn $ "******** passed " ++ show np ++ " of " ++ show nt ++ " ********"
   return $ np == nt
+
 
 testMnemonic :: String -> IO (Int,Int)
 testMnemonic mne = testOneInstFile ("tests/" ++ mne ++ ".sass")
@@ -238,7 +275,7 @@ testFileGK emit_io k fp = do
         | null skipped_spaces || "//"`isPrefixOf`skipped_spaces = testLoop (np,nt) lns
         | instHasLabels ln = do
           -- should be able to parse it
-          let syntax = stripPrefixBits ln
+          let syntax = dropPrefixBits ln
           case parseUnresolvedInst 0 fp 1 syntax of
             Left err -> do
               -- putStrLn $ "==> " ++ show ln
@@ -258,7 +295,7 @@ testFileGK emit_io k fp = do
               testLoop (np,nt+1) lns
             Right si -> do
               emit_io $ putStrYellow (ln++"\n")
-              z <- testSampleInst emit_io False si (fp,lno) (stripPrefixBits ln)
+              z <- testSampleInst emit_io False si (fp,lno) (dropPrefixBits ln)
               if not z then return (np,nt+1)
                 else do
                   testLoop (np+1,nt+1) lns
@@ -273,6 +310,41 @@ testFileGK emit_io k fp = do
 instHasLabels :: String -> Bool
 instHasLabels ln = any (`isInfixOf`ln) ["32@lo(","32@hi(","`(","@srel"]
 
+
+-- parses, but uses 0 for all labels
+parseTestInstIO ::
+  PC ->
+  FilePath ->
+  Int ->
+  String ->
+  IO Inst
+parseTestInstIO pc fp lno inp =
+  case parseTestInst pc fp lno inp of
+    Left err -> die $ dFormat err
+    Right (i,ws) -> do
+      unless (null ws) $ do
+        putStrLn "WARNINGS:"
+        mapM_ (putStrLn . dFormat) ws
+      return i
+
+
+-- resolves labels
+parseTestInst ::
+  PC ->
+  FilePath ->
+  Int ->
+  String ->
+  Either Diagnostic (Inst,[Diagnostic])
+parseTestInst pc fp lno inp =
+  case parseUnresolvedInst pc fp lno inp of
+    Left err -> Left err
+    Right (ui,lrefs,ws) ->
+        case ui lbls of
+          Left err -> Left err
+          Right i -> Right (i,ws)
+      where lbls = map (\(_,lbl) -> (lbl,0)) lrefs
+
+
 testSampleInst :: (IO () -> IO ()) -> Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool -- (Int,Int)
 testSampleInst emit_io verbose si (fp,lno) syntax = do
   let fmtDiag d = dFormatWithLines syntax_lines d
@@ -282,7 +354,7 @@ testSampleInst emit_io verbose si (fp,lno) syntax = do
         where syntax_lines = replicate (lno-1) "\n" ++ [syntax]
       emitLn = emit_io . putStrLn
       emitLnRed = emit_io . putStrRed
-  case parseInst 0 fp lno syntax of
+  case parseTestInst 0 fp lno syntax of
     Left err -> do
       emitLn "ERROR: parsed SampleInst, but InstParser failed"
       emitLn $ fmtDiag err
@@ -292,7 +364,7 @@ testSampleInst emit_io verbose si (fp,lno) syntax = do
       let i_formatted = format i
           -- move the line number for "line 1" since we only get
           -- a line at a time
-      case parseInst 0 fp lno i_formatted of
+      case parseTestInst 0 fp lno i_formatted of
         Left err -> do
           emitLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
           emitLn $ fmtInstIr i

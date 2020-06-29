@@ -86,11 +86,13 @@ probe ix s = startProbe
 
 
 disassembleFieldD :: Field -> Sample -> IO [String]
-disassembleFieldD f (Sample w128) = disBitsRawBatch opts{oVerbosity = 2} w128s
+disassembleFieldD f (Sample w128) =
+    disBitsRawBatch dft_analysis_opts{oVerbosity = 2} w128s
   where w128s :: [Word128]
         w128s = map (\v -> putField128 (fOff f) (fLen f) v w128) [0 .. 2^(fLen f)-1]
 disassembleField :: Field -> Sample -> IO [String]
-disassembleField f (Sample w128) = disBitsRawBatch opts w128s
+disassembleField f (Sample w128) =
+    disBitsRawBatch dft_analysis_opts w128s
   where w128s :: [Word128]
         w128s = map (\v -> putField128 (fOff f) (fLen f) v w128) [0 .. 2^(fLen f)-1]
 -- disassembleFields :: [Field] -> Sample -> IO [String]
@@ -202,12 +204,18 @@ help = do
 decode :: IO [Sample] -> IO ()
 decode ms = do
   (s:_) <- ms
-  disBitsRaw opts (sBits s) >>= putStr
-  putStrLn $ "  " ++ "{" ++ intercalate "," (decodeDepInfo (sBits s)) ++ "}"
+  let dep_info_str = "{" ++ intercalate "," (decodeDepInfo (sBits s)) ++ "}"
+  disBitsRaw dft_analysis_opts (sBits s) >>= putStr
+  putStrLn $ "  " ++ dep_info_str
+  -- raw <- disBitsRaw dft_analysis_opts (sBits s)
+  -- case parseRawInst (raw ++ ";") of
+  --   Left err -> putStrLn $ "[ERROR: " ++ err ++ "; " ++ raw ++ "]"
+  --   Right ri -> putStrLn $ fmtRawInst ri ++ dep_info_str
+
 decodeR :: IO [Sample] -> IO ()
 decodeR ms = do
   (s:_) <- ms
-  disBitsRaw opts (sBits s) >>= putStrLn
+  disBitsRaw dft_analysis_opts (sBits s) >>= putStrLn
 
 listDiffs :: IO [Sample] -> IO [Sample] -> IO ()
 listDiffs ms1 ms2 = do
@@ -219,16 +227,16 @@ listDiffs ms1 ms2 = do
       putStrLn $ intercalate "  " (map fmtFieldHeader fs)
       let fmt :: Sample -> Field -> String
           fmt s f = fmtFieldValue f (fGetValue f s)
-      s1_str <- disBitsRaw opts (sBits s1)
+      s1_str <- disBitsRaw dft_analysis_opts (sBits s1)
       putStrLn $ intercalate "  " (map (fmt s1) fs) ++ "  " ++ s1_str
-      s2_str <- disBitsRaw opts (sBits s2)
+      s2_str <- disBitsRaw dft_analysis_opts (sBits s2)
       putStrLn $ intercalate "  " (map (fmt s2) fs) ++ "  " ++ s2_str
       putStrLn "INTERPOLATING"
       let interpolateField :: Field -> IO ()
           interpolateField f = do
             let val2 = fGetValue f s2
                 s1a = Sample (putField128 (fOff f) (fLen f) val2 (sBits s1))
-            s1a_str <- disBitsRaw opts (sBits s1a)
+            s1a_str <- disBitsRaw dft_analysis_opts (sBits s1a)
             putStrLn $ intercalate "  " (map (fmt s1a) fs) ++ "  (flipped " ++ show f ++ ") " ++ s1a_str
 
 
@@ -302,7 +310,13 @@ listFields fs io_ss = do
 -- test_twiddle = twiddleField (79,2) (sString "000EA200001EE900`0000000004067381")
 type TwiddleRow = ([(Field,Word64)],[Sample])
 
-
+twiddleRF :: IO [Sample] -> IO ()
+twiddleRF = twiddleFields [(91,1),(9,3)]
+twiddleF :: Field -> IO [Sample] -> IO ()
+twiddleF = twiddleField
+twiddleFs :: [Field] -> IO [Sample] -> IO ()
+twiddleFs = twiddleFields
+--
 twiddleField :: Field -> IO [Sample] -> IO ()
 twiddleField = twiddleFieldB
 twiddleFields :: [Field] -> IO [Sample] -> IO ()
@@ -344,14 +358,16 @@ twiddleFieldsBaseP binary fs s0s = body
               chunk k as =
                 case splitAt k as of
                   (pfx,sfx) -> pfx : chunk k sfx
-          syns_chunks <- chunk (length s0s) <$> disBitsRawBatch opts (concatMap (map sBits . snd) rows)
+          syns_chunks <-
+            chunk (length s0s) <$>
+              disBitsBatch dft_analysis_opts (concatMap (map sBits . snd) rows)
           -- mapM_ putStrLn (concat strs)
           -- strs is [[String]]
           forM_ (zip rows syns_chunks) $ \((fvs,mod_ss),mod_ss_syns) -> do
             let fmtRowEntry :: (Int,Sample,Sample,String) -> String
                 fmtRowEntry (i,s0,s_m,syn) =
                     values ++
-                    " " ++ drop (length "0x") (show (sBits s_m)) ++  -- bits
+                    " " ++ drop (length "0x") (show (sBits s_m)) ++ ":" ++  -- bits
                     "  " ++ syn ++
                     "\n"
                   where values = intercalate "  " (map (uncurry (fmtVal (i==0) s0)) fvs)
@@ -398,7 +414,7 @@ surveyFields fs io_ss = body
   where body = do
           ss <- io_ss
           putStrLn "disassembling"
-          strs <- disBitsRawBatch opts (map sBits ss)
+          strs <- disBitsRawBatch dft_analysis_opts (map sBits ss)
           --
           let binary = True
           let (fmtHeader,fmtValue)
@@ -559,7 +575,7 @@ studyOpcodesStartingAt at = do
                                 putField128 91 1 b91 (putField128 9 3 b12_9 bits_with_op)
                               all_cases = [(b91,b12_9) | b91<-[0..1], b12_9<-[0..7]]
                   cases <-
-                    zip bitss <$> disBitsRawBatch opts bitss
+                    zip bitss <$> disBitsRawBatch dft_analysis_opts bitss
                   let good_cases :: [(Word128,String)] -- RF paired with syntax
                       good_cases = filter (not . badAsm . snd) cases
                       fmtCase (w128,str) =

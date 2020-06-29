@@ -54,3 +54,6 @@ padL k s = replicate (k - length s) ' ' ++ s
 class Syntax s where
   format :: s -> String
 
+  formatTypeName :: s -> String
+  formatTypeName = const ""
+

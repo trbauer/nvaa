@@ -5,19 +5,37 @@ module NVT.EnumSet where
 import Data.Bits
 import Data.Word
 import Data.List(foldl')
+-- import Debug.Trace
+import Text.Read
 
 type EnumSet = EnumBitSet Int
 type EnumSet64 = EnumBitSet Word64
 
--- this fails since we since fromList cannot infer the integral type
 newtype EnumBitSet i a = EnumBitSet i
-  deriving (Eq,Ord,Read)
+  deriving (Eq,Ord)
 
 pattern EnumSetEMPTY :: (Eq i,Num i) => EnumBitSet i a
 pattern EnumSetEMPTY = EnumBitSet 0
 
 instance (Enum a,Show a,Bits i) => Show (EnumBitSet i a) where
-  show es = "fromList " ++ show (toList es)
+  -- show es = "fromList " ++ show (toList es)
+  --
+  -- TODO: I get this right out of the docs
+  -- https://hackage.haskell.org/package/base-4.12.0.0/docs/Text-Show.html#t:ShowS
+  -- showsPrec prec es = showParen (10 > prec) $
+  --  showString "fromList " . showsPrec 11 (toList es)
+  --
+  -- copied from IntMap
+  showsPrec d m = showParen (d > 10) $
+    showString "fromList " . shows (toList m)
+
+instance (Read a,Enum a,Bits i,Num i) => Read (EnumBitSet i a) where
+  readPrec = parens $ prec 10 $ do
+    Ident "fromList" <- lexP
+    xs <- readPrec
+    return (fromList xs)
+
+  readListPrec = readListPrecDefault
 
 fromList :: (Enum a,Bits i,Num i) => [a] -> EnumBitSet i a
 fromList = fromListG
@@ -29,7 +47,7 @@ fromListG = EnumBitSet . foldl' addE 0
               Nothing -> setBit bits ix
               Just n
                 | ix > n -> error "EnumSet.fromList" "bit index for enum elem too large for bitset"
-                | otherwise -> setBit bits ix
+                | otherwise ->  setBit bits ix
           where ix = fromEnum a
 
 singleton :: (Enum a, Bits i, Num i) => a -> EnumBitSet i a

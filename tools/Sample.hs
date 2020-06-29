@@ -26,9 +26,9 @@ fFormat f
   | otherwise  = "[" ++ show (fOff f + fLen f - 1) ++ ":" ++ show (fOff f) ++ "]"
 
 
-opts :: Opts
-opts = dft_opts_75
-
+dft_analysis_opts :: Opts
+-- dft_opts = dft_opts_75
+dft_analysis_opts = dft_opts_80
 
 -- 000E280000005800`0004200002097984:        LDS.U R9, [R2.X4+0x420] {!4,+1.W} ;    // examples/sm_75/samples\bitonic.sass:3554
 -- 000E220000009A00`0008000000027984:        LDS.U.64 R2, [R0.X8+0x800] {!1,+1.W} ; // examples/sm_75/samples\bitonic.sass:3652
@@ -37,6 +37,10 @@ opts = dft_opts_75
 -- e.g. 000EE800001EE900`0000000006068381
 sString :: String -> IO [Sample]
 sString = return . (\s -> [s]) . sStringPure
+sS :: String -> IO [Sample]
+sS = sString
+sStrings :: [String] -> IO [Sample]
+sStrings = return . map sStringPure
 sStringPure :: String -> Sample
 sStringPure str =
   case reads ("0x" ++ str) of
@@ -46,7 +50,7 @@ sAllOps :: String -> IO [Sample]
 sAllOps = sAllOpsK (-1)
 sAllOpsK :: Int -> String -> IO [Sample]
 sAllOpsK k opname =
-  sFileK k ("examples/" ++ oArch opts ++ "/ops/" ++ map toUpper opname++".sass")
+  sFileK k ("examples/" ++ oArch dft_analysis_opts ++ "/ops/" ++ map toUpper opname++".sass")
 sDir :: FilePath -> IO [Sample]
 sDir dir = do
   fs <- getSubPaths dir

@@ -36,13 +36,14 @@ initPSt :: u -> PSt u
 initPSt u = PSt 1 [] u
 
 type PID u a = P Identity u a
+type ParseResult u a = Either Diagnostic (a,u,[Diagnostic])
 
 runPID ::
     PID u a ->
     u ->
     FilePath ->
     String ->
-    Either Diagnostic (a,[Diagnostic])
+    ParseResult u a
 runPID pma u file inp =
   runIdentity $ runP pma u file inp
 
@@ -52,29 +53,33 @@ runP :: Monad m
     -> u
     -> FilePath
     -> String
-    -> m (Either Diagnostic (a,[Diagnostic]))
+    -> m (ParseResult u a)
 runP pma u file inp = body
-  where body = case runExceptT (P.runParserT pma_with_warnings (initPSt u) file inp) of
-                 mea -> do
-                  ea <- mea
-                  case ea of
-                    -- semantic error (throwSemanticError)
-                    Left err -> return $ Left err
-                    -- parse error
-                    Right (Left err) -> return $ Left (errToDiag err)
-                    -- success
-                    Right (Right (a,ws)) -> return (Right (a,ws))
+  where body =
+          case runExceptT (P.runParserT pma_with_warnings (initPSt u) file inp) of
+            mea -> do
+            ea <- mea
+            case ea of
+              -- semantic error (throwSemanticError)
+              Left err -> return $ Left err
+              -- parse error
+              Right (Left err) -> return $ Left (errToDiag err)
+              -- success
+              Right (Right (a,u,ws)) -> return (Right (a,u,ws))
 
         pma_with_warnings = do
           a <- pma
+          u <- psUserState <$> P.getState
           ws <- psWarnings <$> P.getState
           -- return (a,map (uncurry Diagnostic) ws)
-          return (a,ws)
+          return (a,u,ws)
 
         errToDiag :: P.ParseError -> Diagnostic
         errToDiag err = dCons eloc emsg
           where eloc = sourcePosToLoc (P.errorPos err)
-                emsg = drop 1 $ dropWhile (/=';') (concatMap (\c -> if c == '\n' then "; " else [c]) (show err))
+                emsg =
+                  drop 1 $ dropWhile (/=';') $
+                    concatMap (\c -> if c == '\n' then "; " else [c]) (show err)
 
 pSemanticError :: (MonadTrans t, Monad m) => Loc -> String -> t (ExceptT Diagnostic m) a
 pSemanticError loc msg = pSemanticErrorDiag $ dCons loc msg
@@ -147,8 +152,6 @@ pWithNextId pa = do
   pa id
 
 
-
-
 def :: Monad m => P.GenLanguageDef String (PSt u) m
 def = P.LanguageDef {
                 P.commentStart = "/*"
@@ -173,15 +176,18 @@ pWhiteSpace = P.whiteSpace tokenParser
 pIdentifier :: Monad m => P m u String
 pIdentifier = P.identifier tokenParser
 
-
-pLiteral :: Monad m => String -> P m u String
-pLiteral = P.string
-
 pSymbol :: Monad m => String -> P m u String
 pSymbol = P.symbol tokenParser
 
 pSymbol_ :: Monad m => String -> P m u ()
 pSymbol_ str = pSymbol str >> return ()
+
+pKeyword :: Monad m => String -> P m u ()
+pKeyword s = do
+  P.string s
+  P.notFollowedBy (P.alphaNum <|> P.oneOf "_")
+  pWhiteSpace
+  return ()
 
 pFloating :: Monad m => P m u Double
 pFloating = P.float tokenParser
@@ -279,9 +285,23 @@ pInt = pImmA
 
 
 pOneOf :: Monad m => [(String,a)] -> P m u a
-pOneOf opts = loop (sortOn (Down . fst) opts)
+pOneOf = loop . orderByLen
   where loop [] = fail "unexpected token"
         loop ((s,a):sas) = P.try (pSymbol s >> return a) <|> loop sas
+
+orderByLen :: [(String,a)] -> [(String,a)]
+orderByLen = reverse . sortBy (comparing (length . fst))
+
+pOneOfNamed :: Monad m => String -> [(String,a)] -> P m u a
+pOneOfNamed what = pLabel what . loop . orderByLen
+  where loop [] = fail $ "expected " ++ what
+        loop ((s,a):sas) = P.try (pSymbol s >> return a) <|> loop sas
+pOneOfKeyword :: Monad m => String -> [(String,a)] -> P m u a
+pOneOfKeyword what = pLabel what . loop . orderByLen
+  where loop []
+          | null what = fail "unexpected token"
+          | otherwise = fail ("expected " ++ what)
+        loop ((s,a):sas) = P.try (pKeyword s >> return a) <|> loop sas
 
 pSymbols :: Monad m => [String] -> P m u String
 pSymbols  = pOneOf . map (\s -> (s,s))

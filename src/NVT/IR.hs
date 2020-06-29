@@ -9,6 +9,7 @@ import NVT.Floats
 import qualified NVT.EnumSet as ES
 
 import Data.Bits
+import Data.Char
 import Data.Int
 import Data.List
 import Data.Word
@@ -30,57 +31,187 @@ import qualified Data.Map.Strict as DM
 
 type PC = Int
 
+data Op =
+    OpARRIVES    -- ARRIVES.LDGSTSBAR.64 [URZ+0x800] {!1};
+  | OpATOM       -- ATOM.E.ADD.STRONG.GPU PT, R9, [R4.64+0x4], R9 {!6,+6.W,+1.R};
+  | OpATOMG      -- @!P1 ATOMG.E.ADD.STRONG.GPU PT, R4, [R6.64], R23 {!1,+6.W,+1.R};
+  | OpATOMS      -- ATOMS.EXCH       RZ, [0x2804], RZ {!1};
+  | OpB2R        -- B2R.RESULT       RZ, P0 {!2,+2.W};
+  | OpBAR        -- BAR.SYNC         0x0 {!6};
+  | OpBMOV       -- BMOV.32.CLEAR    R24, B6 {!4,+1.W};
+  | OpBMSK       -- BMSK             R6, R5, R6 {!2};
+  | OpBPT        -- BPT.TRAP         0x1 {!5};
+  | OpBRA        -- @!P0  BRA        `(.L_1) {!5}; or @!P1  BRA  !P2, `(.L_18) {!5}; (bit 87-90 are PredSrc) or BRA.DIV          ~URZ, `(.L_989) {!6};
+  | OpBRX        -- BRX              R10 -0xbd0 {!5}
+  | OpBRXU
+  | OpBREAK
+  | OpBREV
+  | OpBSSY       -- BSSY             B0, `(.L_14) {!1};
+  | OpBSYNC      -- BSYNC            B1 {!5};
+  | OpCALL       -- CALL.ABS.NOINC   `(cudaLaunchDeviceV2)
+  | OpCCTL       -- CCTL.IVALL        {!5,Y};
+  | OpCS2R
+  | OpDADD
+  | OpDEPBAR     -- DEPBAR.LE        SB0, 0x0 {!4,Y};
+  | OpDFMA
+  | OpDMMA
+  | OpDMUL
+  | OpDSETP
+  | OpERRBAR
+  | OpEXIT
+  | OpF2F
+  | OpF2FP
+  | OpF2I
+  | OpFADD
+  | OpFCHK
+  | OpFFMA
+  | OpFLO
+  | OpFMNMX
+  | OpFMUL
+  | OpFRND
+  | OpFSEL
+  | OpFSET
+  | OpFSETP
+  | OpHADD2
+  | OpHFMA2
+  | OpHMMA
+  | OpHMUL2
+  | OpHSET2
+  | OpHSETP2
+  | OpI2F
+  | OpI2I
+  | OpI2IP
+  | OpIABS
+  | OpIADD3
+  | OpIDP
+  | OpIMAD
+  | OpIMMA
+  | OpIMNMX
+  | OpISET
+  | OpISETP
+  | OpKILL
+  | OpLD
+  | OpLDC
+  | OpLDG
+  | OpLDGDEPBAR -- load global dep barrier
+  | OpLDGSTS    -- async global to shared mem (load global, store shared)
+  | OpLDL
+  | OpLDS
+  | OpLDSM
+  | OpLEA
+  | OpLEPC -- load effective PC
+  | OpLOP3
+  | OpMATCH
+  | OpMEMBAR
+  | OpMOV
+  | OpMOVM
+  | OpMUFU
+  | OpNANOSLEEP
+  | OpNANOTRAP -- sm_75
+  | OpNOP
+  | OpP2R
+  | OpPLOP3
+  | OpPOPC
+  | OpPRMT
+  | OpQSPC
+  | OpR2P
+  | OpR2UR
+  | OpRED
+  | OpREDUX
+  | OpRET
+  | OpRTT
+  | OpS2R
+  | OpS2UR
+  | OpSEL
+  | OpSGXT
+  | OpSHL
+  | OpSHR
+  | OpSHF
+  | OpSHFL
+  | OpST
+  | OpSTG
+  | OpSTL
+  | OpSTS
+  | OpSUST
+  | OpTEX
+  | OpTLD
+  | OpUFLO
+  | OpUIADD3
+  | OpUIMAD
+  | OpUISETP
+  | OpULDC
+  | OpULEA
+  | OpULOP3
+  | OpUMOV
+  | OpUPLOP3
+  | OpUPOPC
+  | OpUPRMT
+  | OpUSEL
+  | OpUSGXT
+  | OpUSHF
+  | OpVOTE
+  | OpVOTEU
+  | OpWARPSYNC
+  | OpYIELD
+  deriving (Show,Eq,Ord,Read,Enum)
+
+all_ops :: [Op]
+all_ops = [toEnum 0..]
+
+oMnemonic :: Op -> String
+oMnemonic = drop 2 . show
+
 -- type Op = String
-data Op = Op {oMnemonic :: !String}
-  deriving (Show,Eq,Ord)
+-- data Op = Op {oMnemonic :: !String}
+--  deriving (Show,Eq,Ord)
 instance Syntax Op where
   format = oMnemonic
+
 oHasDstPred :: Op -> Bool
-oHasDstPred (Op op) =
+oHasDstPred op =
   -- definitely present
   -- e.g.
   --   ISETP.GE.AND P0, PT, R0, c[0x0][0x170], PT {!1} ; // 000FE20003F06270`00005C0000007A0C
-  op `elem` ["PLOP3","DSETP","FSETP","ISET","HSETP2"]
+  -- op `elem` ["PLOP3","DSETP","FSETP","ISET","HSETP2"]
+  op `elem` [OpPLOP3,OpDSETP,OpFSETP,OpISET,OpHSETP2]
 oHasOptDstPred :: Op -> Bool
-oHasOptDstPred (Op op) =
+oHasOptDstPred op =
   -- I THINK THESE ARE SOURCES (there can be two)
   --        IADD3 R10,     R24, R19, R10 {!1} ;   // 000FE20007FFE00A`00000013180A7210
   --  @!P0  IADD3 R12, P1,  R0, R15,  RZ {!5,Y} ; // 000FCA0007F3E0FF`0000000F000C8210
 
   --   LOP3.LUT     R2, R2,   0x7f800000, RZ, 0xc0, !PT {!4,Y} ;      000fc800078ec0ff`7f80000002027812
   --   LOP3.LUT P1, RZ, R16,     0x20000, RZ, 0xc0, !PT {!12,Y,^4} ;  008fd8000782c0ff`0002000010ff7812
-  op `elem` ["LOP3"]
+  op `elem` [OpLOP3]
 
 oIsBitwise :: Op -> Bool
-oIsBitwise (Op op) = op `elem` ["LOP","PLOP","SHL","SHR","SHF","SHFL"]
+oIsBitwise = (`elem` [OpLOP3,OpPLOP3,OpSHL,OpSHR,OpSHF,OpSHFL])
 
 oIsBranch :: Op -> Bool
-oIsBranch (Op op) =
-  op `elem` ["BPT","BRA","BRX","CALL","KILL","NANOTRAP","RET","RTT"]
+oIsBranch = (`elem`[OpBPT,OpBRA,OpBRX,OpCALL,OpKILL,OpNANOTRAP,OpRET,OpRTT])
 
 oIsFP :: Op -> Bool
-oIsFP (Op op) =
-  op `elem` ["FADD","FFMA","FCHK","FMNMX","FMUL","FSEL","FSET","FSETP"] ||
-  op `elem` ["DADD","DFMA","DMUL","DSETP"]
+oIsFP op =
+  op `elem` [OpF2F,OpF2FP,OpF2I,OpFADD,OpFFMA,OpFCHK,OpFMNMX,
+             OpFMUL,OpFSEL,OpFSET,OpFSETP] ||
+  op `elem` [OpHADD2,OpHFMA2,OpHMMA,OpHMUL2,OpHSET2,OpHSETP2] ||
+  op `elem` [OpDADD,OpDFMA,OpDMUL,OpDSETP]
 oIsInt :: Op -> Bool
-oIsInt (Op op) =
-  op `elem` ["I2I","I2F","IABS","IADD3","IDP","IMAD","IMMA","IMNMX","ISETP"]
+oIsInt = (`elem`[OpI2I,OpI2F,OpIABS,OpIADD3,OpIDP,OpIMAD,OpIMMA,OpIMNMX,OpISETP])
 oIsLD :: Op -> Bool
-oIsLD (Op op) =
-  op `elem` ["LD","LDC","LDG","LDL","LDS","LDSM"]
+oIsLD = (`elem`[OpLD,OpLDC,OpLDG,OpLDL,OpLDS,OpLDSM])
 oIsST :: Op -> Bool
-oIsST (Op op) =
-  op `elem` ["ST","STG","STL","STS"]
+oIsST = (`elem`[OpST,OpSTG,OpSTL,OpSTS])
+oIsAT :: Op -> Bool
+oIsAT = (`elem`[OpATOM,OpATOMG,OpATOMS])
 
 oIsLDST_L :: Op -> Bool
-oIsLDST_L (Op op) =
-  op `elem` ["LDL","STL"]
+oIsLDST_L = (`elem` [OpLDL,OpSTL])
 oIsLDST_G :: Op -> Bool
-oIsLDST_G (Op op) =
-  op `elem` ["LDG","STG","LD","ST"]
+oIsLDST_G = (`elem` [OpLDG,OpSTG,OpLD,OpST])
 
 oIsSLM :: Op -> Bool
-oIsSLM (Op op) = op `elem` ["LDS","LDSM","STS"]
+oIsSLM = (`elem` [OpLDS,OpLDSM,OpSTS,OpATOMS])
 
 data Inst =
   Inst {
@@ -109,7 +240,7 @@ iLacksInstOpt io = not . iHasInstOpt io
 fmtInstIr :: Inst -> String
 fmtInstIr i =
     "Inst {\n" ++
-    fS "iLoc" iLoc ++
+    r (fS "iLoc" iLoc) ++
     fS "iPc" iPc ++
     fS "iPredication" iPredication ++
     fS "iOp" iOp ++
@@ -123,11 +254,14 @@ fmtInstIr i =
         fS = f show
         f :: (a -> String) -> String -> (Inst -> a) -> String
         f fmt nm prj =
-          printf "  %-12s" nm ++ " = " ++ fmt (prj i) ++ "\n"
+          printf ", %-12s" nm ++ " = " ++ fmt (prj i) ++ "\n"
+
+        r "" = ""
+        r (',':sfx) = ' ':sfx
 
 data Pred =
     PredNONE
-    --     neg  reg
+    --     neg.  rgr.
   | PredP  !Bool !PR -- regular predicate
   | PredUP !Bool !UP -- uniform predicate (True,UP7) is "UPZ"
                      -- this should act the same as PredNONE
@@ -145,12 +279,13 @@ instance Syntax Pred where
 --   deriving (Show,Eq)
 
 data Reg =
-    RegR !R
-  | RegP !PR
-  | RegB !BR
-  | RegUR !UR
-  | RegUP !UP
-  | RegSR !SR
+    RegR !R -- general register
+  | RegP !PR -- predicate register
+  | RegB !BR -- barrier register (used by BSYNC, BSSY)
+  | RegUR !UR -- uniform register
+  | RegUP !UP -- uniform predicate
+  | RegSB !SB -- (scoreboard register?) (used in DEPBAR)
+  | RegSR !SR -- system?/special? register (S2R and CS2R)
   deriving (Show,Eq,Ord)
 instance Syntax Reg where
   format reg =
@@ -160,84 +295,55 @@ instance Syntax Reg where
       RegB r -> format r
       RegUR r -> format r
       RegUP r -> format r
+      RegSB r -> format r
       RegSR r -> format r
 
-
-data Dst = Dst !Reg deriving (Show,Eq,Ord)
+-- only HSETP2 supports a modifier (.H0_H0)
+data Dst = Dst !ModSet !Reg
+  deriving (Show,Eq,Ord)
+pattern DstRms :: ModSet -> R -> Dst
+pattern DstRms ms r = Dst ms (RegR r)
 pattern DstR :: R -> Dst
-pattern DstR r = Dst (RegR r)
+pattern DstR r = Dst ES.EnumSetEMPTY (RegR r)
 pattern DstRZ = DstR RZ
 pattern DstP :: PR -> Dst
-pattern DstP p = Dst (RegP p)
+pattern DstP p = Dst ES.EnumSetEMPTY (RegP p)
 pattern DstB :: BR -> Dst
-pattern DstB b = Dst (RegB b)
+pattern DstB b = Dst ES.EnumSetEMPTY (RegB b)
 pattern DstUR :: UR -> Dst
-pattern DstUR ur = Dst (RegUR ur)
+pattern DstUR ur = Dst ES.EnumSetEMPTY (RegUR ur)
 pattern DstUP :: UP -> Dst
-pattern DstUP up = Dst (RegUP up)
+pattern DstUP up = Dst ES.EnumSetEMPTY (RegUP up)
 
 instance Syntax Dst where
-  format (Dst r) = format r
+  format (Dst ms r) = msDecorate ms (format r)
 
 data Src =
     SrcReg !ModSet !Reg
   | SrcCon !ModSet !Surf !Int
   | SrcImm !Imm
+  | SrcTex !TexOp
   deriving (Show,Eq,Ord)
 pattern SrcRZ :: Src
 pattern SrcRZ  = SrcReg ES.EnumSetEMPTY (RegR RZ)
 pattern SrcURZ = SrcReg ES.EnumSetEMPTY (RegUR URZ)
 pattern SrcPT  = SrcReg ES.EnumSetEMPTY (RegP PT)
 --
-pattern Src_R ms r = SrcReg ms (RegR r)
-pattern Src_P ms p = SrcReg ms (RegP p)
-pattern Src_UP ms up = SrcReg ms (RegUP up)
 pattern Src_B ms b = SrcReg ms (RegB b)
+pattern Src_P ms p = SrcReg ms (RegP p)
+pattern Src_R ms r = SrcReg ms (RegR r)
+pattern Src_SB ms r = SrcReg ms (RegSB r)
+pattern Src_SR ms r = SrcReg ms (RegSR r)
+pattern Src_UP ms up = SrcReg ms (RegUP up)
 pattern Src_UR ms ur = SrcReg ms (RegUR ur)
 pattern SrcI32 i = SrcImm (Imm32 i)
 ----------------------------------------------------
 -- common values
-sRC_PT :: Src
-sRC_PT = SrcReg msEmpty (RegP PT)
-sRC_P0 :: Src
-sRC_P0 = SrcReg msEmpty (RegP P0)
-sRC_P1 :: Src
-sRC_P1 = SrcReg msEmpty (RegP P1)
-sRC_P2 :: Src
-sRC_P2 = SrcReg msEmpty (RegP P2)
-sRC_P3 :: Src
-sRC_P3 = SrcReg msEmpty (RegP P3)
---
-sRC_NPT :: Src
-sRC_NPT = SrcReg (msSingleton ModLNEG) (RegP PT)
-sRC_NP0 :: Src
-sRC_NP0 = SrcReg (msSingleton ModLNEG) (RegP P0)
-sRC_NP1 :: Src
-sRC_NP1 = SrcReg (msSingleton ModLNEG) (RegP P1)
-sRC_NP2 :: Src
-sRC_NP2 = SrcReg (msSingleton ModLNEG) (RegP P2)
-sRC_NP3 :: Src
-sRC_NP3 = SrcReg (msSingleton ModLNEG) (RegP P3)
---
-sRC_RZ :: Src
-sRC_RZ = SrcReg msEmpty (RegR RZ)
-sRC_URZ :: Src
-sRC_URZ = SrcReg msEmpty (RegUR URZ)
---
-sRC_SR_CTAID_X :: Src
-sRC_SR_CTAID_X = SrcReg msEmpty (RegSR SR_CTAID_X)
-sRC_SR_TID_X :: Src
-sRC_SR_TID_X = SrcReg msEmpty (RegSR SR_TID_X)
---
-sRC_IMM_0 :: Src
-sRC_IMM_0 = SrcI32 0
-sRC_IMM_1 :: Src
-sRC_IMM_1 = SrcI32 1
-sRC_C00 :: Src
-sRC_C00 = SrcCon msEmpty (SurfImm 0) 0
-
 dST_PT :: Dst
 dST_PT = DstP PT
+
+dST_UPT :: Dst
+dST_UPT = DstUP UPT
 
 sHARED_DSTS :: DM.Map Dst Dst
 sHARED_DSTS = DM.fromList $ map (\x -> (x,x)) $
@@ -261,10 +367,46 @@ sHARED_DSTS = DM.fromList $ map (\x -> (x,x)) $
   , DstUR UR1
   , DstUR UR2
   , DstUR UR3
+  --
+  , DstUP UP0
+  , DstUP UP1
+  , dST_UPT
   ]
 
 dstIntern :: Dst -> Dst
 dstIntern = internLookup sHARED_DSTS
+
+sRC_PT :: Src
+sRC_PT = SrcReg msEmpty (RegP PT)
+--
+sRC_NPT :: Src
+sRC_NPT = SrcReg (msSingleton ModLNEG) (RegP PT)
+--
+sRC_RZ :: Src
+sRC_RZ = SrcReg msEmpty (RegR RZ)
+--
+sRC_URZ :: Src
+sRC_URZ = SrcReg msEmpty (RegUR URZ)
+--
+sRC_UPF :: Src
+sRC_UPF = SrcReg (msSingleton ModLNEG) (RegUP UPT)
+sRC_UPT :: Src
+sRC_UPT = SrcReg msEmpty (RegUP UPT)
+--
+sRC_SR_CTAID_X :: Src
+sRC_SR_CTAID_X = SrcReg msEmpty (RegSR SR_CTAID_X)
+sRC_SR_TID_X :: Src
+sRC_SR_TID_X = SrcReg msEmpty (RegSR SR_TID_X)
+--
+sRC_I32_0 :: Src
+sRC_I32_0 = SrcI32 0
+sRC_I32_1 :: Src
+sRC_I32_1 = SrcI32 1
+sRC_I32_15 :: Src
+sRC_I32_15 = SrcI32 0xF
+sRC_C00 :: Src
+sRC_C00 = SrcCon msEmpty (SurfImm 0) 0
+
 srcIntern :: Src -> Src
 srcIntern = internLookup sHARED_SRCS
 
@@ -278,16 +420,16 @@ sHARED_SRCS :: DM.Map Src Src
 sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   [
     sRC_PT
-  , sRC_P0
-  , sRC_P1
-  , sRC_P2
-  , sRC_P3
+  , SrcReg msEmpty (RegP P0)
+  , SrcReg msEmpty (RegP P1)
+  , SrcReg msEmpty (RegP P2)
+  , SrcReg msEmpty (RegP P3)
   --
   , sRC_NPT
-  , sRC_NP0
-  , sRC_NP1
-  , sRC_NP2
-  , sRC_NP3
+  , SrcReg (msSingleton ModLNEG) (RegP P0)
+  , SrcReg (msSingleton ModLNEG) (RegP P1)
+  , SrcReg (msSingleton ModLNEG) (RegP P2)
+  , SrcReg (msSingleton ModLNEG) (RegP P3)
   --
   , sRC_RZ
   , SrcReg msEmpty (RegR R0)
@@ -306,22 +448,43 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   , SrcReg msEmpty (RegUR UR3)
   --
   , SrcI32 0xFFFFFFFF
-  , sRC_IMM_0
-  , sRC_IMM_1
+  , sRC_I32_0
+  , sRC_I32_1
   , SrcI32 0x02
   , SrcI32 0x04
   , SrcI32 0x08
   , SrcI32 0x10
+  -- FP32
+  , SrcI32 0xFF800000 -- -INF
+  , SrcI32 0xFFC00000 -- -QNAN
+  , SrcI32 0xC0000000 -- -2
+  , SrcI32 0xBF800000 -- -1
+  , SrcI32 0xBF000000 -- -0.5
+  , SrcI32 0xBE800000 -- -0.25
+  -- 0.0 is above
+  , SrcI32 0x3E800000 -- 0.25
+  , SrcI32 0x3F000000 -- 0.5
+  , SrcI32 0x3F800000 -- 1
+  , SrcI32 0x40000000 -- 2
+  , SrcI32 0x7F800000 -- +INF
+  , SrcI32 0x7FC00000 -- +QNAN
   --
   , sRC_SR_TID_X
   , sRC_SR_CTAID_X
   --
   , sRC_C00
+  --
+  , sRC_UPF
+  , SrcReg msEmpty (RegUP UP0)
+  , SrcReg msEmpty (RegUP UP1)
+  , SrcReg (msSingleton ModLNEG) (RegUP UP0)
+  , SrcReg (msSingleton ModLNEG) (RegUP UP1)
+  , sRC_UPT
   ]
 
 data Imm =
     Imm32 !Word32
-  | Imm49 !Word64 -- for branches
+  | Imm49 !Int64 -- for branches
   deriving (Show,Eq,Ord)
 data Surf =
     SurfImm !Int
@@ -332,7 +495,7 @@ instance Syntax Surf where
   format (SurfReg ur) = "cx[" ++ format ur ++ "]"
 
 instance Syntax Src where
-  format = formatSrcWithOpts (defaultImmFormatter (Op "NOP"))
+  format = formatSrcWithOpts (defaultImmFormatter OpNOP)
 
 type ImmFormatter = Imm -> String
 --
@@ -347,7 +510,9 @@ defaultImmFormatter op imm =
       -- everything else
       | otherwise -> printf "0x%08X" u32
       where s32 = fromIntegral u32 :: Int32
-    Imm49 u64 -> printf "0x%013X" u64
+    Imm49 i64
+      | i64 < 0 -> "-" ++ printf "0x%013X" (-i64)
+      | otherwise -> printf "0x%013X" i64
 
 formatSrcWithOpts :: ImmFormatter -> Src -> String
 formatSrcWithOpts fmt_imm src =
@@ -355,6 +520,7 @@ formatSrcWithOpts fmt_imm src =
     SrcReg ms r -> msDecorate ms (format r)
     SrcCon ms six soff -> msDecorate ms (format six ++ printf "[0x%X]" soff)
     SrcImm i -> fmt_imm i
+    SrcTex to -> format to
 
 
 -- operand modifiers
@@ -375,6 +541,10 @@ data Mod =
   | ModROW -- IMMA ... R12.reuse.ROW
   | ModCOL --
   --
+  | ModB1 -- R2P.{B1,B2,B3} [77:76]
+  | ModB2
+  | ModB3
+  --
   -- more suffixes, but for LD*/ST* addr operands
   | ModU32   -- [R12.U32]
   | Mod64    -- [R12.64]
@@ -383,6 +553,7 @@ data Mod =
   | ModX8    -- LDS ... [R12.X8]
   | ModX16   -- LDS ... [R12.X16]
   deriving (Show,Eq,Ord,Enum)
+
 type ModSet = ES.EnumSet Mod
 msElem :: Mod -> ModSet -> Bool
 msElem = ES.elem
@@ -417,6 +588,7 @@ mMutuallyExclusive m1 m2 = m1 == m2 || check sets
             [ModLNEG,ModANEG,ModBNEG]
           , [ModX4,ModX8,ModX16]
           , [ModH0_H0,ModH1_H1]
+          , [ModB1,ModB2,ModB3]
           , [ModROW,ModCOL]
           , [ModU32,Mod64]
           ]
@@ -488,6 +660,17 @@ data R =
   | R248 | R249 | R250 | R251 | R252 | R253 | R254 | RZ
   deriving (Show,Eq,Enum,Read,Ord)
 
+-- used in DEPBAR
+data SB =
+    SB0
+  | SB1
+  | SB2
+  | SB3
+  | SB4
+  | SB5
+  deriving (Show,Eq,Enum,Read,Ord)
+
+-- These vary by product.  Some of the commented out registers are from old hardware
 data SR =
     SR_LANEID
   | SR_CLOCK
@@ -502,10 +685,10 @@ data SR =
   | SR_Y_DIRECTION
   | SR_THREAD_KILL
   | SM_SHADER_TYPE
-  | SR_DIRECTCBEWRITEADDRESSL
-  | SR_DIRECTCBEWRITEADDRESSH
+  | SR_DIRECTCBEWRITEADDRESSLOW -- SR_DIRECTCBEWRITEADDRESSL
+  | SR_DIRECTCBEWRITEADDRESSHIGH -- SR_DIRECTCBEWRITEADDRESSH
   | SR_DIRECTCBEWRITEENABLED
-  | SR_MACHINE_ID_0
+  | SR_SW_SCRATCH -- SR_MACHINE_ID_0
   | SR_MACHINE_ID_1
   | SR_MACHINE_ID_2
   | SR_MACHINE_ID_3
@@ -563,40 +746,28 @@ data SR =
   | SR86 | SR87 | SR88 | SR89 | SR90 | SR91 | SR92 | SR93 | SR94 | SR95
   --
   | SR_HWTASKID
-  | SR_CIRCULARQUEUEENTRYINDE
-  | SR_CIRCULARQUEUEENTRYADDR
-  | SR_PM0
-  | SR_PM_HI0
-  | SR_PM1
-  | SR_PM_HI1
-  | SR_PM2
-  | SR_PM_HI2
-  | SR_PM3
-  | SR_PM_HI3
-  | SR_PM4
-  | SR_PM_HI4
-  | SR_PM5
-  | SR_PM_HI5
-  | SR_PM6
-  | SR_PM_HI6
-  | SR_PM7
-  | SR_PM_HI7
-  | SR_SNAP_PM0
-  | SR_SNAP_PM_HI0
-  | SR_SNAP_PM1
-  | SR_SNAP_PM_HI1
-  | SR_SNAP_PM2
-  | SR_SNAP_PM_HI2
-  | SR_SNAP_PM3
-  | SR_SNAP_PM_HI3
-  | SR_SNAP_PM4
-  | SR_SNAP_PM_HI4
-  | SR_SNAP_PM5
-  | SR_SNAP_PM_HI5
-  | SR_SNAP_PM6
-  | SR_SNAP_PM_HI6
-  | SR_SNAP_PM7
-  | SR_SNAP_PM_HI7
+  | SR_CIRCULARQUEUEENTRYINDEX -- SR_CIRCULARQUEUEENTRYINDE
+  | SR_CIRCULARQUEUEENTRYADDRESSLOW -- SR_CIRCULARQUEUEENTRYADDR
+  | SR_CIRCULARQUEUEENTRYADDRESSHIGH -- this was missing in the past
+  --
+  | SR_PM0 | SR_PM_HI0
+  | SR_PM1 | SR_PM_HI1
+  | SR_PM2 | SR_PM_HI2
+  | SR_PM3 | SR_PM_HI3
+  | SR_PM4 | SR_PM_HI4
+  | SR_PM5 | SR_PM_HI5
+  | SR_PM6 | SR_PM_HI6
+  | SR_PM7 | SR_PM_HI7
+  --
+  | SR_SNAP_PM0 | SR_SNAP_PM_HI0
+  | SR_SNAP_PM1 | SR_SNAP_PM_HI1
+  | SR_SNAP_PM2 | SR_SNAP_PM_HI2
+  | SR_SNAP_PM3 | SR_SNAP_PM_HI3
+  | SR_SNAP_PM4 | SR_SNAP_PM_HI4
+  | SR_SNAP_PM5 | SR_SNAP_PM_HI5
+  | SR_SNAP_PM6 | SR_SNAP_PM_HI6
+  | SR_SNAP_PM7 | SR_SNAP_PM_HI7
+  --
   | SR_VARIABLE_RATE
   | SR_TTU_TICKET_INFO
   --
@@ -632,16 +803,47 @@ data UR =
   deriving (Show,Eq,Enum,Read,Ord)
 
 data UP =
-    -- there is no UPT (true), but the non-negated use
-    -- of UP7 appears to be treated that way in uniform ops
-    -- (shows no predication on the instruction)
-    UP0 | UP1 | UP2 | UP3 | UP4 | UP5 | UP6 | UP7
+    -- Older assemblers used to produce UP7, but I believe this
+    -- should have been UPT since it was treated that way logically
+    -- in operations (i.e. as an ignored unshown identity value).
+    UP0 | UP1 | UP2 | UP3 | UP4 | UP5 | UP6 | UPT
   deriving (Show,Eq,Enum,Read,Ord)
 
+-- Barrier convergence registers (c.f. BSSY)
 data BR =
     B0  | B1  | B2  | B3  | B4  | B5  | B6  | B7
   | B8  | B9  | B10 | B11 | B12 | B13 | B14 | B15
+  --
+  -- c.f. BMOV
+  | THREAD_STATE_ENUM_0 -- "THREAD_STATE_ENUM.0"
+  | THREAD_STATE_ENUM_1
+  | THREAD_STATE_ENUM_2
+  | THREAD_STATE_ENUM_3
+  | THREAD_STATE_ENUM_4
+  | TRAP_RETURN_PC_LO -- "TRAP_RETURN_PC.LO"
+  | TRAP_RETURN_PC_HI -- "TRAP_RETURN_PC.HI"
+  | TRAP_RETURN_MASK
+  | MEXITED
+  | MKILL
+  | MACTIVE
+  | MATEXIT
+  | OPT_STACK
+  | API_CALL_DEPTH
+  | ATEXIT_PC_LO -- "ATEXIT_PC.LO"
+  | ATEXIT_PC_HI -- "ATEXIT_PC.HI"
   deriving (Show,Eq,Enum,Read,Ord)
+
+-- used in TEX and TLD as a source operand
+data TexOp =
+    TexOp1D
+  | TexOp2D
+  | TexOp3D
+  | TexOpCUBE
+  | TexOpARRAY_1D
+  | TexOpARRAY_2D
+  | TexOpINVALID6
+  | TexOpARRAY_CUBE
+  deriving (Show,Eq,Ord,Enum)
 
 -- this type omits src reuse info as we couple that with the operands
 data DepInfo =
@@ -675,14 +877,15 @@ instance Syntax DepInfo where
               Just b -> "+" ++ show b ++ "." ++ what
 diIntern :: DepInfo -> DepInfo
 diIntern di
-  | diDefault == di = diDefault
-  | diStall1 == di = diStall1
-  | diStall2 == di = diStall2
-  | diStall4Y == di = diStall4Y
-  | diStall10Y == di = diStall10Y
-  | diStall12Y == di = diStall12Y
+  | diDefault == di = diDefault   -- {}
+  | diStall1 == di = diStall1     -- {!1}
+  | diStall2 == di = diStall2     -- {!2}
+  | diStall3 == di = diStall3     -- {!3}
+  | diStall4Y == di = diStall4Y   -- {!4,Y}
+  | diStall10Y == di = diStall10Y -- {!10,Y}
+  | diStall12Y == di = diStall12Y -- {!12,Y}
   | otherwise = di
-diDefault, diStall1, diStall2, diStall4Y, diStall10Y, diStall12Y :: DepInfo
+diDefault, diStall1, diStall2, diStall3, diStall4Y, diStall10Y, diStall12Y :: DepInfo
 diDefault =
   DepInfo {
     diStalls = 0
@@ -693,6 +896,7 @@ diDefault =
   }
 diStall1 = diDefault{diStalls = 1}
 diStall2 = diDefault{diStalls = 2}
+diStall3 = diDefault{diStalls = 3}
 diStall4Y = diDefault{diStalls = 4,diYield = True}
 diStall10Y = diDefault{diStalls = 10,diYield = True}
 diStall12Y = diDefault{diStalls = 12,diYield = True}
@@ -724,30 +928,54 @@ instance Syntax UR where format = show
 
 instance Codeable UP where
   encode = encodeEnum
-  decode = decodeEnum UP0 UP7
+  decode = decodeEnum UP0 UPT
 instance Syntax UP where format = show
 
 instance Codeable BR where
   encode = encodeEnum
-  decode = decodeEnum B0 B15
-instance Syntax BR where format = show
+  decode = decodeEnum B0 ATEXIT_PC_HI
+instance Syntax BR where
+  format b =
+    case b of
+      THREAD_STATE_ENUM_0 -> "THREAD_STATE_ENUM.0"
+      THREAD_STATE_ENUM_1 -> "THREAD_STATE_ENUM.1"
+      THREAD_STATE_ENUM_2 -> "THREAD_STATE_ENUM.2"
+      THREAD_STATE_ENUM_3 -> "THREAD_STATE_ENUM.3"
+      THREAD_STATE_ENUM_4 -> "THREAD_STATE_ENUM.4"
+      TRAP_RETURN_PC_LO -> "TRAP_RETURN_PC.LO"
+      TRAP_RETURN_PC_HI -> "TRAP_RETURN_PC.HI"
+      ATEXIT_PC_LO -> "ATEXIT_PC.LO"
+      ATEXIT_PC_HI -> "ATEXIT_PC.HI"
+      _ -> show b
+
+instance Codeable SB where
+  encode = encodeEnum
+  decode = decodeEnum SB0 SB5
+instance Syntax SB where format = show
+
+instance Codeable TexOp where
+  encode = encodeEnum
+  decode = decodeEnum TexOp1D TexOpARRAY_CUBE
+instance Syntax TexOp where
+  format = drop (length "TexOp") . show
 
 
 -- instruction options are the tokens following the mnemonic
-type InstOptSet = ES.EnumBitSet Word128 InstOpt
+type InstOptSet = ES.EnumBitSet Word256 InstOpt
 iosToList :: InstOptSet -> [InstOpt]
 iosToList = ES.toList
 iosFromList :: [InstOpt] -> InstOptSet
-iosFromList = ES.fromList
+iosFromList = iosIntern . ES.fromList
 iosElem :: InstOpt -> InstOptSet -> Bool
 iosElem = ES.elem
 iosIntersect :: InstOptSet -> InstOptSet -> InstOptSet
-iosIntersect = ES.intersect
+iosIntersect ios_l = iosIntern . ES.intersect ios_l
 iosEmpty :: InstOptSet
 iosEmpty = ES.empty
 iosNull :: InstOptSet -> Bool
 iosNull = ES.null
-
+iosIntern :: InstOptSet -> InstOptSet
+iosIntern ios = if iosNull ios then iosEmpty else ios
 
 data InstOpt =
     -- ISETP/UISETP
@@ -766,30 +994,67 @@ data InstOpt =
   | InstOptLEU
   | InstOptGEU
   | InstOptGTU
-  -- DSETP
-  | InstOptMAX
+  | InstOptNUM
+  | InstOptNAN
+  | InstOptMIN -- also REDUX
+  | InstOptMAX -- also REDUX
   --
   | InstOptEX -- ISETP
+  --
+  -- REDUX
+  | InstOptSUM
   --
   | InstOptAND
   | InstOptOR
   | InstOptXOR
   --
-  | InstOptFTZ -- FSETP, others
-  | InstOptRZ -- round to zero
-  | InstOptRE -- round to even
-  | InstOptRP -- round to plus inf
-  | InstOptRM -- round to minus inf
+  -- W
+  | InstOptW -- SGXT.W
   --
-  | InstOptU32 -- IMAD
+  -- FLO.*
+  | InstOpSH
+  --
+  -- ATOM.*
+  | InstOptADD
+  | InstOptEXCH
+  | InstOptCAS
+  | InstOptCAST
+  | InstOptARRIVE -- ATOMS.ARRIVE.64
+  | InstOptPOPC -- ATOMS.POPC.INC.32
+  | InstOptSPIN
+  --
+  -- B2R.RESULT
+  | InstOptRESULT
+  | InstOptWARP
+  --
+  -- BAR.SYNC
+  | InstOptARV
+  | InstOptDEFER_BLOCKING
+  | InstOptRED
+  | InstOptSYNC
+  | InstOptSYNCALL
+  --
+  -- BRA.{INC,DEC} (bit [86:85])
+  | InstOptINC
+  | InstOptDEC
+  --
+  -- rounding modes in FMP, FSETP, etc...
+  | InstOptFTZ -- FSETP, others
+  | InstOptRZ  -- round to zero
+  | InstOptRE  -- round to even
+  | InstOptRP  -- round to plus inf
+  | InstOptRM  -- round to minus inf
+  | InstOptRN  -- round to negative
   --
   | InstOptWIDE -- IMAD
   --
-  | InstOptX -- IADD3.X
+  | InstOptX    -- IADD3.X
+  --
+  | InstOptSAT  -- I2I.U16.S32.SAT
   --
   | InstOptPAND -- LOP3.LUT.PAND
   --
-  | InstOptL -- SHF.L
+  | InstOptL -- SHF.L / QSPC.L
   | InstOptR -- SHF.R
   --
   | InstOptHI -- SHF, IADD3, ...
@@ -800,15 +1065,31 @@ data InstOpt =
   | InstOptIDX
   | InstOptBFLY
   --
+  -- PRMT
+  | InstOptF4E
+  | InstOptB4E
+  | InstOptRC8
+  | InstOptECL
+  | InstOptECR
+  | InstOptRC16
+  --
   | InstOptREL -- call/ret
   | InstOptABS
   | InstOptNODEC
   | InstOptNOINC
   --
-  | InstOptRCP -- MUFU.*
-  | InstOptLG2
+  -- MUFU.*
+  | InstOptCOS
+  | InstOptSIN
   | InstOptEX2
+  | InstOptLG2
+  | InstOptRCP
   | InstOptRSQ
+  | InstOptRCP64H
+  | InstOptRSQ64H
+  | InstOptSQRT
+  | InstOptTANH
+  -- invalid
   --
   | InstOptE   -- LD*/ST*
   | InstOptU   -- .U (part of .U.128)
@@ -816,8 +1097,12 @@ data InstOpt =
   | InstOptS8  -- .S8
   | InstOptU16 -- .U16
   | InstOptS16 -- .S16
+  | InstOpt32  -- .32  (BMOV)
   | InstOpt64  -- .64
   | InstOpt128 -- .128
+  | InstOptS32 -- .S32 (REDUX)
+  | InstOptU64 -- .U64 (I2F)
+  | InstOptS64 -- .S64 (I2F)
   --
   | InstOptPRIVATE
   --
@@ -837,12 +1122,134 @@ data InstOpt =
   | InstOptLU
   | InstOptEU
   | InstOptNA
+  -- membar
+  | InstOptSC -- MEMBAR.SC.GPU
+  | InstOptVC -- MEMBAR.ALL.VC (also in RED)
   --
-  -- WARNING: this mustn't exceed 64 or we need to change our EnumSet
+  -- QSPC
+  | InstOptS  -- QSPC.E.S
+  | InstOptG  -- QSPC.E.G
+  --
+  -- SUST.D.BA.3D.U8.CONSTANT.CTA.PRIVATE.TRAP ..
+  ---SUST.D.BA.2D.STRONG.SM.TRAP ..
+  | InstOptD
+  | InstOptBA
+  | InstOpt3D
+  | InstOpt2D
+  --
+  -- TEX.*
+  | InstOptAOFFI
+  | InstOptB
+  | InstOptDC
+  | InstOptLL
+  | InstOptLB
+  | InstOptLZ
+  | InstOptNDV
+  | InstOptNODEP
+  | InstOptSCR
+  --
+  | InstOptB1 -- P2R
+  | InstOptB2 -- P2R
+  | InstOptB3 -- P2R
+  --
+  | InstOptLDGSTSBAR -- ARRIVES.*
+  | InstOptCLEAR     -- BMOV.32.CLEAR
+  | InstOptPQUAD     -- BMOV.32.PQUAD (bit 84)
+  --
+  | InstOptTRAP      -- BPT.TRAP
+  | InstOptINT       -- BPT.INT
+  --
+  | InstOptIVALL     -- CCTL.IVAL (invalidate all)
+  --
+  | InstOpt884       -- e.g. DMMA.884
+  | InstOpt8816      -- e.g. DMMA.884
+  | InstOpt1684      -- HMMA
+  | InstOpt1688      -- HMMA
+  | InstOpt16816     -- e.g. HMMA.16816.F32.BF16
+  | InstOpt16832     -- e.g. IMMA.16832
+  --
+  -- NOTE: since order matters in F2F (src vs dst) we fuse
+  -- some pairs of options and give them special handling in both
+  | InstOptF16_TF32  -- HMMA.1688.F32.TF32
+  | InstOptF16_F32   -- F2F.F16.F32
+  | InstOptF16_F64   -- F2F.F16.F64 -- not sure if this exists
+  | InstOptBF16_F32  -- F2F.BF16.F32
+  | InstOptBF16_F64  -- F2F.BF16.F64 -- not sure if this exists
+  | InstOptF32_F16   -- F2F.F32.F16
+  | InstOptF32_BF16  -- HMMA.16816.F32.BF16
+  | InstOptF32_TF32  -- HMMA.1688.F32.TF32
+  | InstOptF32_F64   -- F2F.F32.F64
+  | InstOptF64_F16   -- F2F.F64.F16
+  | InstOptF64_F32   -- F2F.F64.F32
+  -- same for I2I
+  | InstOptS8_S32    -- I2I.S8.S32
+  | InstOptS16_S32   -- I2I.S16.S32
+  | InstOptU8S_32    -- I2I.U8.S32
+  | InstOptU16_S32   -- I2I.U16.S32
+  --
+  | InstOptU32       -- IMAD
+  | InstOptF32       -- HADD.F32
+  | InstOptF64       -- FRND.F64.TRUNC
+  | InstOptBF        -- HSET2.BF.EQ.AND / FSET.BF.GT.AND
+  | InstOptBF16      -- F2FP.BF16.PACK_AB
+  | InstOptBF16_V2   -- HFMA2.BF16_V2
+  | InstOptF16       -- HMMA.16816.F16
+  | InstOptF16x2     -- ATOM....
+  --
+  -- IDP.*
+  | InstOpt4A_U8_U8
+  | InstOpt4A_S8_U8
+  | InstOpt4A_U8_S8
+  | InstOpt4A_S8_S8
+  | InstOpt2A_LO_U16_U8
+  | InstOpt2A_LO_U16_S8
+  | InstOpt2A_LO_S16_U8
+  | InstOpt2A_LO_S16_S8
+  | InstOpt2A_HI_U16_U8
+  | InstOpt2A_HI_U16_S8
+  | InstOpt2A_HI_S16_U8
+  | InstOpt2A_HI_S16_S8
+  --
+  | InstOptTRUNC     -- F2I.TRUNC.NTZ
+  | InstOptCEIL      -- F2I.U32.CEIL.NTZ
+  | InstOptNTZ       -- F2I.TRUNC.NTZ
+  | InstOptFMZ       -- FFMA.FMZ.RZ.SAT
+  | InstOptFLOOR     -- FRND.FLOOR
+  | InstOptMMA       -- HFMA2.MMA
+  | InstOptSX32      -- LEA
+  | InstOptSH        -- FLO.U32.SH
+  | InstOptBYPASS    -- LDGSTS.E.BYPASS.128.ZFILL
+  | InstOptZFILL     -- LDGSTS.E.BYPASS.128.ZFILL
+  | InstOptLTC128B   -- LDGSTS.E.BYPASS.LTC128B.128.CONSTANT
+  | InstOptPACK_AB   -- F2FP.BF16.PACK_AB
+  --
+  | InstOpt16_M88_4  -- LDSM.16.M88.4
+  | InstOpt16_M88_2  -- LDSM.16.M88.2
+  | InstOpt16_MT88_4 -- LDSM.16.MT88.4
+  -- TODO: maybe others for LDSM
+  --
+  | InstOpt16_MT88 -- MOVM.16.MT88
+  | InstOpt16_M832 -- MOVM.16.M832 (synthetically generated)
+  | InstOpt16_M864 -- MOVM.16.M864 (synthetically generated)
+  --
+  -- MATCH.*
+  | InstOptANY
+  | InstOptALL
+  --
+  -- WARPSYNC
+  | InstOptEXCLUSIVE
   deriving (Show,Eq,Ord,Enum)
+  -- WARNING: this mustn't exceed 128 or we need to change our EnumSet to use a Word256
+
+
 instance Syntax InstOpt where
-  -- format = ('.':) . drop (length "InstOpt") . show
-  format = drop (length "InstOpt") . show
+  format InstOptDEFER_BLOCKING = "DEFER_BLOCKING"
+  format InstOptPACK_AB = "PACK_AB"
+  format InstOptBF16_V2 = "BF16_V2"
+  -- normal cases
+  format o = underscoresToDots $ drop (length "InstOpt") (show o)
+    where underscoresToDots = map (\c -> if c == '_' then '.' else c)
+
 inst_opt_isetp_functions :: InstOptSet
 inst_opt_isetp_functions = iosFromList
   [
@@ -864,9 +1271,9 @@ inst_opt_ldst_ordering = iosFromList [InstOptCONSTANT, InstOptSTRONG, InstOptMMI
 inst_opt_ldst_caching :: InstOptSet
 inst_opt_ldst_caching = iosFromList [InstOptEF, InstOptEL, InstOptLU, InstOptEU, InstOptNA]
 
-
 all_inst_opts :: [InstOpt]
 all_inst_opts = [toEnum 0 ..]
+
 
 
 fmtInst :: ImmFormatter -> Inst -> String
@@ -889,7 +1296,7 @@ fmtInst fmt_imm i =
         --  * .SHL  K, X            <-  X*(2^K) + RZ
         synthetic_tokens :: String
         synthetic_tokens
-          | iOp i == Op "IMAD" =
+          | iOp i == OpIMAD =
             case iSrcs i of
               (src0:src1:src2:_)
                 | isRZ src0 || isRZ src1 -> ".MOV"   -- RZ*X + Y = MOV Y
@@ -907,10 +1314,10 @@ fmtInst fmt_imm i =
                       isPow2Gt1 _ = False
               _ -> ""
           -- unless I choose to use the LUT as syntax
-          | iOp i == Op "LOP3" && length (iSrcs i) == 4 =
+          | iOp i == OpLOP3 && length (iSrcs i) == 4 =
             case drop 3 (iSrcs i) of
               [SrcI32 imm] -> ".(" ++ fmtLop3 (fromIntegral imm) ++ ")"
-          | iOp i == Op "PLOP3" = ".LUT"
+          | iOp i == OpPLOP3 = ".LUT"
           | otherwise = ""
 
         opnds_str :: String
@@ -947,14 +1354,14 @@ fmtInst fmt_imm i =
                 srcs = map (formatSrcWithOpts fmt_imm) visible_srcs
 
                 visible_srcs
-                  | iOp i == Op "IADD3" =
+                  | iOp i == OpIADD3 =
                     case iSrcs i of
                       -- (SrcP False PT:SrcP False PT:sfx) -> sfx
                       -- (SrcP False PT:sfx) -> sfx
                       SrcPT:SrcPT:sfx -> sfx
                       SrcPT:sfx -> sfx
                       sfx -> sfx
-                  | iOp i == Op "LOP3" = take 3 (iSrcs i)
+                  | iOp i == OpLOP3 = take 3 (iSrcs i)
                   | otherwise = iSrcs i
                 ext_pred_srcs = map (drop 1 . format) (iSrcPreds i) -- drop 1 for the @ format produces
 

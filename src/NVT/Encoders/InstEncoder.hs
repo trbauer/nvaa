@@ -709,7 +709,7 @@ eInst i = enc
           eHandleInstOptBitWhen fLDST_PRIVATE InstOptPRIVATE $
                 not (oIsSLM (iOp i)) && not (oIsLDST_L (iOp i))
           --
-          let is_ldc = Op "LDC" == iOp i
+          let is_ldc = OpLDC == iOp i
           --
           let allows_scope =
                 not is_ldc && all (not . ($iOp i)) [oIsLDST_L, oIsSLM]
@@ -838,9 +838,9 @@ eInst i = enc
               -- The vector address always goes in the same register
               eEncode fLDST_ADDR_REG r_addr
               --
-              let is_lds_ldsm = iOp i `elem` map Op ["LDS","LDSM","LDL","LD"]
+              let is_lds_ldsm = iOp i `elem` [OpLDS,OpLDSM,OpLDL,OpLD]
                   uses_ur = ur /= URZ
-                  op_ldg_ld_stg_st = iOp i `elem` map Op ["LDG","LD","STG","ST"]
+                  op_ldg_ld_stg_st = iOp i `elem` [OpLDG,OpLD,OpSTG,OpST]
                   bits_11_9 = if is_lds_ldsm || uses_ur then 4 else 1
               eRegFile uses_ur bits_11_9
               when uses_ur $
@@ -858,7 +858,7 @@ eInst i = enc
                     -- LD/ST with UR uses the high 24 only,
                     -- but otherwise gets the full 24b
                     -- | iOp i `elem` map Op ["LD","ST"] && not uses_ur = fLD_ADDR_IMMOFF32
-                    | iOp i `elem` map Op ["LD","ST"] && not uses_ur = fLDST_ADDR_IMMOFF32
+                    | iOp i `elem` [OpLD,OpST] && not uses_ur = fLDST_ADDR_IMMOFF32
                     | otherwise = fLDST_ADDR_IMMOFF24
               eSIMM fADDR_IMMOFF (fromIntegral (fromIntegral imm :: Int32))
               --
@@ -879,10 +879,10 @@ eInst i = enc
         eLD :: E ()
         eLD = do
           case iOp i of
-            Op "LD"  -> eField fOPCODE 0x180
-            Op "LDG" -> eField fOPCODE 0x181
-            Op "LDL" -> eField fOPCODE 0x183
-            Op "LDS" -> eField fOPCODE 0x184
+            OpLD  -> eField fOPCODE 0x180
+            OpLDG -> eField fOPCODE 0x181
+            OpLDL -> eField fOPCODE 0x183
+            OpLDS -> eField fOPCODE 0x184
             _ -> eFatalF fOPCODE "unhandled load op"
           --
           ePredication
@@ -908,7 +908,7 @@ eInst i = enc
         --  [ 1][ 1][  0  ][IMM24][ UR  ][ RZ  ][DATA ][ 4 ]   LDG DATA, [    UR+IMM24]
         eDstLD :: E ()
         eDstLD = do
-          let supports_zd = iOp i `elem` [Op "LDG",Op "LDS"] -- [Op "LDG",Op "LD"]
+          let supports_zd = iOp i `elem` [OpLDG,OpLDS]
           eHandleInstOptBitWhen fLD_ZD InstOptZD supports_zd
           case iDsts i of
             [DstP r_prd,DstR r_data] -> do
@@ -918,7 +918,7 @@ eInst i = enc
               eEncode fDST_REG r_data
             [DstR r_data] -> do
               if supports_zd then
-                  when (iOp i /= Op "LDS") $ eEncode fLD_ZD_PREG PT
+                  when (iOp i /= OpLDS) $ eEncode fLD_ZD_PREG PT
                 else if iHasOpt InstOptZD
                   then eFatalF fLD_ZD "missing predicate dst for .ZD"
                 else return ()
@@ -952,10 +952,10 @@ eInst i = enc
         eST :: E ()
         eST = do
           case iOp i of
-            Op "ST"   -> eField fOPCODE 0x185
-            Op "STG"  -> eField fOPCODE 0x186
-            Op "STL"  -> eField fOPCODE 0x187
-            Op "STS"  -> eField fOPCODE 0x188
+            OpST  -> eField fOPCODE 0x185
+            OpSTG -> eField fOPCODE 0x186
+            OpSTL -> eField fOPCODE 0x187
+            OpSTS -> eField fOPCODE 0x188
             _ -> eFatalF fOPCODE "unhandled store op"
           --
           ePredication
@@ -968,7 +968,7 @@ eInst i = enc
                     where isUR (Src_UR _ ur) = ur /= URZ
                           isUR _ = False
                   (fST_DATAREG,fST_UROFF)
-                    | op == Op "ST" && not ur_used = (fST_DATA_REG_HI,error "eST: unreachable")
+                    | op == OpST && not ur_used = (fST_DATA_REG_HI,error "eST: unreachable")
                     | otherwise = (fST_DATA_REG_LO,fLDST_ADDR_UROFF_HI)
               eAddrsLDST fST_UROFF src_addrs
               unless (msNull ms) $

@@ -16,12 +16,24 @@ dFormat :: Diagnostic -> String
 dFormat d = lFormat (dLoc d) ++ ": " ++ dMessage d
 
 dFormatWithLines :: [String] -> Diagnostic -> String
-dFormatWithLines lns d =
+dFormatWithLines lns = dFormatWithMappings (zip [1..] lns)
+
+dFormatWithCurrentLine :: (Int,String) -> Diagnostic -> String
+dFormatWithCurrentLine lm = dFormatWithMappings [lm]
+
+-- format the location with the real line, but
+dFormatWithMappings :: [(Int,String)] -> Diagnostic -> String
+dFormatWithMappings lms d =
     lFormat (dLoc d) ++ ": " ++ dMessage d ++ context
-  where context
-          | ln - 1 < 0 || ln - 1 >= length lns || cl == 0 = ""
-          | otherwise = "\n" ++
-            lns !! (ln - 1) ++ "\n" ++
-            replicate (cl - 1) ' ' ++ "^"
+  where context =
+          case ln`lookup`lms of
+            Nothing -> ""
+            Just ctx ->
+              "\n" ++
+              ctx ++ "\n" ++
+              replicate (cl - 1) ' ' ++ "^"
+
         ln = lLine (dLoc d)
         cl = lColumn (dLoc d)
+
+

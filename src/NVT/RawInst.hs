@@ -83,23 +83,26 @@ fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
           | otherwise  = " " ++ intercalate ", " (riOperands ri)
         --
         mne
-          | raw = riMnemonic ri
-          | "LOP3.LUT" `isInfixOf` riMnemonic ri = lop ++ "." ++ lop_func
+          | not raw && is_lop = lop ++ "." ++ lop_func
           | otherwise = riMnemonic ri
-          where lop :: String
+          where is_lop :: Bool
+                is_lop = any (`isPrefixOf`riMnemonic ri) ["LOP3","PLOP3","ULOP3","UPLOP3"]
+
+                lop :: String
                 lop = takeWhile (/='.') (riMnemonic ri)
                 --
-                lut_ix :: Int
-                lut_ix
-                  | "P" `isPrefixOf` head (riOperands ri) = 5
-                  | otherwise = 4
-                --
+                -- ULOP3.LUT UR12, UR6, 0x5, URZ, 0xfc, !UPT
+                -- UPLOP3.LUT UP0, UPT, UPT, UPT, UPT, 0x80, 0x0
                 lop_func :: String
                 lop_func =
-                  case reads (riOperands ri !! lut_ix) of
-                    [(x,"")] | x <= 255 -> "(" ++ fmtLop3 x ++ ")"
-                    _ -> "LUT"
+                  case drop 1 (reverse (riOperands ri)) of
+                    [] -> "LUT"
+                    op_str:_ ->
+                      case reads op_str of
+                        [(x,"")] | x <= 255 -> "(" ++ fmtLop3 x ++ ")"
+                        _ -> "LUT"
         --
+        dep_info :: String
         dep_info
           | raw = ""
           | null tokens = ""
@@ -194,34 +197,46 @@ parseRawInst' = parseSyntax . skipWs
 
                 parseMnemonic :: RawInst -> String -> Either String (RawInst,String)
                 parseMnemonic ri sfx =
-                  case span (\c -> isAlphaNum c || c == '.' || c`elem`"_(~&^|)") (skipWs sfx) of
+                  case span (\c -> isAlphaNum c || c`elem`"._(~&^|)") (skipWs sfx) of
                     (mne,sfx) -> parseOperands (ri{riMnemonic = mne}) (skipWs sfx)
 
                 parseOperands :: RawInst -> String -> Either String (RawInst,String)
                 parseOperands ri sfx =
-                  case sfx of
-                    -- nullary instruction
-                    ';':sfx -> return (ri,dropWhile isSpace sfx)
-                    s ->
-                      case span (not . (`elem`",;{")) s of
-                        (op,sfx) ->
-                            case skipWs sfx of
-                              ',':sfx -> parseOperands ri1 sfx
-                              ';':sfx -> return (ri1,dropWhile isSpace sfx)
-                              -- skip control info
-                              '{':sfx ->
-                                case span (/='}') sfx of
-                                  (opts,'}':s) -> parseOperands (ri1 {riDepInfo = ws}) (skipWs s)
-                                    where ws = words (map (\c -> if c == ',' then ' ' else c) opts)
-                                  (opts,s) -> Left "expected }"
-                              -- case dropWhile (/=';') (drop 1 sfx) of
-                              --  "" -> Nothing
-                              --  ';':sfx -> return (SampleInst ri1 (Word128 0 0),dropWhile isSpace sfx)
-                              "" -> Left "expected ;"
-                          where ri1 = ri{riOperands = riOperands ri ++ [trimWs op]}
+                    case trimWs sfx of
+                      -- end of instruction
+                      "" -> return (ri,"")
+                      --
+                      -- end of instruction
+                      ';':sfx -> return (ri,dropWhile isSpace sfx)
+                      --
+                      -- start next operand
+                      ',':sfx -> parseOperands ri (trimWs sfx)
+                      --
+                      -- either start of dep info or special case DEPBAR
+                      '{':sfx
+                        | "DEPBAR"`isInfixOf`riMnemonic ri ->
+                          case span (/='}') sfx of
+                            (body,'}':sfx1)
+                              | all (\c -> isDigit c || c `elem` ",") body ->
+                                parseOperands (ri{riOperands = riOperands ri ++ ["{" ++ body ++ "}"]}) (trimWs sfx1)
+                              | otherwise -> addDepInfo sfx
+                            _ -> addDepInfo sfx
+                        | otherwise -> addDepInfo sfx
+                      --
+                      -- normal operand
+                      sfx -> handleNormalOp sfx
+                  where handleNormalOp sfx =
+                            case span (not . (`elem`",;{")) sfx of
+                              (op,sfx) -> addOperand op sfx
+                          where addOperand op sfx = parseOperands ri1 (trimWs sfx)
+                                  where ri1 = ri{riOperands = riOperands ri ++ [trimWs op]}
 
--- tryEncodingPrefix :: String -> Maybe (Word128,String)
--- tryEncodingPrefix s
+                        addDepInfo sfx =
+                          case span (/='}') sfx of
+                            (opts,'}':sfx) -> parseOperands (ri {riDepInfo = ws}) (skipWs sfx)
+                              where ws = words (map (\c -> if c == ',' then ' ' else c) opts)
+                            (opts,sfx) -> Left $ "expected } ==" ++ show (opts,sfx)
+
 
 parseSampleInst :: String -> Either String SampleInst
 parseSampleInst s = -- parseLongForm s <|> parseShortForm s
@@ -357,11 +372,6 @@ skipWs (c:cs)
 --           dropWhile isSpace . drop 1 .
 --             dropWhile (/='/') . drop 1 . dropWhile (/='/')
 
-
--- disBits :: Word128 -> IO RawInst
--- disBits =
-
-
 getTempFile :: IO FilePath
 getTempFile = do
 -- TODO: need a temp file
@@ -369,6 +379,16 @@ getTempFile = do
   (fp,h) <- openTempFile temp_dir "nvaa.bin"
   hClose h
   return fp
+
+disBits :: Opts -> Word128 -> IO String
+disBits os w128 = head <$> disBitsBatch os [w128]
+
+disBitsBatch :: Opts -> [Word128] -> IO [String]
+disBitsBatch os w128s = do
+  let addDeps :: (Word128,String) -> String
+      addDeps (w128,syn) = syn ++ deps
+        where deps = " {" ++ intercalate "," (decodeDepInfo w128) ++ "};"
+  map addDeps . zip w128s <$> disBitsRawBatch os w128s
 
 disBitsRaw :: Opts -> Word128 -> IO String
 disBitsRaw os w128 = head <$> disBitsRawBatch os [w128]
@@ -386,8 +406,8 @@ disBitsRawBatch os w128s = setup
         decodeChunk _         _       [] = return []
         decodeChunk temp_file chunk_len w128s = do
           let (w128s_chunk,w128s_sfx) = splitAt chunk_len w128s
-          BS.writeFile temp_file (BS.concat (map toByteStringW128 w128s_chunk))
-
+              bs = BS.concat (map toByteStringW128 w128s_chunk)
+          BS.writeFile temp_file bs
           (ec,oup,err) <-
             runCudaToolWithExitCode os "nvdisasm" [
                     "--no-vliw"
@@ -399,7 +419,7 @@ disBitsRawBatch os w128s = setup
           case ec of
             ExitFailure _
               | chunk_len == 1 -> do
-                -- failed at the smallest value, it's a legit error
+                  -- failed at the smallest value, it's a legit error
                   debugLn os $
                     "*** nvdisasm failed chunk (" ++ show chunk_len ++ ") ***"
                   let this_error = (\ls -> if null ls then "???" else head ls) (lines err)
@@ -419,12 +439,18 @@ disBitsRawBatch os w128s = setup
             ExitSuccess -> do
               debugLn os $
                 "*** nvdisasm succeeded with chunk(" ++ show chunk_len ++ ") ***"
-              -- we get a header line with .headerflags first, drop it and emit
-              let filterOutput = map (removeSemi . trimWs . skipWs) . drop 1 . lines
+              -- 1. we get a header line with .headerflags first, drop it and emit rest
+              -- 2. in some strange cases nvdisasm just fails to produce output
+              let filterOutput :: String -> [String]
+                  filterOutput =
+                      pad . map (removeSemi . trimWs . skipWs) . drop 1 . lines
                     where removeSemi s
                             | null s = s
                             | last s == ';' = trimWs (init s)
                             | otherwise = s
+                          pad lns = lns ++ replicate (length w128s_chunk - length lns) pad_ln
+                            where pad_ln = "*** nvdisasm failed to produce output ***"
+
               -- hope we got past the error and reduce size
               (filterOutput oup++) <$> decodeChunk temp_file (min (chunk_len*2) (length w128s_sfx)) w128s_sfx
 

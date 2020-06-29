@@ -10,6 +10,7 @@ import Control.Concurrent.MVar
 import Control.Exception
 import Data.IORef
 import Data.List
+import Debug.Trace
 import System.Directory
 import System.FilePath
 import System.Environment
@@ -30,11 +31,76 @@ main = do
   getArgs >>= run
 
 run :: [String] -> IO ()
-run as =
-  case as of
-    ["samples"] -> collectSampleIsa "" D.dft_opts_80
-    ["libs"] -> collectLibrarySampleIsa "" D.dft_opts_80
-    _ -> die "usage: collect (samples|libs)"
+run as = parseCSOpts cso_dft as >>= runWithOpts
+
+runWithOpts :: CSOpts -> IO ()
+runWithOpts cso = do
+  case csoTool cso of
+    "samples" -> collectSampleIsa cso D.dft_opts_80
+    "libs" -> collectLibrarySampleIsa cso D.dft_opts_80
+    t -> fatal $ "-t=" ++ t ++ ": invalid tool"
+
+
+fatal :: String -> IO a
+fatal = die
+
+data CSOpts =
+  CSOpts {
+    csoTool :: String
+  , csoFilters :: ![String]
+  , csoParallelism :: !Int
+  , csoClobber :: !Bool
+  , csoFailFast :: !Bool
+  , csoVerbosity :: !Int
+  } deriving Show
+cso_dft :: CSOpts
+cso_dft =
+  CSOpts {
+    csoTool = ""
+  , csoFilters = []
+  , csoParallelism = 1
+  , csoClobber = False
+  , csoFailFast = False
+  , csoVerbosity = 0
+  }
+csoMatchesFilter :: CSOpts -> String -> Bool
+csoMatchesFilter cso str =
+  null (csoFilters cso) || any (`isInfixOf`str) (csoFilters cso)
+
+
+parseCSOpts :: CSOpts -> [String] -> IO CSOpts
+parseCSOpts cso [] = return cso
+parseCSOpts cso (a:as)
+  | a `elem` ["-h","--help"] = do
+    putStrLn $
+      "usage:  collect  OPTS -t=(samples|libs) FILTERS\n" ++
+      "  where OPTS are:\n" ++
+      "     -c            clobber\n" ++
+      "     -f            fail fast\n" ++
+      "     -j[=INT]      parallelism\n" ++
+      "     -t=TOOL       sets the tool (must be samples or libs)\n" ++
+      "     -v[=INT]      verbosity\n" ++
+      "  and FILTERS are a list of infix matches to include\n" ++
+      ""
+    exitSuccess
+  | a `elem` ["-t"] = badArg ("expected " ++ a ++ "=...")
+  | a == "-c" = parseCSOpts (cso{csoClobber = True}) as
+  | a`elem`["-f","--fail-fast"]  = parseCSOpts (cso{csoFailFast = True}) as
+  | a == "-j" = parseCSOpts (cso{csoParallelism = 8}) as
+  | "-j="`isPrefixOf`a = handleIntArg (\x -> cso{csoParallelism = x})
+  | a == "-v" = parseCSOpts (cso{csoVerbosity = 1}) as
+  | "-t="`isPrefixOf`a =
+      if null (csoTool cso)
+        then parseCSOpts (cso{csoTool = eq_val}) as
+        else badArg "tool already set"
+  | "-v="`isPrefixOf`a = handleIntArg (\x -> cso{csoVerbosity = x})
+  | "-"`isPrefixOf`a = badArg "unrecognized option"
+  | otherwise = parseCSOpts (cso{csoFilters = csoFilters cso ++ [a]}) as
+  where badArg msg = fatal $ a ++ ": " ++ msg
+        eq_val = drop 1 . dropWhile (/='=') $ a
+        handleIntArg func =
+          case reads eq_val of
+            [(x,"")] -> parseCSOpts (func x) as
 
 
 checkSetup :: IO ()
@@ -49,9 +115,10 @@ checkSetup = do
   checkDir cUDA_SAMPLES_ROOT
 
 
-collectSampleIsa :: String -> D.Opts -> IO ()
-collectSampleIsa filter_str os_raw = body
+collectSampleIsa :: CSOpts -> D.Opts -> IO ()
+collectSampleIsa cso os_raw = body
   where body = do
+          print cso
           when (null (D.oArch os)) $
             die "options need arch set"
           --
@@ -61,30 +128,35 @@ collectSampleIsa filter_str os_raw = body
           dir <- findCudaSamplesDir
           --
           ss <- D.getSubPaths dir >>= filterM doesDirectoryExist -- e.g. 0_Simple, 1_Utilities, ...
-          mapM_ walkSampleSet ss
+          all_ds <- concat <$> mapM getSampleSetSampleDirs ss
+          let comp_ds = filter (csoMatchesFilter cso) all_ds
+          walkSamples comp_ds
 
+        os :: D.Opts
         os = os_raw{D.oSourceMapping = True}
 
         base_output_dir :: FilePath
         base_output_dir = "examples/" ++ D.oArch os ++ "/samples"
 
-        walkSampleSet :: FilePath -> IO ()
-        walkSampleSet dir = do
+        -- e.g. fetch all under: 2_Graphics/...
+        getSampleSetSampleDirs :: FilePath -> IO [FilePath]
+        getSampleSetSampleDirs dir = do
           let filterNonNvrtc :: [FilePath] -> [FilePath]
               filterNonNvrtc =
                 -- filter (not . ("asyncAPI"`isInfixOf`)) .
                   filter (not . ("_nvrtc"`isInfixOf`))
           ss <- filterNonNvrtc <$> D.getSubPaths dir -- e.g. asyncAPI
-          filterM doesDirectoryExist ss >>= walkSamples
+          ds <- filterM doesDirectoryExist ss
+          return ds
 
         clobber :: Bool
-        clobber = False
+        clobber = csoClobber cso
 
         fail_fast :: Bool
-        fail_fast = False
+        fail_fast = csoFailFast cso
 
         parallelism :: Int
-        parallelism = 8
+        parallelism = csoParallelism cso
 
         walkSamples :: [FilePath] -> IO ()
         walkSamples [] = return ()
@@ -96,7 +168,7 @@ collectSampleIsa filter_str os_raw = body
           | otherwise = parallelWalk
           where serialHandler :: SomeException -> IO ()
                 serialHandler se = do
-                  putStrLn $ "  ==> " ++ show se
+                  putStrLn $ "  ==> [main] " ++ show se
                   if fail_fast then throwIO se
                     else putStrLn "continuing (fail_fast not set)"
 
@@ -111,7 +183,7 @@ collectSampleIsa filter_str os_raw = body
                       let runOne (d_par,pr,mv) = do
                             let childHandler :: SomeException -> IO ()
                                 childHandler se = do
-                                  pr $ "exiting on exception: " ++ show se
+                                  pr $ "  [" ++ takeFileName d_par ++ "] exiting on exception: " ++ show se ++ "\n"
                                   putMVar mv (Just se)
                             forkIO $ do
                               (walkSample pr d_par >> putMVar mv Nothing) `catch` childHandler
@@ -129,32 +201,37 @@ collectSampleIsa filter_str os_raw = body
 
         walkSample :: (String -> IO ()) -> FilePath -> IO ()
         walkSample pr d = do
-          d_fs <- D.getSubPaths d
-          -- TODO: should also take .cpp and .c files that #include .cuh files
-          let cu_files = filter ((==".cu") . takeExtension) d_fs
-          mapM_ (walkCuFile pr) (filter (filter_str`isInfixOf`) cu_files)
-          --
-          -- copy any .cuh files too from this sample too
-          let cuh_files = filter (".cuh"`isSuffixOf`) d_fs
-          forM_ cuh_files $ \cuh_file -> do
-            pr $ "  copying " ++ cuh_file ++ "\n"
-            copyFile cuh_file (base_output_dir ++ "/" ++ takeFileName cuh_file)
+          if not (csoMatchesFilter cso (takeFileName d)) then return ()
+            else do
+              d_fs <- D.getSubPaths d
+              -- TODO: should also take .cpp and .c files that #include .cuh files
+              let cu_files = filter ((==".cu") . takeExtension) d_fs
+              mapM_ (walkCuFile pr d) cu_files
+              --
+              -- copy any .cuh files too from this sample too
+              let cuh_files = filter (".cuh"`isSuffixOf`) d_fs
+              forM_ cuh_files $ \cuh_file -> do
+                pr $ "  [" ++ takeFileName d ++ "]: copying " ++ cuh_file ++ "\n"
+                copyFile cuh_file (base_output_dir ++ "/" ++ takeFileName cuh_file)
 
-        walkCuFile ::  (String -> IO ()) ->FilePath -> IO ()
-        walkCuFile pr src_cu_file = do
+        walkCuFile ::  (String -> IO ()) -> FilePath -> FilePath -> IO ()
+        walkCuFile pr d src_cu_file = do
             all_exist <- and <$> mapM doesFileExist [sass_output, ptx_output, cubin_output]
             if all_exist && not clobber then skipIt
-              else buildIt
+              else buildIt (all_exist && clobber)
           where output_no_ext = base_output_dir ++ "/" ++ dropExtension (takeFileName src_cu_file)
                 sass_output = output_no_ext ++ ".sass"
                 ptx_output = output_no_ext ++ ".ptx"
                 cubin_output = output_no_ext ++ ".cubin"
 
-                skipIt = do
-                  pr "   ==> already built\n"
+                printLn :: String -> IO ()
+                printLn msg = pr $ "  [" ++ takeFileName d ++ "]: " ++ msg ++ "\n"
 
-                buildIt = do
-                  pr "   ==> building\n"
+                skipIt = do
+                  printLn "already built"
+
+                buildIt clobbering = do
+                  printLn $ "building" ++ (if clobbering then " (clobbering)" else "")
                   samples_inc_dir <- (++"\\common\\inc") <$> findCudaSamplesDir
                   --
                   let nvcc_os =
@@ -162,9 +239,16 @@ collectSampleIsa filter_str os_raw = body
                           D.oOutputFile = sass_output
                         , D.oSaveCuBin = cubin_output
                         , D.oSavePtx = ptx_output
-                        , D.oExtraArgs = ["-I"++samples_inc_dir]
+                        , D.oExtraArgs = ["-I"++samples_inc_dir, "-I" ++ takeDirectory src_cu_file]
                         , D.oInputFile = src_cu_file
                         }
+                  printLn $ "\n     % nva.exe  " ++
+                    intercalate "^\n      " ([
+                      "-o=" ++ sass_output
+                    , "--save-cubin=" ++ cubin_output
+                    , "--save-ptx=" ++ ptx_output
+                    ] ++ map ("-X"++) (D.oExtraArgs nvcc_os) ++ [src_cu_file])
+                  --
                   let handler :: Bool -> SomeException -> IO ()
                       handler double_fault e
                         | "user interrupt" `isInfixOf` show e = do
@@ -185,7 +269,7 @@ collectSampleIsa filter_str os_raw = body
                   -- copies the .cu file
                   let dst_cu_file = base_output_dir ++ "/" ++ takeFileName src_cu_file
                   copyFile src_cu_file dst_cu_file
-                  pr $ "  ==> done; copied " ++ dst_cu_file
+                  printLn $ "  done"
 
 findCudaSamplesDir :: IO FilePath
 findCudaSamplesDir = tryPathVers ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0"]
@@ -199,8 +283,8 @@ findCudaSamplesDir = tryPathVers ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0",
         mkCudaSampleDir ver = cUDA_SAMPLES_ROOT ++ "\\" ++ ver
 
 
-collectLibrarySampleIsa :: String -> D.Opts -> IO ()
-collectLibrarySampleIsa substr os_raw = body
+collectLibrarySampleIsa :: CSOpts -> D.Opts -> IO ()
+collectLibrarySampleIsa cso os_raw = body
   where body = do
           when (null (D.oArch os)) $
             die "options need arch set"
@@ -247,13 +331,15 @@ collectLibrarySampleIsa substr os_raw = body
 
                 dumpLib :: String -> IO ()
                 dumpLib lib
-                  | not (substr `isInfixOf` lib) = return ()
-                  | otherwise = do
+                  | csoMatchesFilter cso lib = do
                     putStrLn $ "*** DUMPING " ++ lib
                     let full_lib_path = dll_dir ++ "/" ++ lib
                     z <- doesFileExist full_lib_path
                     if not z then putStrLn (lib ++ ": file not found in dir: SKIPPING")
                       else collectLibrarySampleIsaFromDir os (full_lib_path)
+                  | otherwise = do
+                    putStrLn $ "*** SKIPPING " ++ lib
+                    return ()
 
 -- should generalize the top one to call this one
 collectLibrarySampleIsaFromDir :: D.Opts -> FilePath -> IO ()

@@ -16,6 +16,10 @@ import Text.Printf
 -- import qualified Data.Map.Strict as DM
 import qualified Data.ByteString as S
 
+sm_ver :: String
+sm_ver = "sm_80"
+-- sm_ver = "sm_75"
+
 
 collectOps :: IO ()
 collectOps = body
@@ -28,7 +32,6 @@ collectOps = body
           --
           --
           createDirectoryIfMissing True output_root
-          let filterSassOnly = filter (".sass"`isSuffixOf`)
           --
 --          samples_sass_files <-  filterSassOnly <$> getSubPaths "examples/sm_75/samples"
 --          mapM_ processFile (samples_sass_files)
@@ -36,12 +39,23 @@ collectOps = body
           -- library_dirs <- getSubPaths "examples/sm_75/libs" >>= filterM doesDirectoryExist
           -- libraries_sass_files <- filterSassOnly . concat <$> mapM getSubPaths library_dirs
           -- mapM_ processFile library_dirs
+          let processDir :: FilePath -> IO ()
+              processDir dir = do
+                let filterSassOnly = filter (".sass"`isSuffixOf`)
+                lib_root_sass_files <- filterSassOnly <$> getSubPaths dir
+                mapM_ processFile lib_root_sass_files
+                return ()
+          --
+          let smpls_path = "examples/" ++ sm_ver ++ "/samples"
+          processDir smpls_path
+          --
+          let lib_path = "examples/" ++ sm_ver ++ "/libs"
+          lib_dirs <- getSubPaths lib_path
+          mapM_ processDir lib_dirs
 
-          root_sass_files <- filterSassOnly <$> getSubPaths "examples/sm_75/libs"
-          mapM_ processFile root_sass_files
-          return ()
 
-        output_root = "examples/sm_75/ops"
+        output_root :: FilePath
+        output_root = "examples/" ++ sm_ver ++ "/ops"
 
         processFile :: FilePath -> IO ()
         processFile fp = do

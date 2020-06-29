@@ -2,8 +2,9 @@ module NVT.Bits where
 
 import Data.Bits
 import Data.Char
+import Data.List
 import Data.Word
-import Debug.Trace
+-- import Debug.Trace
 import Text.Printf
 import qualified Data.ByteString as BS
 
@@ -23,6 +24,8 @@ bZeros k = BS.pack (replicate k 0)
 
 bSize :: Binary -> Int
 bSize = BS.length
+
+-------------------------------------------------------
 
 data Word128 =
   Word128 {
@@ -57,6 +60,7 @@ instance Num Word128 where
   abs = w128UnOp abs
   signum = w128UnOp signum
   --
+  fromInteger 0 = w128_zero
   fromInteger i = Word128 hi lo
     where hi = fromInteger (0xFFFFFFFFFFFFFFFF .&. (i`shiftR`64)) :: Word64
           lo = fromInteger (0xFFFFFFFFFFFFFFFF .&. i) :: Word64
@@ -142,8 +146,11 @@ fromByteStringU128LE bs
   where (bs_lo8,bs_hi8sfx) = BS.splitAt 8 bs
         bs_hi8 = BS.take 8 bs_hi8sfx
 
+
 w128_zero :: Word128
 w128_zero = Word128 0 0
+w128_ones :: Word128
+w128_ones = Word128 0xFFFFFFFFFFFFFFFF 0xFFFFFFFFFFFFFFFF
 
 instance Bits Word128 where
   (.&.) = w128binOp (.&.)
@@ -152,47 +159,72 @@ instance Bits Word128 where
   complement (Word128 hi lo) = Word128 (complement hi) (complement lo)
   zeroBits = w128_zero
 
-  -- DOESN'T WORK for shift sizes like 128
   shiftL (Word128 hi lo) off
-    | off >= 64  = Word128 (lo`shiftL`off-64) 0
+    | off >= 64 = Word128 (lo `shiftL` (off - finiteBitSize hi)) 0
     | otherwise = Word128 new_hi new_lo
-    where new_hi = hi `shiftL` off .|. lo `shiftR` (64 - off)
-          new_lo = lo `shiftL` off
+    where new_hi = (hi `shiftL` off) .|. (lo `shiftR` (finiteBitSize hi - off))
+          new_lo = (lo `shiftL` off)
   shiftR (Word128 hi lo) off
-    | off >= 64  = Word128 0 (hi`shiftR`off-64)
+    | off >= finiteBitSize hi = Word128 0 (hi`shiftR`(off - finiteBitSize hi))
     | otherwise = Word128 new_hi new_lo
-    where new_hi = hi `shiftR` off .|. lo `shiftR` (64 - off)
-          new_lo = hi `shiftL` (64 - off) .|. lo `shiftR` off
+    where new_hi = (hi `shiftR` off) .|. (lo `shiftL`(finiteBitSize hi - off))
+          new_lo = (hi `shiftL` (finiteBitSize hi - off)) .|. (lo `shiftR` off)
   -- positive is left
   -- negative is right
   rotate w@(Word128 hi lo) off0
-    -- rotate right
-    | off < 0 = rotate w (128-off)
-    -- normal bit align
-    --   hhhhhhhhhhhhhhhh llllllllllllllll (each char is 4 bits)
-    --     rol 4
-    --   hhhhhhhhhhhhhhhl lllllllllllllllh
-    | off < 64 = Word128 new_hi new_lo
-    --     rol 124 = ror -4
-    --   lhhhhhhhhhhhhhhh hlllllllllllllll
-    | otherwise = rotate w (off-128)
-    where off = off0 `mod` 128
-          new_hi = hi `shiftL` off .|. lo `shiftR` (64 - off)
-          new_lo = lo `shiftL` off .|. hi `shiftR` (64 - off)
-  bitSize _ = 128
-  bitSizeMaybe _ = Just 128
+    -- we do this with the following approach
+    --   1. if 0 then nothing
+    --   2. if negative (right), normalize to positive and less than word size (128);
+    --       e.g. 129 mods to 1 (129 to left is 1 to the left)
+    --       e.g. -1 (right 1) is 127 left
+    --       e.g. -129 (right 129) == 127 left
+    --     (the Haskell `mod` function does this and 'off' holds the value)
+    --   3. if the bit size is smaller than our half words (64b for Word128),
+    --      then we do the natural funnel shift pattern
+    --   4. otherwise the shift is by N between 65 and 127, we can treat this as
+    --      a shift by (N - 64) on the rotated (swapped) words
+    | off == 0 = w -- 0, 128, 256, etc...
+    --
+    -- rotate (-129) == rotate 1 MOD
+    -- rotate (129) == rotate 1
+    -- rotate (1023) == rotate 127
+    -- off holds normalize value
+    | off < 0 = error "Word128.rotate: unreachable" -- mod should prevent this
+    --
+    -- step 3) SMALLER than our half word size:
+    --   YYYYXXXXXXXXXXX BBBBAAAAAAAAAAA
+    --  goes to:
+    --   XXXXXXXXXXXBBBB AAAAAAAAAAAYYYY
+    | off < finiteBitSize hi = Word128 lt64_new_hi lt64_new_lo
+    --
+    -- step 4) greater than 64 (but less than 127) is the same as swapping the words
+    -- and rotating by (off - 64)
+    --   YYYYXXXXXXXXXXX BBBBAAAAAAAAAAA
+    --  goes to:
+    --   AAAAAAAAAAAYYYY XXXXXXXXXXXBBBB
+    -- think of this as iteratively rotating by less than 64
+    | otherwise = rotate (Word128 lo hi) (off - finiteBitSize hi)
+    where off = off0 `mod` finiteBitSize w
+          lt64_new_hi = (hi `shiftL` off) .|. (lo `shiftR` (elem_size - off))
+          lt64_new_lo = (lo `shiftL` off) .|. (hi `shiftR` (elem_size - off))
+          elem_size = finiteBitSize hi
+    --  (Word128 0xF000000000000000 0xC000000000000001)`rotate`(1) == 0xE000000000000001`8000000000000003
+    --  (Word128 0xF000000000000000 0xC000000000000001)`rotate`(-1) == 0xF800000000000000`6000000000000000
+  bitSize = finiteBitSize
+  bitSizeMaybe = Just . finiteBitSize
   isSigned _ = False
   testBit (Word128 hi lo) off
-    | off < 64 = testBit lo off
-    | otherwise = testBit hi (off - 64)
+    | off < finiteBitSize hi = testBit lo off
+    | otherwise = testBit hi (off - finiteBitSize hi)
   bit off
-    | off < 64 = Word128 0 (1 `shiftL` off)
-    | otherwise = Word128 (1 `shiftL` off-64) 0
+    | off < finiteBitSize lo_bit = Word128 0 lo_bit
+    | otherwise = Word128 hi_bit 0
+    where lo_bit = 1 `shiftL` off
+          hi_bit = 1 `shiftL` (off - finiteBitSize lo_bit)
   popCount (Word128 hi lo) = popCount hi + popCount lo
 
 instance FiniteBits Word128 where
   finiteBitSize _ = 128
-
   countLeadingZeros (Word128 hi lo)
     | clz_hi < 64 = clz_hi
     | otherwise = 64 + countLeadingZeros lo
@@ -202,15 +234,153 @@ instance FiniteBits Word128 where
     | otherwise = 64 + countTrailingZeros hi
     where ctz_lo = countTrailingZeros lo
 
-
-
 w128binOp ::
   (Word64 -> Word64 -> Word64) ->
   Word128 ->
   Word128 ->
   Word128
-w128binOp f (Word128 hi1 lo1) (Word128 hi2 lo2) =
-  Word128 (f hi1 hi2) (f lo1 lo2)
+w128binOp f (Word128 hi1 lo1) (Word128 hi2 lo2)
+  | x == w128_zero = w128_zero
+  | otherwise = x
+  where x = Word128 (f hi1 hi2) (f lo1 lo2)
+
+--------------------------
+data Word256 =
+  Word256 {
+    wHi128 :: !Word128
+  , wLo128 :: !Word128
+  } deriving (Eq,Ord)
+
+instance Show Word256 where
+  show (Word256 (Word128 hh hl) (Word128 lh ll)) =
+      "0x" ++ intercalate "`" (map fmt [hh,hl,lh,ll])
+    where fmt x = printf "%016X" x
+instance Read Word256 where
+  readsPrec _ ('0':x:str)
+    | x `elem` "xX" =
+      -- TODO: could we handle expressions with readPrec?
+      --   0x(1+2)`00045451?
+      case span isHexDigit str of
+        (ds_hh,'`':sfx)
+          | not (null ds_hh) ->
+          case span isHexDigit sfx of
+            (ds_hl,sfx)
+              | not (null ds_hl) ->
+                case span isHexDigit sfx of
+                  (ds_lh,sfx)
+                    | not (null ds_lh) ->
+                      case span isHexDigit sfx of
+                        (ds_ll,sfx)
+                          | not (null ds_ll) ->
+                            [(Word256 w128h w128l,sfx)]
+                            where parseHex s = read ("0x" ++ s)
+                                  w128h = Word128 (parseHex ds_hh) (parseHex ds_hl)
+                                  w128l = Word128 (parseHex ds_lh) (parseHex ds_ll)
+                        _ -> []
+                  _ -> []
+            _ -> []
+        _ -> []
+  readsPrec _ _ = []
+instance Num Word256 where
+  (+) = w256BinOp (+)
+  (-) = w256BinOp (-)
+  (*) = w256BinOp (*)
+  --
+  negate = w256UnOp negate
+  abs = w256UnOp abs
+  signum = w256UnOp signum
+  --
+  fromInteger 0 = w256_zero
+  fromInteger i = Word256 (Word128 hh hl) (Word128 lh ll)
+    where hh = fromInteger (0xFFFFFFFFFFFFFFFF .&. (i`shiftR`192)) :: Word64
+          hl = fromInteger (0xFFFFFFFFFFFFFFFF .&. (i`shiftR`128)) :: Word64
+          lh = fromInteger (0xFFFFFFFFFFFFFFFF .&. (i`shiftR`64)) :: Word64
+          ll = fromInteger (0xFFFFFFFFFFFFFFFF .&. i) :: Word64
+
+w256UnOp :: (Integer -> Integer) -> Word256 -> Word256
+w256UnOp f w128 =
+  fromInteger (f (w256ToInteger w128))
+w256BinOp :: (Integer -> Integer -> Integer) -> Word256 -> Word256 -> Word256
+w256BinOp f w256a w256b =
+  fromInteger (f (w256ToInteger w256a) (w256ToInteger w256b))
+
+w256ToInteger :: Word256 -> Integer
+w256ToInteger (Word256 (Word128 hh hl) (Word128 lh ll)) =
+    hh_i .|. hl_i .|. lh_i .|. ll_i
+  where hh_i = fromIntegral hh `shiftL` 192 :: Integer
+        hl_i = fromIntegral hl `shiftL` 128 :: Integer
+        lh_i = fromIntegral lh `shiftL` 64 :: Integer
+        ll_i = fromIntegral ll :: Integer
+
+w256_zero :: Word256
+w256_zero = Word256 w128_zero w128_zero
+w256_ones :: Word256
+w256_ones = Word256 w128_ones w128_ones
+
+instance Bits Word256 where
+  (.&.) = w256binOp (.&.)
+  (.|.) = w256binOp (.|.)
+  xor = w256binOp xor
+  complement (Word256 hi lo) = Word256 (complement hi) (complement lo)
+  zeroBits = w256_zero
+
+  -- DOESN'T WORK for shift sizes like 128
+  shiftL (Word256 hi lo) off
+    | off >= 128 = Word256 (lo`shiftL`(off - 128)) 0
+    | otherwise = Word256 new_hi new_lo
+    where new_hi = hi `shiftL` off .|. lo `shiftR` (128 - off)
+          new_lo = lo `shiftL` off
+  shiftR (Word256 hi lo) off
+    | off >= 128  = Word256 0 (hi`shiftR`(off - 128))
+    | otherwise = Word256 new_hi new_lo
+    where new_hi = hi `shiftR` off .|. lo `shiftR` (128 - off)
+          new_lo = hi `shiftL` (128 - off) .|. lo `shiftR` off
+  -- positive is left
+  -- negative is right
+  rotate w@(Word256 hi lo) off0
+    -- rotate right
+    | off < 0 = rotate w (128 - off)
+    -- normal bit align
+    --   hhhhhhhhhhhhhhhh llllllllllllllll (each char is 4 bits)
+    --     rol 4
+    --   hhhhhhhhhhhhhhhl lllllllllllllllh
+    | off < 128 = Word256 new_hi new_lo
+    --     rol 124 = ror -4
+    --   lhhhhhhhhhhhhhhh hlllllllllllllll
+    | otherwise = rotate w (off - 128)
+    where off = off0 `mod` 128
+          new_hi = hi `shiftL` off .|. lo `shiftR` (128 - off)
+          new_lo = lo `shiftL` off .|. hi `shiftR` (128 - off)
+  bitSize _ = 256
+  bitSizeMaybe _ = Just 256
+  isSigned _ = False
+  testBit (Word256 hi lo) off
+    | off < 128 = testBit lo off
+    | otherwise = testBit hi (off - 128)
+  bit off
+    | off < 128 = Word256 0 (1 `shiftL` off)
+    | otherwise = Word256 (1 `shiftL` (off - 128)) 0
+  popCount (Word256 hi lo) = popCount hi + popCount lo
+instance FiniteBits Word256 where
+  finiteBitSize _ = 256
+  countLeadingZeros (Word256 hi lo)
+    | clz_hi < 128 = clz_hi
+    | otherwise = 128 + countLeadingZeros lo
+    where clz_hi = countLeadingZeros hi
+  countTrailingZeros (Word256 hi lo)
+    | ctz_lo < 128 = ctz_lo
+    | otherwise = 128 + countTrailingZeros hi
+    where ctz_lo = countTrailingZeros lo
+
+w256binOp ::
+  (Word128 -> Word128 -> Word128) ->
+  Word256 ->
+  Word256 ->
+  Word256
+w256binOp f (Word256 hi1 lo1) (Word256 hi2 lo2)
+  | x == w256_zero = w256_zero
+  | otherwise = x
+  where x = Word256 (f hi1 hi2) (f lo1 lo2)
 
 --------------------------
 fromByteStringU8 :: BS.ByteString -> Word8

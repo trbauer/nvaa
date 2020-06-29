@@ -1,0 +1,989 @@
+000FE20008000A3F`00080000FF0079B0:        ARRIVES.LDGSTSBAR.64 [URZ+0x800] {!1}; // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4522
+000FE20008000A3F`00080000FD0079B0:        ARRIVES.LDGSTSBAR.64 [R253+URZ+0x800] {!1};
+000FE20008000A31`00080003FD0079B0:        ARRIVES.LDGSTSBAR.64 [R253+UR49+0x800] {!1};
+
+
+00016C00081EE1C6`000004090409798A:        ATOM.E.ADD.STRONG.GPU PT, R9, [R4.64+0x4], R9 {!6,+6.W,+1.R}; // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:2837
+000EA2000011450A`00000008040A738B:        ATOM.E.CAS.64.STRONG.SYS P0, R10, [R4], R8, R10 {!1,+3.W}; // examples/sm_80/samples/conjugateGradientMultiDeviceCG.sass:7754
+000EA2000812E9C4`0000000B0CFF798A:        ATOM.E.ADD.F16x2.RN.STRONG.GPU P1, RZ, [R12.64], R11 {!1,+3.W}; // examples/sm_80/libs/cusolver64_10/Program.1809.sm_80.sass:912433
+000E6400001EE115`000000071208738B:        ATOM.E.CAS.STRONG.GPU PT, R8, [R18], R7, R21 {!2,+2.W}; // examples/sm_80/libs/cusolver64_10/Program.1836.sm_80.sass:1534888
+000EA2000812E9CA`0000000312FF798A:        ATOM.E.ADD.F16x2.RN.STRONG.GPU P1, RZ, [R18.64], R3 {!1,+3.W}; // examples/sm_80/libs/cusolver64_10/Program.1863.sm_80.sass:363925
+000EA400089EE1C4`000000171010798A:        ATOM.E.MIN.STRONG.GPU PT, R16, [R16.64], R23 {!2,+3.W}; // examples/sm_80/libs/nppif64_11/Program.371.sm_80.sass:8996
+// TODO: many more
+
+
+00016200081EE1C4`00000017180089A8:  @!P0  ATOMG.E.ADD.STRONG.GPU PT, R0, [R24.64], R23 {!1,+6.W,+1.R}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4383
+000EA200099EE1C4`0000000B060679A8:        ATOMG.E.INC.STRONG.GPU PT, R6, [R6.64], R11 {!1,+3.W}; // examples/sm_80/samples/threadFenceReduction.sass:44776
+//
+
+
+000FE200040000FF`002808FFFFFF738C:        ATOMS.EXCH       RZ, [0x2808], RZ {!1}; // examples/sm_80/samples/bisect_small.sass:1849
+0001E2000D00403F`0000000006FF7F8C:        ATOMS.POPC.INC.32 RZ, [R6.X4+URZ] {!1,+1.R}; // examples/sm_80/samples/histogram256.sass:1238
+000FE2000C80043F`00080000FFFF7F8C:        ATOMS.ARRIVE.64  RZ, [URZ+0x800] {!1}; // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4544
+000E240001800005`000000041205738D:        ATOMS.CAST.SPIN  R5, [R18], R4, R5 {!2,+1.W}; // examples/sm_80/libs/cusolver64_10/Program.1809.sm_80.sass:910674
+000E6800000000FF`00000407FF07138C:  @P1   ATOMS.ADD        R7, [0x4], R7 {!4,+2.W}; // examples/sm_80/samples/simpleAWBarrier.sass:2135
+0001E4000D00403F`0000000005FF7F8C:        ATOMS.POPC.INC.32 RZ, [R5.X4+URZ] {!2,+1.R}; // examples/sm_80/libs/nppist64_11/Program.49.sm_80.sass:80524
+0001E200000040FF`0000000510FF738C:        ATOMS.ADD        RZ, [R16.X4], R5 {!1,+1.R}; // examples/sm_80/libs/nppist64_11/Program.49.sm_80.sass:85647
+// more
+
+
+000E640000004000`03C0000000FF731C:        B2R.RESULT       RZ, P0 {!2,+2.W};     // examples/sm_80/samples/radixSortThrust.sass:270446
+000E2200000E4000`03C000000002731C:        B2R.RESULT       R2     {!1,+1.W};     // examples/sm_80/libs/cusolver64_10/Program.1890.sm_80.sass:245137
+000E640000044000`03C0000000FF731C:        B2R.RESULT       RZ, P2 {!2,+2.W};     // examples/sm_80/libs/cusparse64_11/Program.900.sm_80.sass:180293
+
+
+000FEC0000000000`0000000000001B1D:  @P1   BAR.SYNC                    0x0           {!6}; // examples/sm_80/samples/bisect_large.sass:7641
+000FEC0000010000`0000000000001B1D:  @P1   BAR.SYNC.DEFER_BLOCKING     0x0           {!6}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:1041076
+000FEC0000014400`0000000000007B1D:        BAR.RED.AND.DEFER_BLOCKING  0x0,       P0 {!6}; // examples/sm_80/libs/cusolver64_10/Program.2628.sm_80.sass:551677
+000FEC0004802400`0000000000007B1D:        BAR.ARV                     0x0, 0x0      {!6};
+000FEC0004818400`0000000000007B1D:        BAR.SYNCALL.DEFER_BLOCKING                {!6};
+000FEC0000014400`0000040000007B1D:        BAR.RED.AND.DEFER_BLOCKING  0x0, 0x1,  P0 {!6};
+000FEC0007014400`0040040000007B1D:        BAR.RED.AND.DEFER_BLOCKING  0x1, 0x1, !P6 {!6};
+
+
+001E220000100000`0000000006107355:        BMOV.32.CLEAR        R16, B6 {!1,+1.W,^1}; // examples/sm_80/samples/cdpSimplePrint.sass:1384
+0011E40000000000`0000001006007356:        BMOV.32          B6, R16 {!2,+1.R,^1}; // examples/sm_80/samples/cdpSimplePrint.sass:1589
+0011E40000100000`0000001006007356:        BMOV.32.PQUAD    B6, R16 {!2,+1.R,^1};
+
+
+000FE40000000000`000000131213721B:        BMSK             R19, R18, R19 {!2}; // examples/sm_80/samples/ParticleSystem_cuda.sass:67333
+000FE40000000000`000000161316021B:  @P0   BMSK             R22, R19, R22 {!2}; // examples/sm_80/samples/ParticleSystem_cuda.sass:68216
+
+
+001FEA0000300000`000000040000795C:        BPT.TRAP    0x1 {!5,^1}; // examples/sm_80/samples/reductionMultiBlockCG.sass:1115
+001FEA0000400000`000000040000795C:        BPT.INT     0x1 {!5,^1};
+
+
+000FC0000383FFFF`FFFFFFF000007947:        BRA            `(.L_1) {Y};   // examples/sm_80/samples/asyncAPI.sass:254
+000FEA0005000000`0000053000009947:  @!P1  BRA       !P2, `(.L_18) {!5};   // examples/sm_80/samples/BezierLineCDP.sass:1303
+000FD80003800000`000001F00000C947:  @!P4  BRA            `(.L_11) {!12,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7399
+000FD80003A00000`000001F00000C947:  @!P4  BRA.INC         0x210 {!12,Y};
+000FD80003C00000`000001F00000C947:  @!P4  BRA.DEC         0x220 {!12,Y};
+
+
+000FE20003800000`0000000000018942:  @!P0  BREAK       B1 {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1297
+000FE20005000000`0000000000019942:  @!P1  BREAK  !P2, B1 {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1302
+
+
+000E240000000000`0000002300237301:        BREV R35, R35 {!2,+1.W}; // examples/sm_80/samples/lineOfSight.sass:17373
+000EA20000000000`0000001A001A7901:        BREV R26, 0x1a {!1,+3.W};
+000EA20008000000`0000001A001A7B01:        BREV R26, cx[UR26][0x0] {!1,+3.W};
+000EA20008000000`0000001A001A7D01:        BREV R26, UR26 {!1,+3.W};
+
+
+000FEA000383FFFF`FFFFF4B00C007949:        BRX      R12 -0xb50 {!5};  // examples/sm_80/libs/nppial64_11/Program.77.sm_80.sass:67013
+000FEA000703FFFF`FFFFF4B00C007949:        BRX !P6, R12 -0xb50 {!5};
+
+
+000FCA000B83FFFF`FFFFE7C004007958:        BRXU         UR4 -0x1840 {!5,Y}; // examples/sm_80/libs/nppidei64_11/Program.91.sm_80.sass:14691
+000FCA000BA3FFFF`FFFFE7C004007958:        BRXU.INC     UR4 -0x1840 {!5,Y};
+000FCA000BC3FFFF`FFFFE7C004007958:        BRXU.DEC     UR4 -0x1840 {!5,Y};
+// 000FCA000BE3FFFF`FFFFE7C004007958:        BRXU.INVALID3 UR4 -0x1840 {!5,Y};
+000FCA000B03FFFF`FFFFE7C004007958:        BRXU     P6, UR4 -0x1840 {!5,Y};
+000FCA000F03FFFF`FFFFE7C004007958:        BRXU    !P6, UR4 -0x1840 {!5,Y};
+
+
+000FE60003800000`0000026000007945:        BSSY   B0, `(.L_32) {!3}; // examples/sm_80/samples/binomialOptions_kernel.sass:3230
+000FD80003800000`000000F000007945:        BSSY   B0, 0x100 {!12,Y};
+000FD80003800000`400000F000007945:        BSSY   B0, 0x40000110 {!12,Y};
+000FD80003800000`800000F000007945:        BSSY   B0, -0x7ffffee0 {!12,Y};
+000FD80003800000`C00000F000007945:        BSSY   B0, -0x3ffffed0 {!12,Y};
+// test all barrier convergence registers
+000FD80003800000`000000F000007945:        BSSY   B0,   0x100 {!12,Y};
+000FD80003800000`000000F000017945:        BSSY   B1,   0x110 {!12,Y};
+000FD80003800000`000000F000027945:        BSSY   B2,   0x120 {!12,Y};
+000FD80003800000`000000F000037945:        BSSY   B3,   0x130 {!12,Y};
+000FD80003800000`000000F000047945:        BSSY   B4,   0x140 {!12,Y};
+000FD80003800000`000000F000057945:        BSSY   B5,   0x150 {!12,Y};
+000FD80003800000`000000F000067945:        BSSY   B6,   0x160 {!12,Y};
+000FD80003800000`000000F000077945:        BSSY   B7,   0x170 {!12,Y};
+000FD80003800000`000000F000087945:        BSSY   B8,   0x180 {!12,Y};
+000FD80003800000`000000F000097945:        BSSY   B9,   0x190 {!12,Y};
+000FD80003800000`000000F0000A7945:        BSSY   B10,  0x1a0 {!12,Y};
+000FD80003800000`000000F0000B7945:        BSSY   B11,  0x1b0 {!12,Y};
+000FD80003800000`000000F0000C7945:        BSSY   B12,  0x1c0 {!12,Y};
+000FD80003800000`000000F0000D7945:        BSSY   B13,  0x1d0 {!12,Y};
+000FD80003800000`000000F0000E7945:        BSSY   B14,  0x1e0 {!12,Y};
+000FD80003800000`000000F0000F7945:        BSSY   B15,  0x1f0 {!12,Y};
+
+
+000FEA0003800000`0000000000027941:        BSYNC      B2 {!5}; // examples/sm_80/samples/BezierLineCDP.sass:1355
+000FEA0003800000`0000000000027941:        BSYNC      B2 {!5}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2931
+000FEA0003800000`0000000000017941:        BSYNC      B1 {!5}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2819
+000FEA0003000000`0000000000027941:        BSYNC  P6, B2 {!5};
+000FEA0006800000`0000000000027941:        BSYNC !P5, B2 {!5};
+03CFEA0003800000`0000000000007941:        BSYNC      B0 {!5,^3,^4,^5,^6};  // examples/sm_80/samples/binomialOptions_kernel.sass:2400
+000FEA0007800000`0000000000027941:        BSYNC !PT, B2 {!5};
+
+
+002FC80000000114`000000000C227229:        DADD   R34, -R12,  R20 {!4,Y,^2}; // examples/sm_80/samples/bodysystemcuda.sass:12857
+0010640000000000`00C0020006147629:        DADD   R20,  R6,  c[0x3][0x8] {!2,+2.W,+1.R,^1}; // examples/sm_80/samples/bodysystemcuda.sass:12864
+000FE40008000100`40000006FF167E29:        DADD   R22, -RZ,  |UR6| {!2}; // examples/sm_80/libs/cusolver64_10/Program.1215.sm_80.sass:9972
+001E0E0000000002`000000000404D229:  @!P5  DADD   R4,   R4,   R2 {!7,Y,+1.W,^1}; // examples/sm_80/libs/cusolver64_10/Program.1215.sm_80.sass:9910
+000E0C000000060A`0000000008047229:        DADD   R4,  |R8|, |R10| {!6,Y,+1.W}; // examples/sm_80/libs/cusolver64_10/Program.1215.sm_80.sass:12285
+002E4E000000000A`000000000202D229:  @!P5  DADD   R2,   R2,   R10 {!7,Y,+2.W,^2}; // examples/sm_80/libs/cusolver64_10/Program.1215.sm_80.sass:23667
+
+
+000FC80000000000`0000D0800000791A:        DEPBAR.LE  SB5, 0x2 {!4,Y}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2502
+000FCE0000000000`0000900C0000791A:        DEPBAR.LE  SB1, 0x0, {3,2} {!7,Y}; // examples/sm_80/libs/cusolver64_10/Program.2625.sm_80.sass:631715
+000FF00000000000`0000813F0000791A:        DEPBAR.LE  SB0, 0x4, {5,4,3,2,1,0} {!8};
+
+
+001FC8000000000A`3FE00000060A742B:        DFMA  R10, R6,   R10,  0.5 {!4,Y,^1}; // examples/sm_80/samples/bodysystemcuda.sass:12936
+002FC8000800000C`8000000804087E2B:        DFMA  R8,  R4,   R12, -UR8 {!4,Y,^2}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:7333
+001E0C0000000806`000062006202762B:        DFMA  R2,  R98, -R6,   c[0x0][0x188] {!6,Y,+1.W,^1}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:7469
+001E080000000004`400000000606782B:        DFMA  R6,  R6,   2,    R4 {!4,Y,+1.W,^1}; // examples/sm_80/samples/Mandelbrot_cuda.sass:11075
+040FE40000000022`000000461A22722B:        DFMA  R34, R26.reuse, R70, R34 {!2}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:77937
+000F08000000004E`0080000004047A2B:        DFMA  R4, R4, c[0x2][0x0], R78 {!4,Y,+5.W}; // examples/sm_80/libs/cufft64_10/Program.102.sm_80.sass:17072
+082364000000000C`000000221414722B:        DFMA  R20, R20, R34.reuse, R12 {!2,+6.W,+2.R,^2}; // examples/sm_80/libs/cusolver64_10/Program.1404.sm_80.sass:16002
+010F080008000824`000000041C247C2B:        DFMA  R36, R28, UR4, -R36 {!4,Y,+5.W,^5}; // examples/sm_80/libs/cusolver64_10/Program.1890.sm_80.sass:241570
+
+
+0A0E740000000010`0000004A5210723F:        DMMA.884  R16,  R82,         R74.reuse, R16 {!10,+2.W,^6}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:6610
+040EB40000000154`000000949E54723F:        DMMA.884  R84, -R158.reuse,  R148,      R84 {!10,+3.W}; // examples/sm_80/libs/cusolver64_10/Program.2653.sm_80.sass:19344
+040EB40000000070`80000096A270723F:        DMMA.884  R112, R162.reuse, -R150,      R112 {!10,+3.W}; // examples/sm_80/libs/cusolver64_10/Program.2653.sm_80.sass:21722
+//
+0447340000004054`0000007C9054723F:        DMMA.884.RM R84, R144.reuse, R124, R84 {!10,+5.W,+4.R,^3};
+0447340000008054`0000007C9054723F:        DMMA.884.RP R84, R144.reuse, R124, R84 {!10,+5.W,+4.R,^3};
+044734000000C054`0000007C9054723F:        DMMA.884.RZ R84, R144.reuse, R124, R84 {!10,+5.W,+4.R,^3};
+
+
+0006480000000000`0000003E0C0C7228:        DMUL      R12, R12, R62 {!4,Y,+2.W,+4.R}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:6402
+000FE20000000200`008000001E087A28:        DMUL      R8, |R30|, c[0x2][0x0] {!1}; // examples/sm_80/samples/interval.sass:5427
+000E4E0000000000`0000600004547A28:        DMUL      R84, R4, c[0x0][0x180] {!7,Y,+2.W}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:7262
+000FC80008000000`0000000808087C28:        DMUL      R8, R8, UR8 {!4,Y};   // examples/sm_80/samples/dmmaTensorCoreGemm.sass:7317
+001E080000004000`00005E00040A7A28:        DMUL.RM   R10, R4, c[0x0][0x178] {!4,Y,+1.W,^1}; // examples/sm_80/samples/interval.sass:5451
+040EA40000008000`00005E00040E7A28:        DMUL.RP   R14, R4.reuse, c[0x0][0x178] {!2,+3.W}; // examples/sm_80/samples/interval.sass:5455
+000FC80000004000`00000008081E8228:  @!P0  DMUL.RM   R30, R8, R8 {!4,Y};   // examples/sm_80/samples/interval.sass:6355
+080E220000000000`0000000A0A067228:        DMUL      R6, R10, R10.reuse {!1,+1.W}; // examples/sm_80/samples/bodysystemcuda.sass:20751
+
+
+001E1C0003F0C000`000000121400722A:        DSETP.GTU.AND    P0, PT,  R20,  R18, PT {!14,Y,+1.W,^1}; // examples/sm_80/samples/bisect_small.sass:2247
+001E1C0003FA4200`000000FF1600722A:        DSETP.GT.AND     P5, PT, |R22|, RZ,  PT {!14,Y,+1.W,^1}; // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:4639
+001E0C0003F0D200`7FF000000600942A:  @!P1  DSETP.NEU.AND    P0, PT, |R6|, +INF, PT {!6,Y,+1.W,^1}; // examples/sm_80/samples/conjugateGradientMultiDeviceCG.sass:4739
+002E62000390F000`008000001600762A:        DSETP.MAX.AND    P0, P1, R22, c[0x2][0x0], PT {!1,+2.W,^2}; // examples/sm_80/samples/bisect_large.sass:8569
+
+
+001E2C0000201800`00005E00000C7B10:        F2F.F64.F32    R12,   c[0x0][0x178] {!6,+1.W,^1}; // examples/sm_80/libs/npps64_11/Program.35.sm_80.sass:8241
+001E240000301000`4000000600077310:        F2F.F32.F64    R7,   |R6| {!2,+1.W,^1}; // examples/sm_80/libs/npps64_11/Program.147.sm_80.sass:10166
+000FE20000101000`0000004C004C1304:  @P1   F2F.F32.F16    R76,   R76 {!1};        // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:1456737
+000F620000202000`8000007400747304:        F2F.BF16.F32   R116, -R116 {!1,+6.W}; // examples/sm_80/libs/cusolver64_10/Program.2644.sm_80.sass:2679
+005E280008301000`0000000600107D10:        F2F.F32.F64    R16,   UR6 {!4, +1.W, ^1,^3};
+005E280008301000`0000000600107B10:        F2F.F32.F64    R16,   cx[UR6][0x0] {!4, +1.W, ^1,^3};
+005E280000301000`0000000600107910:        F2F.F32.F64    R16,   1.2731974745791633891e-313 {!4, +1.W, ^1,^3};
+
+
+000FE400000010FF`00000006FF06123E:  @P1   F2FP.BF16.PACK_AB R6, RZ, R6 {!2};  // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:211584
+000FE200000000FF`0000000EFF0EA23E:  @!P2  F2FP.PACK_AB R14, RZ, R14 {!1}; // examples/sm_80/libs/cusolver64_10/Program.1881.sm_80.sass:143105
+008FE400000000FF`000000B5B703783E:        F2FP.PACK_AB R3, R183, 2.5363502204279188984e-43 {!2, ^4};
+008FE400000000FF`000000B5B7037A3E:        F2FP.PACK_AB R3, R183, c[0x0][0x0] {!2, ^4};
+008FE400080000FF`000000B5B7037A3E:        F2FP.PACK_AB R3, R183, cx[UR53][0x0] {!2, ^4};
+
+
+000E24000020B000`0000000600067305:        F2I.U32.CEIL.NTZ      R6,  R6 {!2,+1.W};     // examples/sm_80/samples/BezierLineCDP.sass:1673
+0002A4000021F000`0000000200037305:        F2I.FTZ.U32.TRUNC.NTZ R3,  R2 {!2,+3.W,+2.R}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7098
+000F220000201100`0000000D000D7305:        F2I                   R13, R13 {!1,+5.W};   // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:499083
+000F220000201100`0000000D000D7905:        F2I                   R13, 1.8216880036222621922e-44 {!1, +5.W};
+000F220000201100`0000000D000D7B05:        F2I                   R13, c[0x0][0x0] {!1, +5.W};
+000F220000206100`0000000D000D7305:        F2I.S8.FLOOR.NTZ      R13, R13 {!1, +5.W};
+000F220000204100`0000000D000D7305:        F2I.S8.FLOOR          R13, R13 {!1, +5.W};
+000F22000020B100`0000000D000D7305:        F2I.CEIL.NTZ          R13, R13 {!1, +5.W};
+000F220000213100`0000000D000D7305:        F2I.FTZ.NTZ           R13, R13 {!1, +5.W};
+
+
+001FCA0000000000`000000070407A221:  @!P2  FADD             R7, R4, R7 {!5,Y,^1}; // examples/sm_80/libs/cusolver64_10/Program.1260.sm_80.sass:48853
+000FE40000000000`80000015041E7221:        FADD             R30, R4, -R21 {!2};   // examples/sm_80/libs/cusolver64_10/Program.1260.sm_80.sass:51413
+000FC80000010100`800000FF0F0F7221:        FADD.FTZ         R15, -R15, -RZ {!4,Y}; // examples/sm_80/libs/cusolver64_10/Program.1260.sm_80.sass:51988
+000FE20000010000`3F8000001C040421:  @P0   FADD.FTZ         R4, R28, 1 {!1};      // examples/sm_80/libs/cusolver64_10/Program.1260.sm_80.sass:52043
+000FC80008010100`80000004FF057E21:        FADD.FTZ         R5, -RZ, -UR4 {!4,Y}; // examples/sm_80/samples/bgr_resize.sass:797
+002FE40000000000`8000600005057621:        FADD             R5, R5, -c[0x0][0x180] {!2,^2}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2318
+040FE40000000100`4040000005007421:        FADD             R0, -R5.reuse, 3 {!2}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2684
+000FE20000002000`4000001AFF067221:        FADD.SAT         R6, RZ, |R26| {!1};   // examples/sm_80/samples/bilateral_kernel.sass:1634
+140FE40000000100`0000000B0A077221:        FADD             R7, -R10.reuse, R11.reuse {!2}; // examples/sm_80/samples/bisect_small.sass:1856
+
+
+000E640000000000`0000600002007B02:        FCHK             P0, R2, c[0x0][0x180] {!2,+2.W}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9516
+000E240000020000`0000001C1B007302:        FCHK             P1, R27, R28 {!2,+1.W}; // examples/sm_80/libs/cublas64_11/Program.903.sm_80.sass:22141
+000E240008000000`0000000512007D02:        FCHK             P0, R18, UR5 {!2,+1.W}; // examples/sm_80/samples/flowCUDA.sass:3770
+
+
+000FC80000000004`0000000709087223:        FFMA             R8, R9, R7, R4 {!4,Y}; // examples/sm_80/samples/BezierLineCDP.sass:1334
+000FE200000000FF`5F80000000030823:  @P0   FFMA             R3, R0, 1.84467440737095516160e+19, RZ {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1499
+180FE2000000C008`000000090B007223:        FFMA.RZ          R0, R11, R9.reuse, R8.reuse {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1357
+180FE20000004008`000000090B037223:        FFMA.RM          R3, R11, R9.reuse, R8.reuse {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1359
+000FE20000008008`000000090B007223:        FFMA.RP          R0, R11, R9, R8 {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1362
+000FC40000000007`000063000A0A7A23:        FFMA             R10, R10, c[0x0][0x18c], R7 {!2,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7696
+080FE40000000006`00005F0004047623:        FFMA             R4, R4, R6.reuse, c[0x0][0x17c] {!2}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2324
+000FC800080000FF`000000040B057C23:        FFMA             R5, R11, UR4, RZ {!4,Y}; // examples/sm_80/samples/oceanFFT_kernel.sass:3085
+000FC80008000005`000000040C0E7E23:        FFMA             R14, R12, R5, UR4 {!4,Y}; // examples/sm_80/samples/oceanFFT_kernel.sass:3086
+002FC8000000200C`3F0000000E0C7423:        FFMA.SAT         R12, R14, R12, 0.5 {!4,Y,^2}; // examples/sm_80/libs/curand64_10/Program.18.sm_80.sass:17416
+000FCA000000080B`000000080A0A9223:  @!P1  FFMA             R10, R10, R8, -R11 {!5,Y}; // examples/sm_80/libs/cusolver64_10/Program.2317.sm_80.sass:54265
+000FCA000000F00B`0000001A1A1C7223:        FFMA.FMZ.RZ.SAT  R28, R26, R26, R11 {!5, Y};
+000FCA00000F000B`0000001A1A1C7223:        FFMA.FTZ         R28, R26, R26, R11 {!5, Y};
+040FE40000000106`00000005030A0223:  @P0   FFMA             R10, -R3.reuse, R5, R6 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2317.sm_80.sass:54457
+
+
+000E6200080E0000`0000000400137D00:        FLO.U32          R19, UR4 {!1,+2.W};   // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4323
+00106400000E0000`0000000200037300:        FLO.U32          R3, R2 {!2,+2.W,+1.R,^1}; // examples/sm_80/samples/marchingCubes_kernel.sass:16368
+001E2400000E0400`0000000200067300:        FLO.U32.SH       R6, R2 {!2,+1.W,^1};  // examples/sm_80/libs/cusparse64_11/Program.243.sm_80.sass:29901
+
+
+001FE40000410000`0000000403060220:  @P0   FMUL.FTZ         R6, R3, R4 {!2,^1};   // examples/sm_80/samples/BezierLineCDP.sass:1502
+000FE40000410000`3F00000004070820:  @P0   FMUL.FTZ         R7, R4, 0.5 {!2};     // examples/sm_80/samples/BezierLineCDP.sass:1503
+000FE20000400000`0000600008087A20:        FMUL             R8, R8, c[0x0][0x180] {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:11030
+040FE20000400000`000000171A197220:        FMUL             R25, R26.reuse, R23 {!1}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2408
+000FE40000400000`3E2AAAAB13137820:        FMUL             R19, R19, 0.16666667163372039795 {!2}; // examples/sm_80/samples/bicubicTexture_cuda.sass:3293
+
+
+000FE40003800000`437F000006067809:        FMNMX            R6, R6, 255, PT {!2}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1038
+000FC80003800000`0000640000007A09:        FMNMX            R0, R0, c[0x0][0x190], PT {!4,Y}; // examples/sm_80/samples/bisect_large.sass:7606
+006FCA0007800000`0000001215157209:        FMNMX            R21, R21, R18, !PT {!5,Y,^2,^3}; // examples/sm_80/samples/bisect_small.sass:2362
+010FCA0007800000`000000041313D209:  @!P5  FMNMX            R19, R19, R4, !PT {!5,Y,^5}; // examples/sm_80/libs/cusolver64_10/Program.1044.sm_80.sass:68397
+000FC80007800000`4000000807087209:        FMNMX            R8, R7, |R8|, !PT {!4,Y}; // examples/sm_80/libs/cusolver64_10/Program.1575.sm_80.sass:10762
+
+
+000064000020D000`00000009000B7307:        FRND.TRUNC       R11, R9 {!2,+2.W,+1.R}; // examples/sm_80/samples/texture_2d.sass:2413
+000E220000205000`00000025000B7307:        FRND.FLOOR       R11, R37 {!1,+1.W};   // examples/sm_80/libs/curand64_10/Program.18.sm_80.sass:17105
+004EA4000030D800`0000000800187313:        FRND.F64.TRUNC   R24, R8 {!2,+3.W,^3}; // examples/sm_80/libs/curand64_10/Program.18.sm_80.sass:17367
+000EE40000209000`0000001000077307:        FRND.CEIL        R7, R16 {!2,+4.W};    // examples/sm_80/libs/nppig64_11/Program.21.sm_80.sass:46564
+004E240000301800`0000000600087313:        FRND.F64         R8, R6 {!2,+1.W,^3};  // examples/sm_80/libs/npps64_11/Program.49.sm_80.sass:8604
+000EE20000201000`0000001600167307:        FRND             R22, R22 {!1,+4.W};   // examples/sm_80/libs/nvjpeg64_11/Program.18.sm_80.sass:1452
+
+
+000FCA0003000000`000000FF16167208:        FSEL             R22, R22, RZ, P6 {!5,Y}; // examples/sm_80/samples/binomialOptions_kernel.sass:2397
+040FE40004800100`3F80000002037808:        FSEL             R3, -R2.reuse, 1, !P1 {!2}; // examples/sm_80/samples/bisect_large.sass:6608
+000FC60002800000`000000162608E208:  @!P6  FSEL             R8, R38, R22, P5 {!3,Y}; // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:4693
+002FE40004000000`0000600006049A08:  @!P1  FSEL             R4, R6, c[0x0][0x180], !P0 {!2,^2}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:7377
+000FE20004000000`3CA72F05FF0D7808:        FSEL             R13, RZ, 0.02040816284716129303, !P0 {!1}; // examples/sm_80/samples/imageDenoising.sass:5549
+
+
+000FCA0003804000`3DCCCCCD0000780A:        FSET.BF.GT.AND   R0, R0, 0.10000000149011611938, PT {!5,Y}; // examples/sm_80/samples/imageDenoising.sass:5782
+002FE40003806000`00006E000C0A7A0A:        FSET.BF.GE.AND   R10, R12, c[0x0][0x1b8], PT {!2,^2}; // examples/sm_80/libs/nppif64_11/Program.329.sm_80.sass:3203
+
+
+000FE40004702600`000000FF0700720B:        FSETP.EQ.OR      P0, PT, |R7|, RZ, !P0 {!2}; // examples/sm_80/samples/bisect_large.sass:6014
+000FE40003F25000`000000FF8000720B:        FSETP.NE.AND     P1, PT, R128, RZ, PT {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:570
+040FE40003F5D200`7F8000000400780B:        FSETP.NEU.FTZ.AND P2, PT, |R4|.reuse, +INF, PT {!2}; // examples/sm_80/samples/BezierLineCDP.sass:1299
+000FE40003F1D000`000000030000720B:        FSETP.NEU.FTZ.AND P0, PT, R0, R3, PT {!2}; // examples/sm_80/samples/BezierLineCDP.sass:1366
+000FC80003F06000`000000FF0700720B:        FSETP.GE.AND     P0, PT, R7, RZ, PT {!4,Y}; // examples/sm_80/libs/cusolver64_10/Program.2746.sm_80.sass:674
+004FE20003F06000`000000090A00720B:        FSETP.GE.AND     P0, PT, R10, R9, PT {!1,^3}; // examples/sm_80/libs/nppitc64_11/Program.21.sm_80.sass:108840
+000FE20003FAE000`C2FC00000700780B:        FSETP.GEU.AND    P5, PT, R7, -126, PT {!1}; // examples/sm_80/samples/binomialOptions_kernel.sass:2228
+000FE20003F84000`000000020900720B:        FSETP.GT.AND     P4, PT, R9, R2, PT {!1}; // examples/sm_80/samples/BlackScholes.sass:1146
+000FE40003F1C200`7F8000000400780B:        FSETP.GTU.FTZ.AND P0, PT, |R4|, +INF, PT {!2}; // examples/sm_80/samples/BezierLineCDP.sass:1291
+000FE40003F1C200`7F8000001900780B:        FSETP.GTU.FTZ.AND P0, PT, |R25|, +INF, PT {!2}; // examples/sm_80/samples/bisect_large.sass:7049
+000FDA0004F23600`000000090000720B:        FSETP.LE.OR      P1, PT, |R0|, R9, !P1 {!13,Y}; // examples/sm_80/libs/cusolver64_10/Program.2774.sm_80.sass:3947
+000FE40001F6B000`000000081500720B:        FSETP.LEU.AND    P3, PT, R21, R8, P3 {!2}; // examples/sm_80/libs/nppitc64_11/Program.21.sm_80.sass:108774
+000FC80000701400`00007B0008007A0B:        FSETP.LT.OR      P0, PT, R8, c[0x0][0x1ec], P0 {!4,Y}; // examples/sm_80/libs/nppig64_11/Program.105.sm_80.sass:35585
+000FDA0000709400`0000790007007A0B:        FSETP.LTU.OR     P0, PT, R7, c[0x0][0x1e4], P0 {!13,Y}; // examples/sm_80/libs/nppif64_11/Program.42.sm_80.sass:2469
+//
+000FE40004702800`000000FF0700720B:        FSETP.EQ.XOR P0, PT, R7, RZ, !P0 {!2};
+000FE40004700600`000000FF0700720B:        FSETP.F.OR P0, PT, |R7|, RZ, !P0 {!2};
+000FE4000470F600`000000FF0700720B:        FSETP.T.OR P0, PT, |R7|, RZ, !P0 {!2};
+000FE40004707600`000000FF0700720B:        FSETP.NUM.OR P0, PT, |R7|, RZ, !P0 {!2};
+000FE40004708600`000000FF0700720B:        FSETP.NAN.OR P0, PT, |R7|, RZ, !P0 {!2};
+000FE4000470A600`000000FF0700720B:        FSETP.EQU.OR P0, PT, |R7|, RZ, !P0 {!2};
+
+
+001FCA0000000000`0000000502028230:  @!P0  HADD2       R2,   R2,             R5 {!5,Y,^1}; // examples/sm_80/samples/fp16ScalarProduct.sass:1064
+101FE40000004900`30000005FF047230:        HADD2.F32   R4,  -RZ.H0_H0,       R5.reuse.H1_H1 {!2,^1}; // examples/sm_80/samples/fp16ScalarProduct.sass:1082
+000FC60000004900`2000002BFF2B7230:        HADD2.F32   R43, -RZ.H0_H0,       R43.H0_H0 {!3,Y}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:154110
+142FE40000000C00`30000000020A7230:        HADD2       R10,  R2.reuse.H1_H1, R0.reuse.H1_H1 {!2,^2}; // examples/sm_80/libs/cusolver64_10/Program.1809.sm_80.sass:931497
+020FE20000004900`20000006FF097430:        HADD2.F32   R9,  -RZ.H0_H0, 0.0078125, 3.5762786865234375e-07 {!1,^6};
+020FE20008004900`20000006FF097630:        HADD2.F32   R9,  -RZ.H0_H0,       cx[UR6][0x0].H0_H0 {!1,^6};
+
+
+004FD80003800008`0000000605087235:        HFMA2.MMA    R8,  R5,              R6,        R8 {!12,Y,^3}; // examples/sm_80/samples/fp16ScalarProduct.sass:1167
+0C2FE40003800819`0000000223197231:        HFMA2        R25, R35.reuse.H0_H0, R2.reuse,  R25 {!2,^2}; // examples/sm_80/libs/cublas64_11/Program.1015.sm_80.sass:25259
+0C1FE40003800824`0000000223007231:        HFMA2        R0,  R35.reuse.H0_H0, R2.reuse,  R36 {!2,^1}; // examples/sm_80/libs/cublas64_11/Program.1015.sm_80.sass:140233
+144FE40003840802`200000223B052231:  @P2   HFMA2        R5,  R59.reuse.H0_H0, R34.H0_H0, R2.reuse.H0_H0 {!2,^3}; // examples/sm_80/libs/cusolver64_10/Program.1863.sm_80.sass:706300
+041FE4000B840812`20000019160E7631:        HFMA2        R14, R22.reuse.H0_H0, R18.H0_H0, cx[UR25][0x0].H0_H0 {!2,^1};
+041FE4000B840812`20000019160E7631:        HFMA2        R14, R22.reuse.H0_H0, R18.H0_H0, cx[UR25] [0x0].H0_H0 {!2,^1};
+041FE40003840812`20000019160E7831:        HFMA2        R14, R22.reuse.H0_H0, 0.0078125, 1.490116119384765625e-06, R18.H0_H0 {!2,^1};
+041FE4000B840812`20000019160E7C31:        HFMA2        R14, R22.reuse.H0_H0, UR25.H0_H0, R18.H0_H0 {!2,^1};
+041FE40003840812`20000019160E7A31:        HFMA2        R14, R22.reuse.H0_H0, c[0x0][0x0].H0_H0, R18.H0_H0 {!2,^1};
+041FE40003840812`20000019160E7431:        HFMA2        R14, R22.reuse.H0_H0, R18.H0_H0, 0.0078125, 1.490116119384765625e-06 {!2,^1};
+
+
+004B6E000004180C`00000008040C723C:        HMMA.16816.F32.BF16 R12, R4, R8, R12 {!7,+6.W,+6.R,^3}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7223
+040F680000085008`0000001C0C08723C:        HMMA.1684.F32.TF32 R8, R12.reuse, R28, R8 {!4,+6.W}; // examples/sm_80/samples/tf32TensorCoreGemm.sass:10449
+080FF00000041820`000000C4A820723C:        HMMA.16816.F32.BF16 R32, R168, R196.reuse, R32 {!8}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:522
+050FE40000001800`000000C4A400723C:        HMMA.16816.F32   R0, R164.reuse, R196, R0 {!2,^5}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:204766
+080FF00000001040`000000DCD040723C:        HMMA.1688.F32    R64, R208, R220.reuse, R64 {!8}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:294150
+040FF00000000824`000000947824723C:        HMMA.16816.F16   R36, R120.reuse, R148, R36 {!8}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:377111
+080FF0000000003E`00000087763E723C:        HMMA.1688.F16    R62, R118, R135.reuse, R62 {!8}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:457968
+080FE40000041820`000000B49820723C:        HMMA.16816.F32.BF16 R32, R152, R180.reuse, R32 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:538168
+080FF00000041038`000000F2DE38723C:        HMMA.1688.F32.BF16 R56, R222, R242.reuse, R56 {!8}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:738491
+080FE4000000106C`000000C7BA6C723C:        HMMA.1688.F32    R108, R186, R199.reuse, R108 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:800660
+040F280000000022`000000444E22723C:        HMMA.1688.F16    R34, R78.reuse, R68, R34 {!4,+5.W}; // examples/sm_80/libs/cusolver64_10/Program.2607.sm_80.sass:160968
+0422AE0000001804`000000100C04723C:        HMMA.16816.F32   R4, R12.reuse, R16, R4 {!7,+3.W,+2.R,^2}; // examples/sm_80/libs/cusolver64_10/Program.2617.sm_80.sass:32827
+048FE80000001034`0000004B5234723C:        HMMA.1688.F32    R52, R82.reuse, R75, R52 {!4,^4}; // examples/sm_80/libs/cusolver64_10/Program.2621.sm_80.sass:70963
+040E6E000000181C`00000092841C723C:        HMMA.16816.F32   R28, R132.reuse, R146, R28 {!7,+2.W}; // examples/sm_80/libs/cusolver64_10/Program.2626.sm_80.sass:82076
+040270000008101C`000000B8A41C723C:        HMMA.1688.F32.TF32 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R}; // examples/sm_80/libs/cusolver64_10/Program.2640.sm_80.sass:620267
+040270000000101C`000000B8A41C723C:        HMMA.1688.F32 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+040270000004101C`000000B8A41C723C:        HMMA.1688.F32.BF16 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+040270000008101C`000000B8A41C723C:        HMMA.1688.F32.TF32 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+040270000000001C`000000B8A41C723C:        HMMA.1688.F16 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+040270000004001C`000000B8A41C723C:        HMMA.1688.F16.BF16 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+040270000008001C`000000B8A41C723C:        HMMA.1688.F16.TF32 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+// 04027000000C001C`000000B8A41C723C:        HMMA.1688.F16.INVALID3 R28, R164.reuse, R184, R28 {!8, +2.W, +2.R};
+040270000000101C`000000B8A41C723C:        HMMA.1688.F32 R28, R164.reuse, R184, R28 {!8, +2.W, +2.R};
+040270000004101C`000000B8A41C723C:        HMMA.1688.F32.BF16 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+040270000008101C`000000B8A41C723C:        HMMA.1688.F32.TF32 R28, R164.reuse, R184, R28 {!8,+2.W,+2.R};
+// 04027000000C101C`000000B8A41C723C:        HMMA.1688.F32.INVALID3 R28, R164.reuse, R184, R28 {!8, +2.W, +2.R};
+
+
+// targeting F16
+000E220000C00C00`000000FF00077306:        I2F.F16.S8       R7,  RZ {!1,+1.W};
+000E220000D00C00`000000FF00077306:        I2F.F16.S16      R7,  RZ {!1,+1.W};
+000E220000200C00`000000FF00077306:        I2F.F16          R7,  RZ {!1,+1.W};     // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3122209
+000E220000202800`00005E00000E7B06:        I2F.F16.U32      R14, c[0x0][0x178] {!1,+1.W};
+// no .S64
+//
+// targeting F32
+000EA20000001000`1000001000087306:        I2F    .U8       R8,  R16.B1 {!1,+3.W}; // examples/sm_80/samples/boxFilter_kernel.sass:9052
+000EA20000001000`1000001A00107306:        I2F    .U8       R16, R26.B1 {!1,+3.W}; // examples/sm_80/samples/boxFilter_kernel.sass:9105
+004E240000101000`0000000400007306:        I2F    .U16      R0,  R4 {!2,+1.W,^3};  // examples/sm_80/libs/nppial64_11/Program.14.sm_80.sass:31946
+0002A20000201000`0000000900077306:        I2F    .U32      R7,  R9 {!1,+3.W,+2.R}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1174
+000E220000201000`00005B00000A7B06:        I2F    .U32      R10, c[0x0][0x16c] {!1,+1.W}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1182
+000E220000301000`0000640000107B12:        I2F    .U64      R16, c[0x0][0x190] {!1,+1.W}; // examples/sm_80/libs/nppidei64_11/Program.133.sm_80.sass:20551
+000E220000209000`0000002000047906:        I2F    .U32.RP   R4,  0x20 {!1,+1.W};   // examples/sm_80/samples/bf16TensorCoreGemm.sass:7074
+0080660000001400`0000001B00097306:        I2F    .S8       R9,  R27 {!3,+2.W,+1.R,^4}; // examples/sm_80/libs/cusparse64_11/Program.153.sm_80.sass:464800
+000EE20000101400`0000002500257306:        I2F    .S16      R37, R37 {!1,+4.W};   // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:358859
+004EA20000101400`0000000C000C1306:  @P1   I2F    .S16      R12, R12 {!1,+3.W,^3}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:363237
+0000620000201400`0000001000047306:        I2F              R4,  R16 {!1,+2.W,+1.R}; // examples/sm_80/samples/BezierLineCDP.sass:1739
+000EA80008201400`0000000400057D06:        I2F              R5,  UR4 {!4,+3.W}; // examples/sm_80/samples/BezierLineCDP.sass:1741
+000E640008201400`0000000400057D06:        I2F              R5,  UR4 {!2,+2.W}; // examples/sm_80/samples/boxFilter_kernel.sass:8935
+000E220000201400`00005E00000E7B06:        I2F              R14, c[0x0][0x178] {!1,+1.W}; // examples/sm_80/samples/boxFilter_kernel.sass:8962
+001E620000301400`0000640000047B12:        I2F    .S64      R4,  c[0x0][0x190] {!1,+2.W,^1}; // examples/sm_80/libs/nppidei64_11/Program.133.sm_80.sass:20345
+//
+000E240008101800`0000000400027D12:        I2F.F64.U16      R2, UR4 {!2,+1.W};    // examples/sm_80/libs/nppidei64_11/Program.119.sm_80.sass:15073
+021E220000201800`0000000F00047312:        I2F.F64.U32      R4, R15 {!1,+1.W,^1,^6}; // examples/sm_80/libs/nppidei64_11/Program.140.sm_80.sass:2863
+000E220000301800`0000660000067B12:        I2F.F64.U64      R6, c[0x0][0x198] {!1,+1.W}; // examples/sm_80/libs/nppidei64_11/Program.119.sm_80.sass:10198
+000E220008101C00`0000000400067D12:        I2F.F64.S16      R6, UR4 {!1,+1.W};    // examples/sm_80/libs/nppidei64_11/Program.119.sm_80.sass:15847
+003E240000201C00`0000000000047312:        I2F.F64          R4, R0 {!2,+1.W,^1,^2}; // examples/sm_80/libs/nppidei64_11/Program.119.sm_80.sass:10072
+000E220000301C00`0000660000067B12:        I2F.F64.S64      R6, c[0x0][0x198] {!1,+1.W}; // examples/sm_80/libs/nppidei64_11/Program.119.sm_80.sass:9672
+//
+000E220000201400`00005E00000E7B06:        I2F              R14, c[0x0][0x178] {!1, +1.W};
+000E220000205400`00005E00000E7B06:        I2F.RM           R14, c[0x0][0x178] {!1, +1.W};
+000E220000209400`00005E00000E7B06:        I2F.RP           R14, c[0x0][0x178] {!1, +1.W};
+000E22000020F400`00005E00000E7B06:        I2F.RZ           R14, c[0x0][0x178] {!1, +1.W};
+
+
+000FE40000000000`0000000F000F7238:        I2I. U8.S32.SAT  R15, R15 {!2};  // examples/sm_80/libs/nppial64_11/Program.28.sm_80.sass:147266
+000FE40000002000`0000000A000A7238:        I2I.U16.S32.SAT  R10, R10 {!2};  // examples/sm_80/libs/nppial64_11/Program.28.sm_80.sass:142955
+000FE4000000D000`0000000A000A7238:        I2I. S8.S32.SAT  R10, R10 {!2};
+000FE40000003000`0000000000007238:        I2I.S16.S32.SAT  R0,  R0  {!2};  // examples/sm_80/libs/nppial64_11/Program.28.sm_80.sass:145478
+//
+000FE40000002000`0000000A000A7838:        I2I.U16.S32.SAT  R10, 0xa {!2};
+000FE40008002000`0000000A000A7C38:        I2I.U16.S32.SAT  R10, UR10 {!2};
+
+
+010FE400000010FF`0000000405047239:        I2IP.S8.S32.SAT  R4,   R5, R4, RZ {!2,^5}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:497642
+000FE400000010FF`0000007677767239:        I2IP.S8.S32.SAT  R118, R119, R118, RZ {!2};
+000FE400000010FF`0000007677767839:        I2IP.S8.S32.SAT  R118, R119, 0x76, RZ {!2};
+000FE400000010FF`0000007677767A39:        I2IP.S8.S32.SAT  R118, R119, c[0x0][0x0], RZ {!2};
+000FE400080010FF`0000007677767A39:        I2IP.S8.S32.SAT  R118, R119, cx[UR54][0x0], RZ {!2};
+000FE400080010FF`0000007677767C39:        I2IP.S8.S32.SAT  R118, R119, UR54, RZ {!2};
+
+
+000FE20000000000`0000001A000B7213:        IABS   R11, R26 {!1};        // examples/sm_80/samples/cdpQuadtree.sass:7402
+080FE20000000000`0000000000087213:        IABS   R8,  R0.reuse {!1};    // examples/sm_80/samples/dct8x8.sass:4681
+000FE20000000000`00006000000E7A13:        IABS   R14, c[0x0][0x180] {!1}; // examples/sm_80/samples/immaTensorCoreGemm.sass:4285
+003FE20008000000`0000000700067C13:        IABS   R6,  UR7 {!1,^1,^2};   // examples/sm_80/libs/cusparse64_11/Program.378.sm_80.sass:27557
+000FE20000000000`0000000500006213:  @P6   IABS   R0,  R5 {!1};          // examples/sm_80/libs/nppist64_11/Program.112.sm_80.sass:42042
+
+
+000FE40007FFE0FF`800000180B137210:        IADD3     R19,         R11,       -R24,           RZ {!2}; // examples/sm_80/libs/cublas64_11/Program.693.sm_80.sass:26952
+001FC80007FFE0FF`0000000C1A107210:        IADD3     R16,         R26,        R12,           RZ {!4,Y,^1}; // examples/sm_80/libs/cublas64_11/Program.693.sm_80.sass:26456
+001FC80007FFE1FF`000064001A027A10:        IADD3     R2,         -R26,        c[0x0][0x190], RZ {!4,Y,^1}; // examples/sm_80/libs/cublas64_11/Program.693.sm_80.sass:26512
+000FE4000FFFE0FF`000000060A0A7C10:        IADD3     R10,         R10,        UR6,           RZ {!2}; // examples/sm_80/libs/cublas64_11/Program.693.sm_80.sass:26515
+000FD60007FFE0FF`FFFFFFF415147810:        IADD3     R20,         R21,       -0xc,           RZ {!11,Y}; // examples/sm_80/libs/cublas64_11/Program.693.sm_80.sass:26570
+040FE40007FFE0FF`000000100E037810:        IADD3     R3,          R14.reuse,  0x10,          RZ {!2}; // examples/sm_80/libs/cublas64_11/Program.693.sm_80.sass:27018
+000FCC00007FE4FF`00005B0005037A10:        IADD3.X   R3,          R5,         c[0x0][0x16c], RZ, P0, !PT {!6,Y}; // examples/sm_80/samples/alignedTypes.sass:3540
+000FCE0007FFE0FF`0000004007079810:  @!P1  IADD3     R7,          R7,         0x40,          RZ {!7,Y}; // examples/sm_80/samples/bgr_resize.sass:853
+000FC80007F1E0FF`00005C0000027A10:        IADD3     R2, P0,      R0,         c[0x0][0x170], RZ {!4,Y}; // examples/sm_80/samples/bodysystemcuda.sass:21277
+000FC80007F1EFFF`00005C0000027A10:        IADD3.X   R2, P0,     ~R0,         c[0x0][0x170], ~RZ, !PT, !PT {!4,Y};
+000FCA0007E5E0FF`0000000904047210:        IADD3     R4, P2, P6,  R4,         R9,            RZ {!5,Y};
+
+
+000FE200000000FF`0080000002027A26:        IDP.4A.U8.U8     R2,  R2,        c[0x2][0x0], RZ  {!1}; // examples/sm_80/samples/marchingCubes_kernel.sass:22825
+000FE2000000041D`008000001C4A7A26:        IDP.4A.U8.S8     R74, R28,       c[0x2][0x0], R29 {!1}; // examples/sm_80/libs/nppif64_11/Program.238.sm_80.sass:16179
+000FE200000002FF`0080010023237A26:        IDP.4A.S8.U8     R35, R35,       c[0x2][0x4], RZ  {!1}; // examples/sm_80/libs/nppif64_11/Program.238.sm_80.sass:13674
+042FE200000006FF`000000060F067226:        IDP.4A.S8.S8     R6,  R15.reuse, R6,          RZ  {!1,^2}; // examples/sm_80/libs/cublas64_11/Program.1019.sm_80.sass:10676
+000FE20000001002`0000000305027226:        IDP.2A.LO.U16.U8 R2,  R5,        R3,          R2  {!1};  // examples/sm_80/samples/marchingCubes_kernel.sass:22828
+000FE20000001427`008000001A0C7A26:        IDP.2A.LO.U16.S8 R12, R26,       c[0x2][0x0], R39 {!1}; // examples/sm_80/libs/nppif64_11/Program.357.sm_80.sass:19040
+000FE20000001219`008002000A197A26:        IDP.2A.LO.S16.U8 R25, R10,       c[0x2][0x8], R25 {!1}; // examples/sm_80/libs/nppif64_11/Program.238.sm_80.sass:23442
+000FCA00080016FF`0000000402087C26:        IDP.2A.LO.S16.S8 R8,  R2,        UR4,         RZ  {!5,Y}; // examples/sm_80/libs/nppial64_11/Program.77.sm_80.sass:67624
+000FCE0000003004`0000001506157226:        IDP.2A.HI.U16.U8 R21, R6, R21, R4 {!7,Y};
+000FCE0000003204`0000001506157226:        IDP.2A.HI.S16.U8 R21, R6, R21, R4 {!7,Y};
+000FCE0000003404`0000001506157226:        IDP.2A.HI.U16.S8 R21, R6, R21, R4 {!7,Y};
+000FCE0000003604`0000001506157226:        IDP.2A.HI.S16.S8 R21, R6, R21, R4 {!7,Y};
+
+001FCA00078E0203`0000000000007A24:        IMAD             R0,      R0,        c[0x0][0x0], R3 {!5,Y,^1}; // examples/sm_80/samples/alignedTypes.sass:2814
+000FC800078E0006`0000000809067225:        IMAD.WIDE.U32    R6,      R9,        R8,          R6 {!4,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7185
+000FCE00078E00FF`00000A00FF017624:        IMAD.MOV.U32     R1,      RZ,        RZ,          c[0x0][0x28] {!7,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7071
+000FCE00078E0203`00005A00000C7625:        IMAD.WIDE        R12,     R0,        R3,          c[0x0][0x168] {!7,Y}; // examples/sm_80/samples/alignedTypes.sass:2824
+000FE200078E00FF`000000FFFF008224:  @!P0  IMAD.MOV.U32     R0,      RZ,        RZ,          RZ {!1};  // examples/sm_80/samples/BezierLineCDP.sass:1289
+000FE200078E0A06`0000000105067824:        IMAD.IADD        R6,      R5,        0x1,        -R6 {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1324
+040FE200078E0204`FF80000005047824:        IMAD             R4,      R5.reuse, -0x800000,    R4 {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1328
+000FD400078E00FF`0000001002027824:        IMAD.SHL.U32     R2,      R2,        0x10,        RZ {!10,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7123
+000FE200028E0605`000000FFFF1B7224:        IMAD.X           R27,     RZ,        RZ,          R5,        P5 {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7966
+100FE400078E0249`000001205A5A7824:        IMAD             R90,     R90,       0x120,       R73.reuse {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9870
+002FE2000F8E0205`0000000402027C24:        IMAD             R2,      R2,        UR4,         R5 {!1,^2}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2287
+000FE2000F8E00FF`00000004FF047E24:        IMAD.U32         R4,      RZ,        RZ,          UR4 {!1}; // examples/sm_80/samples/binaryPartitionCG.sass:796
+000FE200030E0603`0000000105035824:  @P5   IMAD.X           R3,      R5,        0x1,         R3,        P6 {!1}; // examples/sm_80/samples/c++11_cuda.sass:20221
+000FE400078E0012`0000001513157227:        IMAD.HI.U32      R21,     R19,       R21,         R18 {!2}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:2832590
+000FE200078E02FF`555555560F0E7827:        IMAD.HI          R14,     R15,       0x55555556,  RZ {!1}; // examples/sm_80/libs/cusolver64_10/Program.2624.sm_80.sass:33344
+000FC600078E00FF`00000001FF007424:        IMAD.MOV.U32     R0,      RZ,        RZ,          0x1 {!3,Y}; // examples/sm_80/libs/cusolver64_10/Program.2625.sm_80.sass:207459
+000FCE0007820028`0000002725277227:        IMAD.HI.U32      R39, P1, R37,       R39,         R40 {!7,Y}; // examples/sm_80/libs/cufft64_10/Program.126.sm_80.sass:12267
+
+
+01409E0000400404`0000000E02047237:        IMMA.16816.U8.U8     R4,     R2.ROW,         R14.COL,        R4 {!15,Y,+3.W,+1.R,^3,^5}; // examples/sm_80/samples/immaTensorCoreGemm.sass:4096
+01409E0000400404`0000001C02047237:        IMMA.16816.U8.U8     R4,     R2.ROW,         R28.COL,        R4 {!15,Y,+3.W,+1.R,^3,^5}; // examples/sm_80/samples/immaTensorCoreGemm.sass:4149
+050FE40000445C00`000000B898007237:        IMMA.16832.S8.S8.SAT R0,     R152.reuse.ROW, R184.COL,       R0 {!2,^5}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:481480
+040FE40000445C04`000000BA98047237:        IMMA.16832.S8.S8.SAT R4,     R152.reuse.ROW, R186.COL,       R4 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:481482
+000F040000445C60`000000B8A4607237:        IMMA.16832.S8.S8.SAT R96,    R164.ROW,       R184.COL,       R96 {!2,Y,+5.W}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:481541
+040FE80000045402`000000D5AD027237:        IMMA.8816.S8.S8.SAT  R2,     R173.reuse.ROW, R213.COL,       R2 {!4}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:487728
+080FE8000004545C`000000D2B65C7237:        IMMA.8816.S8.S8.SAT  R92,    R182.ROW,       R210.reuse.COL, R92 {!4}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:505140
+
+
+000FE40003800000`0000000017117A17:        IMNMX.U32        R17, R23, c[0x0][0x0], PT {!2}; // examples/sm_80/samples/bisect_large.sass:8194
+004FE40003800000`0000000D080C0217:  @P0   IMNMX.U32        R12, R8, R13, PT {!2,^3}; // examples/sm_80/samples/cdpSimpleQuicksort.sass:1717
+000FCA0007800200`0000002009097817:        IMNMX            R9, R9, 0x20, !PT {!5,Y}; // examples/sm_80/samples/cdpQuadtree.sass:7464
+000FE2000B800000`0000000402027C17:        IMNMX.U32        R2, R2, UR4, PT {!1}; // examples/sm_80/samples/marchingCubes_kernel.sass:22151
+040FE4000B800000`0000000904037C17:        IMNMX.U32        R3, R4.reuse, UR9, PT {!2}; // examples/sm_80/samples/marchingCubes_kernel.sass:22194
+
+
+000FE20003F04270`000000FE0D00780C:        ISETP.GT.AND     P0, PT, R13, 0xfe, PT {!1}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1324
+000FDA0003F06070`000000040D00780C:        ISETP.GE.U32.AND P0, PT, R13, 0x4, PT {!13,Y}; // examples/sm_80/samples/bisect_large.sass:6343
+000FE40003F04300`00006B0005007A0C:        ISETP.GT.AND.EX  P0, PT, R5, c[0x0][0x1ac], PT, P0 {!2}; // examples/sm_80/samples/c++11_cuda.sass:19226
+000FE40003F24310`000000100B00720C:        ISETP.GT.AND.EX  P1, PT, R11, R16, PT, P1 {!2}; // examples/sm_80/libs/npps64_11/Program.105.sm_80.sass:5004
+000FDA0000706670`00005D0000007A0C:        ISETP.GE.OR      P0, PT, R0, c[0x0][0x174], P0 {!13,Y}; // examples/sm_80/libs/nppitc64_11/Program.21.sm_80.sass:141485
+000FE20003F24070`00006A0004007A0C:        ISETP.GT.U32.AND P1, PT, R4, c[0x0][0x1a8], PT {!1}; // examples/sm_80/samples/c++11_cuda.sass:19284
+000FE40002782AF0`000000010700520C:  @P5   ISETP.EQ.XOR     P4, PT, R7, R1, P4 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:38
+//
+000FE40003F20310`000000100B00720C:        ISETP.F.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+000FE40003F21310`000000100B00720C:        ISETP.LT.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+000FE40003F22310`000000100B00720C:        ISETP.EQ.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+000FE40003F23310`000000100B00720C:        ISETP.LE.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+000FE40003F24310`000000100B00720C:        ISETP.GT.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+000FE40003F25310`000000100B00720C:        ISETP.NE.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+000FE40003F26310`000000100B00720C:        ISETP.GE.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+000FE40003F27310`000000100B00720C:        ISETP.T.AND.EX P1, PT, R11, R16, PT, P1 {!2};
+
+
+000EA8000C101900`000000040A047980:        LD.E             R4,   [R10.64] {!4,+3.W}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7204
+000EA2000C101900`000010040A067980:        LD.E             R6,   [R10.64+0x10] {!1,+3.W}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7205
+000EE2000C100900`000000044455B980:  @!P3  LD.E             R85,  [R68.64+UR4] {!1,+4.W}; // examples/sm_80/libs/cusolver64_10/Program.2624.sm_80.sass:238541
+000EE2000C101300`000000041C187980:        LD.E.S8          R24,  [R28.64] {!1,+4.W}; // examples/sm_80/libs/cusolver64_10/Program.2559.sm_80.sass:352834
+000F22000C100900`0000800A8800A980:  @!P2  LD.E             R0,   [R136.64+UR10+0x80] {!1,+5.W}; // examples/sm_80/libs/cusolver64_10/Program.2626.sm_80.sass:294524
+000168000C101100`000000060E0E7980:        LD.E.U8          R14,  [R14.64] {!4,+6.W,+1.R}; // examples/sm_80/libs/nvjpeg64_11/Program.45.sm_80.sass:7801
+000EA2000C101500`000000061C040980:  @P0   LD.E.U16         R4,   [R28.64] {!1,+3.W}; // examples/sm_80/libs/nppig64_11/Program.91.sm_80.sass:47974
+000EA4000C101B00`0000100404047980:        LD.E.64          R4,   [R4.64+0x10] {!2,+3.W}; // examples/sm_80/samples/cdpQuadtree.sass:6092
+0003640000100D00`00000080AC88A980:  @!P2  LD.E.128         R136, [R172+0x80] {!2,+6.W,+2.R}; // examples/sm_80/libs/cusolver64_10/Program.2641.sm_80.sass:181621
+
+
+000E220000000400`00005F00FF097B82:        LDC.U16          R9, c[0x0][0x17c] {!1,+1.W}; // examples/sm_80/samples/bisect_large.sass:7876
+000EF00000000000`00005A40FF0A7B82:        LDC.U8           R10, c[0x0][0x169] {!8,+4.W}; // examples/sm_80/samples/c++11_cuda.sass:19191
+0000A20000000800`00C0030003087B82:        LDC              R8, c[0x3][R3+0xc] {!1,+3.W,+1.R}; // examples/sm_80/samples/binomialOptions_kernel.sass:2454
+000F300000000800`00C0200008117B82:        LDC              R17, c[0x3][R8+0x80] {!8,+5.W}; // examples/sm_80/samples/dct8x8.sass:7637
+0000A80000000A00`00C00200130E7B82:        LDC.64           R14, c[0x3][R19+0x8] {!4,+3.W,+1.R}; // examples/sm_80/samples/dct8x8.sass:7510
+000E620000000400`00005B80FF037B82:        LDC.U16          R3, c[0x0][0x16e] {!1,+2.W}; // examples/sm_80/samples/FunctionPointers_kernels.sass:2954
+004E2C0000000A00`008000000E0E7B82:        LDC.64           R14, c[0x2][R14] {!6,+1.W,^3}; // examples/sm_80/samples/FunctionPointers_kernels.sass:3026
+0000300000000800`00C01600020B7B82:        LDC              R11, c[0x3][R2+0x58] {!8,+1.W,+1.R}; // examples/sm_80/samples/quasirandomGenerator_kernel.sass:1555
+
+
+000F28000C1E1900`0000000404077981:        LDG.E            R7, [R4.64] {!4,+5.W}; // examples/sm_80/samples/bitonic.sass:4062
+000F68000C1E1900`0000040404099981:  @!P1  LDG.E            R9, [R4.64+0x4] {!4,+6.W}; // examples/sm_80/samples/bitonic.sass:4065
+009EE2000C1E9D00`0000100408087981:        LDG.E.128.CONSTANT R8, [R8.64+0x10] {!1,+4.W,^1,^4}; // examples/sm_80/samples/bodysystemcuda.sass:12814
+000EA8000C1F5900`0000000448487981:        LDG.E.STRONG.SYS R72, [R72.64] {!4,+3.W}; // examples/sm_80/libs/cusolver64_10/Program.1008.sm_80.sass:3287
+//
+000F28000C1E1100`0000000404077981:        LDG.E.U8        R7, [R4.64] {!4,+5.W};
+000F28000C1E1300`0000000404077981:        LDG.E.S8        R7, [R4.64] {!4,+5.W};
+000F28000C1E1500`0000000404077981:        LDG.E.U16       R7, [R4.64] {!4,+5.W};
+000F28000C1E1700`0000000404077981:        LDG.E.S16       R7, [R4.64] {!4,+5.W};
+000F28000C1E1900`0000000404077981:        LDG.E           R7, [R4.64] {!4,+5.W};
+000F28000C1E1B00`0000000404077981:        LDG.E.64        R7, [R4.64] {!4,+5.W};
+000F28000C1E1D00`0000000404077981:        LDG.E.128       R7, [R4.64] {!4,+5.W};
+// 000F28000C1E1F00`0000000404077981:        LDG.E.INVALID7 R7, [R4.64] {!4,+5.W};
+
+
+000BE2000B900C68`00000000CA871FAE:  @P1   LDGSTS.E.BYPASS.128               [R135],       [R202.64+UR40] {!1,+6.R}; // examples/sm_80/libs/cusolver64_10/Program.2625.sm_80.sass:88638
+0005E20008940D7F`000000000C117FAE:        LDGSTS.E.BYPASS.LTC128B.128.ZFILL [R17],        [R12.64], P1 {!1,+3.R}; // examples/sm_80/libs/cusolver64_10/Program.2625.sm_80.sass:88414
+0007E20008940D7F`060000000E197FAE:        LDGSTS.E.BYPASS.LTC128B.128.ZFILL [R25+0x6000], [R14.64], P1 {!1,+4.R}; // examples/sm_80/libs/cusolver64_10/Program.2625.sm_80.sass:90758
+//
+0003E2000B800C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.EF.128       [R133], [R202.64+UR24] {!1,+2.R};
+0003E2000B900C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.128          [R133], [R202.64+UR24] {!1,+2.R};
+0003E2000BA00C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.EL.128       [R133], [R202.64+UR24] {!1,+2.R};
+0003E2000BB00C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.LU.128       [R133], [R202.64+UR24] {!1,+2.R};
+0003E2000BC00C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.EU.128       [R133], [R202.64+UR24] {!1,+2.R};
+0003E2000BD00C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.NA.128       [R133], [R202.64+UR24] {!1,+2.R};
+// 0003E2000BE00C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.INVALID6.128 [R133], [R202.64+UR24] {!1,+2.R};
+// 0003E2000BF00C58`00000000CA851FAE:  @P1   LDGSTS.E.BYPASS.INVALID7.128 [R133], [R202.64+UR24] {!1,+2.R};
+
+
+0000A40000100800`0000040001157983:        LDL              R21, [R1+0x4] {!2,+3.W,+1.R}; // examples/sm_80/samples/BezierLineCDP.sass:1458
+000EA20000100A00`0000080001088983:  @!P0  LDL.64           R8,  [R1+0x8] {!1,+3.W}; // examples/sm_80/samples/cdpQuadtree.sass:7601
+000EA40000100C00`0000100001048983:  @!P0  LDL.128          R4,  [R1+0x10] {!2,+3.W}; // examples/sm_80/samples/cdpQuadtree.sass:7617
+0001680000300800`0000140001267983:        LDL.LU           R38, [R1+0x14] {!4,+6.W,+1.R}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3108769
+000EA20000300A00`0000A00001047983:        LDL.LU.64        R4,  [R1+0xa0] {!1,+3.W}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3109050
+000F280000100000`00000600040F0983:  @P0   LDL.U8           R15, [R4+0x6] {!4,+5.W}; // examples/sm_80/libs/nvjpeg64_11/Program.36.sm_80.sass:39875
+
+
+000FE20000000800`00000000FFFFF984:  @!PT  LDS              RZ,  [RZ] {!1};        // examples/sm_80/samples/bf16TensorCoreGemm.sass:7881
+000E620000000A00`00000000211C7984:        LDS.64           R28, [R33] {!1,+2.W}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:8103
+000FE80000000800`0004000003047984:        LDS              R4,  [R3+0x400] {!4};  // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:167236
+000E620000000800`00260000FF297984:        LDS              R41, [0x2600] {!1,+2.W}; // examples/sm_80/libs/cublas64_11/Program.217.sm_80.sass:27920
+000E280008004800`0000000426047984:        LDS              R4,  [R38.X4+UR4] {!4,+1.W}; // examples/sm_80/libs/cublas64_11/Program.217.sm_80.sass:73276
+000EE20008008A00`0002C00400247984:        LDS.64           R36, [R0.X8+UR4+0x2c0] {!1,+4.W}; // examples/sm_80/libs/cublas64_11/Program.217.sm_80.sass:28658
+000E28000800CC00`0000000558107984:        LDS.128          R16, [R88.X16+UR5] {!4,+1.W}; // examples/sm_80/libs/cublas64_11/Program.224.sm_80.sass:28693
+000FE80000000C00`FFFD00001208B984:  @!P3  LDS.128          R8,  [R18+-0x300] {!4}; // examples/sm_80/libs/cublas64_11/Program.854.sm_80.sass:4860
+
+
+000E2C0000000200`000000005050783B:        LDSM.16.M88.4    R80,  [R80] {!6,+1.W}; // examples/sm_80/samples/cudaTensorCoreGemm.sass:4571
+000E280000000100`000000007474783B:        LDSM.16.M88.2    R116, [R116] {!4,+1.W}; // examples/sm_80/samples/immaTensorCoreGemm.sass:4722
+000F240008004200`000000088794783B:        LDSM.16.MT88.4   R148, [R135+UR8] {!2,+5.W}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:316
+000F220008004200`004000085F88783B:        LDSM.16.MT88.4   R136, [R95+UR8+0x4000] {!1,+5.W}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:31039
+000F620008004200`000800079274783B:        LDSM.16.MT88.4   R116, [R146+UR7+0x800] {!1,+6.W}; // examples/sm_80/libs/cusolver64_10/Program.2651.sm_80.sass:51227
+
+
+000FC800078210FF`00000004060A7211:        LEA              R10, P1, R6,        R4,                0x2 {!4,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7191
+000FE200078EB8FF`C080000003067811:        LEA              R6,      R3,        0xc0800000,        0x17 {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1322
+000FE200078FE0FF`0000000114147811:        LEA.HI           R20,     R20,       0x1,           RZ, 0x1c {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7141
+040FE400008F1407`00000005060B7211:        LEA.HI.X         R11,     R6.reuse,  R5,            R7, 0x2, P1 {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7192
+000FE400008F0C07`00005B0002020A11:  @P0   LEA.HI.X         R2,      R2,        c[0x0][0x16c], R7, 0x1, P1 {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7824
+140FE400010F1411`0000002310077211:        LEA.HI.X         R7,      R16.reuse, R35,           R17.reuse, 0x2, P2 {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7546
+000FE400008F0EFF`000000FF09097211:        LEA.HI.X.SX32    R9,      R9,        RZ,                0x1, P1 {!2}; // examples/sm_80/samples/boxFilter_kernel.sass:9014
+
+
+008FE40000000000`000000000082734E:        LEPC             R130 {!2,^4};         // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:888
+
+
+000FE200078EFCFF`0000000403047212:        LOP3.(s0|s1)          R4, R3, R4,            RZ, 0xfc, !PT {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1377
+000FE2000780C0FF`7FFFFFFF00FF7812:        LOP3.(s0&s1)      P0, RZ, R0, 0x7fffffff,    RZ, 0xc0, !PT {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1488
+000FDA000780C804`7FFFFFFF05FF7812:        LOP3.((s0|s2)&s1) P0, RZ, R5, 0x7fffffff,    R4, 0xc8, !PT {!13,Y}; // examples/sm_80/samples/BezierLineCDP.sass:1296
+000FE200078E3CFF`0000620002027A12:        LOP3.(s0^s1)          R2, R2, c[0x0][0x188], RZ, 0x3c, !PT {!1}; // examples/sm_80/samples/bitonicSort.sass:3787
+000FCA000F8E33FF`00000006FF057C12:        LOP3.(~s1)            R5, RZ, UR6,           RZ, 0x33, !PT {!5,Y}; // examples/sm_80/libs/cufft64_10/Program.126.sm_80.sass:3137
+000FE2000F8EFCFF`0000000403047A12:        LOP3.LUT              R4, R3, cx[UR4][0x0],  RZ, 0xfc, !PT {!1};
+
+
+000FEC0000002000`0000000000007992:        MEMBAR.SC.GPU     {!6};   // examples/sm_80/samples/conjugateGradientMultiDeviceCG.sass:5196
+000FEC000000A000`0000000000007992:        MEMBAR.ALL.GPU    {!6};   // examples/sm_80/samples/conjugateGradientMultiDeviceCG.sass:5199
+000FF60000008000`0000000000007992:        MEMBAR.ALL.CTA    {!11};  // examples/sm_80/samples/simpleAWBarrier.sass:1761
+000FEC0000012000`0000000000005992:  @P5   MEMBAR.GPU        {!6};   // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:554428
+000FEC0000012000`0000000000005992:  @P5   MEMBAR.GPU        {!6};   // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:124843
+
+
+000FC00000000000`0000000000007918:        NOP               {Y};     // examples/sm_80/samples/alignedTypes.sass:2919
+000FD40000000000`0000000000007918:        NOP               {!10,Y}; // examples/sm_80/libs/cusolver64_10/Program.2652.sm_80.sass:48721
+
+
+000FCE0000000F00`00000A0000017A02:        MOV              R1, c[0x0][0x28] {!7,Y}; // examples/sm_80/samples/alignedTypes.sass:2811
+001FE20000000F00`0000002000037802:        MOV              R3, 0x20 {!1,^1};     // examples/sm_80/samples/alignedTypes.sass:2822
+000FE40000000F00`00000004000A7202:        MOV              R10, R4 {!2};         // examples/sm_80/samples/BezierLineCDP.sass:1678
+000FCE0008000F00`0000000600007C02:        MOV              R0, UR6 {!7,Y};       // examples/sm_80/samples/bf16TensorCoreGemm.sass:9707
+081FE40000000F00`0000000900037202:        MOV              R3, R9.reuse {!2,^1}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2452
+000FE40000000E00`00000004000A7202:        MOV              R10, R4, 0xe {!2};
+
+
+0042280000000000`000000000D0C723A:        MOVM.16.MT88     R12, R13 {!4,+1.W,+2.R,^3}; // examples/sm_80/libs/cusolver64_10/Program.2634.sm_80.sass:2866
+
+
+000E220000001000`0000000500007308:        MUFU.RCP         R0, R5 {!1,+1.W};     // examples/sm_80/samples/BezierLineCDP.sass:1439
+000E620000001000`0000600000027B08:        MUFU.RCP         R2, c[0x0][0x180] {!1,+2.W}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9518
+000E240000001400`8000000B000C7308:        MUFU.RSQ         R12, -R11 {!2,+1.W};  // examples/sm_80/libs/curand64_10/Program.54.sm_80.sass:17110
+000E240000001400`4000001600037308:        MUFU.RSQ         R3, |R22| {!2,+1.W};  // examples/sm_80/libs/cusolver64_10/Program.198.sm_80.sass:8827
+000E220008001000`0000000400047D08:        MUFU.RCP         R4, UR4 {!1,+1.W};    // examples/sm_80/samples/bgr_resize.sass:796
+000E240000001400`0000000300040308:  @P0   MUFU.RSQ         R4, R3 {!2,+1.W};     // examples/sm_80/samples/BezierLineCDP.sass:1501
+0000620000001000`0000000700028308:  @!P0  MUFU.RCP         R2, R7 {!1,+2.W,+1.R}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1068
+000F620000000800`0000001300137308:        MUFU.EX2         R19, R19 {!1,+6.W};   // examples/sm_80/samples/binomialOptions_kernel.sass:2344
+002E240000001C00`0000001500077308:        MUFU.RSQ64H      R7, R21 {!2,+1.W,^2}; // examples/sm_80/samples/bodysystemcuda.sass:12868
+//
+000E240000000800`0000001A000F7B08:        MUFU.EX2 R15, c[0x0][0x0] {!2,+1.W};
+000E240008000800`0000001A000F7D08:        MUFU.EX2 R15, UR26        {!2,+1.W};
+//
+000E240000000000`0000001A000F7308:        MUFU.COS        R15, R26 {!2,+1.W};
+000E240000000400`0000001A000F7308:        MUFU.SIN        R15, R26 {!2,+1.W};
+000E240000000800`0000001A000F7308:        MUFU.EX2        R15, R26 {!2,+1.W};
+000E240000000C00`0000001A000F7308:        MUFU.LG2        R15, R26 {!2,+1.W};
+000E240000001000`0000001A000F7308:        MUFU.RCP        R15, R26 {!2,+1.W};
+000E240000001400`0000001A000F7308:        MUFU.RSQ        R15, R26 {!2,+1.W};
+000E240000001800`0000001A000F7308:        MUFU.RCP64H     R15, R26 {!2,+1.W};
+000E240000001C00`0000001A000F7308:        MUFU.RSQ64H     R15, R26 {!2,+1.W};
+000E240000002000`0000001A000F7308:        MUFU.SQRT       R15, R26 {!2,+1.W};
+000E240000002400`0000001A000F7308:        MUFU.TANH       R15, R26 {!2,+1.W};
+// 000E240000002800`0000001A000F7308:        MUFU.INVALID10  R15, R26 {!2,+1.W};
+// 000E240000002C00`0000001A000F7308:        MUFU.INVALID11  R15, R26 {!2,+1.W};
+// 000E240000003000`0000001A000F7308:        MUFU.INVALID12  R15, R26 {!2,+1.W};
+// 000E240000003400`0000001A000F7308:        MUFU.INVALID13  R15, R26 {!2,+1.W};
+// 000E240000003800`0000001A000F7308:        MUFU.INVALID14  R15, R26 {!2,+1.W};
+// 000E240000003C00`0000001A000F7308:        MUFU.INVALID15  R15, R26 {!2,+1.W};
+000E240000000200`0000001A000F7308:        MUFU.COS.F16    R15, R26 {!2,+1.W};
+000E240000000600`0000001A000F7308:        MUFU.SIN.F16    R15, R26 {!2,+1.W};
+000E240000000A00`0000001A000F7308:        MUFU.EX2.F16    R15, R26 {!2,+1.W};
+000E240000000E00`0000001A000F7308:        MUFU.LG2.F16    R15, R26 {!2,+1.W};
+000E240000001200`0000001A000F7308:        MUFU.RCP.F16    R15, R26 {!2,+1.W};
+000E240000001600`0000001A000F7308:        MUFU.RSQ.F16    R15, R26 {!2,+1.W};
+// 000E240000001A00`0000001A000F7308:        MUFU.INVALID6.F16 R15, R26 {!2,+1.W};
+// 000E240000001E00`0000001A000F7308:        MUFU.INVALID7.F16 R15, R26 {!2,+1.W};
+000E240000002200`0000001A000F7308:        MUFU.SQRT.F16   R15, R26 {!2,+1.W};
+000E240000002600`0000001A000F7308:        MUFU.TANH.F16   R15, R26 {!2,+1.W};
+// 000E240000002A00`0000001A000F7308:        MUFU.INVALID10.F16 R15, R26 {!2,+1.W};
+// 000E240000002E00`0000001A000F7308:        MUFU.INVALID11.F16 R15, R26 {!2,+1.W};
+// 000E240000003200`0000001A000F7308:        MUFU.INVALID12.F16 R15, R26 {!2,+1.W};
+// 000E240000003600`0000001A000F7308:        MUFU.INVALID13.F16 R15, R26 {!2,+1.W};
+// 000E240000003A00`0000001A000F7308:        MUFU.INVALID14.F16 R15, R26 {!2,+1.W};
+// 000E240000003E00`0000001A000F7308:        MUFU.INVALID15.F16 R15, R26 {!2,+1.W};
+//
+000E240000000800`C000001A000F7308:        MUFU.EX2        R15, -|R26| {!2,+1.W};
+
+000FE60003800000`000000080000735D:        NANOSLEEP        R8 {!3};              // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4595
+000FE60003800000`000000080000795D:        NANOSLEEP        0x8 {!3};
+000FE6000B800000`0000000800007B5D:        NANOSLEEP        cx[UR8][0x0] {!3};
+000FE6000B800000`0000000800007D5D:        NANOSLEEP        UR8 {!3};
+000FE60003800000`0040020000007B5D:        NANOSLEEP        c[0x1][0x8] {!3};
+
+000FC00000000000`0000000000007918:        NOP               {Y};                 // examples/sm_80/samples/alignedTypes.sass:2854
+000FCC0000000000`0000000000007918:        NOP               {!6,Y};              // examples/sm_80/libs/nvjpeg64_11/Program.36.sm_80.sass:40509
+
+
+000FE40000000000`00000001FF257803:        P2R     R37, PR, RZ, 0x1 {!2}; // examples/sm_80/samples/cdpQuadtree.sass:7520
+000FCE0000000000`00000040FF287803:        P2R     R40, PR, RZ, 0x40 {!7,Y}; // examples/sm_80/samples/marchingCubes_kernel.sass:23061
+000FE40000001000`0000007852527803:        P2R.B1  R82, PR, R82, 0x78 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:1425029
+000FE40000002000`0000007856567803:        P2R.B2  R86, PR, R86, 0x78 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:1434062
+000FE40000003000`000000785A5A7803:        P2R.B3  R90, PR, R90, 0x78 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:1451736
+000FE40000001000`0000007852527803:        P2R.B1  R82, PR, R82, 0x78 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:1464782
+//
+000FE80008000000`00000078FF4D7C03:        P2R     R77, PR, RZ, UR56 {!4};
+000FE80000000000`00000078FF4D7803:        P2R     R77, PR, RZ, 0x78 {!4};
+
+
+000FDA0000704572`000000000000781C:        PLOP3.((~s0|~s1)&s2) P0, PT, P0, P2, PT,  0x2a, 0x0 {!13,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9566
+000FDA0000703570`000000000000781C:        PLOP3.((s0|s1)&s2)   P0, PT, P0, P1, PT,  0xa8, 0x0 {!13,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9557
+000FDA0003F0F008`000000000000781C:        PLOP3.(s0&s1&s2)     P0, PT, PT, PT, UP0, 0x80, 0x0 {!13,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7745
+000FE400017AF070`000000000000881C:  @!P0  PLOP3.(s0&s1&s2)     P5, PT, P2, PT, PT,  0x80, 0x0 {!2}; // examples/sm_80/samples/reduction_kernel.sass:86044
+000FE20001F0F070`000000000000481C:  @P4   PLOP3.(s0&s1&s2)     P0, PT, P3, PT, PT,  0x80, 0x0 {!1}; // examples/sm_80/libs/nvjpeg64_11/Program.63.sm_80.sass:8468
+
+
+000E240000000000`0000000500057309:        POPC  R5,  R5   {!2,+1.W};     // examples/sm_80/samples/binaryPartitionCG.sass:791
+000E220008000000`0000002400007D09:        POPC  R0,  UR36 {!1,+1.W};   // examples/sm_80/samples/cdpAdvancedQuicksort.sass:3575
+000E220000000000`8000000500057309:        POPC  R5, ~R5   {!1,+1.W};
+000E220000000000`0000000500057909:        POPC  R5,  0x5  {!1,+1.W};
+000E220000000000`00000E0500057B09:        POPC  R5,  c[0x0][0x38] {!1,+1.W};
+
+
+001FC80000000004`0000760404037816:        PRMT       R3, R4, 0x7604, R4 {!4,Y,^1}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2544
+000FCA0000000005`00000654FF057816:        PRMT       R5, RZ, 0x654, R5 {!5,Y}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2547
+001FC80000000009`0000760409007816:        PRMT       R0, R9, 0x7604, R9 {!4,Y,^1}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2851
+004FC800000000FF`0000991004062816:  @P2   PRMT       R6, R4, 0x9910, RZ {!4,Y,^3}; // examples/sm_80/samples/c++11_cuda.sass:19526
+050FE400000000FF`0000541026272816:  @P2   PRMT       R39, R38.reuse, 0x5410, RZ {!2,^5}; // examples/sm_80/libs/cublas64_11/Program.1015.sm_80.sass:247361
+100FE4000000000B`00000004FF157816:        PRMT       R21, RZ, 0x4, R11.reuse {!2}; // examples/sm_80/libs/nvjpeg64_11/Program.63.sm_80.sass:11490
+000FE20000000203`0000000303037816:        PRMT.B4E   R3, R3, 0x3, R3 {!1}; // examples/sm_80/libs/nvjpeg64_11/Program.63.sm_80.sass:9105
+//
+000FE4000000000C`00007610070C7816:        PRMT       R12, R7, 0x7610, R12 {!2};
+000FE4000000010C`00007610070C7816:        PRMT.F4E   R12, R7, 0x7610, R12 {!2};
+000FE4000000020C`00007610070C7816:        PRMT.B4E   R12, R7, 0x7610, R12 {!2};
+000FE4000000030C`00007610070C7816:        PRMT.RC8   R12, R7, 0x7610, R12 {!2};
+000FE4000000040C`00007610070C7816:        PRMT.ECL   R12, R7, 0x7610, R12 {!2};
+000FE4000000050C`00007610070C7816:        PRMT.ECR   R12, R7, 0x7610, R12 {!2};
+000FE4000000060C`00007610070C7816:        PRMT.RC16  R12, R7, 0x7610, R12 {!2};
+//
+000FE4000800000C`00007610070C7A16:        PRMT R12, R7, cx[UR16][0x1d8], R12 {!2};
+000FE4000800000C`00007610070C7C16:        PRMT R12, R7, UR16,            R12 {!2};
+000FE4000800000C`00007610070C7E16:        PRMT R12, R7, R12,             UR16 {!2};
+000FE4000000000C`00007610070C7416:        PRMT R12, R7, R12,             0x7610 {!2};
+000FE4000000000C`00007610070C7616:        PRMT R12, R7, R12,             c[0x0][0x1d8] {!2};
+000FE4000000000C`00007610070C7816:        PRMT R12, R7, 0x7610,          R12 {!2};
+000FE4000000000C`00007610070C7A16:        PRMT R12, R7, c[0x0][0x1d8],   R12 {!2};
+
+
+000E240000020500`000000000CFF73AA:        QSPC.E.S  P1, RZ, [R12] {!2,+1.W}; // examples/sm_80/libs/cusolver64_10/Program.1809.sm_80.sass:910767
+//
+000E240000020100`000000000CFF73AA:        QSPC.E.G  P1, RZ, [R12] {!2,+1.W};
+000E240008020500`000004040CFF79AA:        QSPC.E.S  P1, RZ, [R12.U32+UR4+0x4] {!2,+1.W};
+
+
+000FDA0000000000`0000007E20007804:        R2P  PR, R32,       0x7e {!13,Y}; // examples/sm_80/samples/MonteCarlo_kernel.sass:27677
+000FDA0000001000`0000007F20007804:        R2P  PR, R32.B1,    0x7f {!13,Y}; // examples/sm_80/samples/MonteCarlo_kernel.sass:27748
+000FDA0000002000`0000007F20007804:        R2P  PR, R32.B2,    0x7f {!13,Y}; // examples/sm_80/samples/MonteCarlo_kernel.sass:27822
+000FDA0000003000`0000007F20007804:        R2P  PR, R32.B3,    0x7f {!13,Y}; // examples/sm_80/samples/MonteCarlo_kernel.sass:27896
+040FE20000000000`0000003F0A007804:        R2P  PR, R10.reuse, 0x3f {!1}; // examples/sm_80/libs/cusolver64_10/Program.1881.sm_80.sass:228068
+
+
+0022E200000E0000`000000000D0573C2:        R2UR     UR5,  R13 {!1,+4.W,+2.R,^2}; // examples/sm_80/libs/cublas64_11/Program.1001.sm_80.sass:10784
+0042B000000E0000`00000000021423C2:  @P2   R2UR     UR20, R2 {!8,+3.W,+2.R,^3}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:80782
+000EA200000E0000`00000000020A73C2:        R2UR     UR10, R2 {!1,+3.W};   // examples/sm_80/libs/cusolver64_10/Program.1863.sm_80.sass:561858
+//
+0000A200000C0000`00000000090773C2:        R2UR P6, UR7,  R9 {!1,+3.W,+1.R};
+
+
+0001E8000C10E186`0000000B0400798E:        RED.E.ADD.STRONG.GPU [R4.64], R11 {!4,+1.R}; // examples/sm_80/samples/binaryPartitionCG.sass:769
+0001E4000D10E184`FFFFFC070400098E:  @P0   RED.E.MAX.STRONG.GPU [R4.64+-0x4], R7 {!2,+1.R}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4497
+0021F6000C10ED86`000000081000798E:        RED.E.ADD.F64.RN.STRONG.GPU [R16.64], R8 {!11,+1.R,^2}; // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:3166
+0005E8000C10E184`000000070400098E:  @P0   RED.E.ADD.STRONG.GPU [R4.64], R7 {!4,+3.R}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:374
+//
+000FE2000D10E384`00000C0B0400098E:  @P0   RED.E.MAX.S32.STRONG.GPU [R4.64+0xc], R11 {!1}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:398
+000FE8000C90E384`0000100D0400098E:  @P0   RED.E.MIN.S32.STRONG.GPU [R4.64+0x10], R13 {!4}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:404
+000FE2000D90E184`000014130400798E:        RED.E.INC.STRONG.GPU [R4.64+0x14], R19 {!1}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:407
+000FE8000E10E184`000018150400798E:        RED.E.DEC.STRONG.GPU [R4.64+0x18], R21 {!4}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:413
+000FE8000E90E184`000020070400098E:  @P0   RED.E.AND.STRONG.GPU [R4.64+0x20], R7 {!4}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:422
+000FE8000F10E184`0000240F0400098E:  @P0   RED.E.OR.STRONG.GPU [R4.64+0x24], R15 {!4}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:425
+000FE2000F90E184`000028110400098E:  @P0   RED.E.XOR.STRONG.GPU [R4.64+0x28], R17 {!1}; // examples/sm_80/samples/simpleAtomicIntrinsics.sass:428
+0001E2000C10E786`000004170A00798E:        RED.E.ADD.F32.FTZ.RN.STRONG.GPU [R10.64+0x4], R23 {!1,+1.R}; // examples/sm_80/libs/cublas64_11/Program.259.sm_80.sass:26585
+0001F2000C10E184`000000470200798E:        RED.E.ADD.STRONG.GPU [R2.64], R71 {!9,+1.R}; // examples/sm_80/libs/cusolver64_10/Program.1008.sm_80.sass:4215
+0003E2000C10E784`0000001B0800798E:        RED.E.ADD.F32.FTZ.RN.STRONG.GPU [R8.64], R27 {!1,+2.R}; // examples/sm_80/libs/cusolver64_10/Program.1809.sm_80.sass:1004476
+
+
+000EA40000004000`00000000040473C4:        REDUX.OR         UR4, R4 {!2,+3.W};    // examples/sm_80/samples/reduction_kernel.sass:118226
+000E220000014000`00000000060573C4:        REDUX.MAX        UR5, R6 {!1,+1.W};    // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4491
+000E24000000C200`00000000070673C4:        REDUX.SUM.S32    UR6, R7 {!2,+1.W};    // examples/sm_80/samples/binaryPartitionCG.sass:779
+//
+000EA40000000000`00000000040473C4:        REDUX      UR4, R4 {!2,+3.W};
+000EA40000004000`00000000040473C4:        REDUX.OR   UR4, R4 {!2,+3.W};
+000EA40000008000`00000000040473C4:        REDUX.XOR  UR4, R4 {!2,+3.W};
+000EA4000000C000`00000000040473C4:        REDUX.SUM  UR4, R4 {!2,+3.W};
+000EA40000010000`00000000040473C4:        REDUX.MIN  UR4, R4 {!2,+3.W};
+000EA40000014000`00000000040473C4:        REDUX.MAX  UR4, R4 {!2,+3.W};
+// 000EA40000018000`00000000040473C4:        REDUX.INVALID6 UR4, R4 {!2,+3.W};
+// 000EA4000001C000`00000000040473C4:        REDUX.INVALID7 UR4, R4 {!2,+3.W};
+
+
+000FEA0003E00000`0000000014007950:        RET.ABS.NODEC      R20 0x0 {!5};         // examples/sm_80/samples/BezierLineCDP.sass:1511
+000FEA0003C3FFFF`FFFFC88002007950:        RET.REL.NODEC      R2 `(_Z27compute_bf16gemm_async_copyPK13__nv_bfloat16S1_PKfPfff) {!5}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9529
+002FEA0003A00000`0000000014007950:        RET.ABS            R20 0x0 {!5,^2};
+002FEA0007600000`0000000014007950:        RET.ABS.NODEC !P6, R20 0x0 {!5,^2};
+
+
+000E240000002100`0000000000037919:        S2R  R3, SR_TID.X {!2,+1.W}; // examples/sm_80/samples/alignedTypes.sass:3463
+000E280000002500`0000000000007919:        S2R  R0, SR_CTAID.X {!4,+1.W}; // examples/sm_80/samples/alignedTypes.sass:3462
+000E240000003900`0000000000057919:        S2R  R5, SR_LTMASK {!2,+1.W}; // examples/sm_80/samples/binaryPartitionCG.sass:752
+000E280000000000`0000000000027919:        S2R  R2, SR_LANEID {!4,+1.W}; // examples/sm_80/samples/c++11_cuda.sass:23287
+000E280000002200`0000000000007919:        S2R  R0, SR_TID.Y {!4,+1.W}; // examples/sm_80/libs/cusolver64_10/Program.1755.sm_80.sass:17534
+000E280000002600`0000000000057919:        S2R  R5, SR_CTAID.Y {!4,+1.W}; // examples/sm_80/libs/cusolver64_10/Program.1755.sm_80.sass:17396
+000E620000002300`0000000000057919:        S2R  R5, SR_TID.Z {!1,+2.W}; // examples/sm_80/libs/cusparse64_11/Program.450.sm_80.sass:44142
+000E240000002700`00000000000A7919:        S2R  R10, SR_CTAID.Z {!2,+1.W}; // examples/sm_80/samples/bgr_resize.sass:709
+
+
+000E220000002500`00000000000479C3:        S2UR   UR4,  SR_CTAID.X {!1,+1.W}; // examples/sm_80/samples/conjugateGradientCudaGraphs.sass:771
+000F220000002700`00000000001D79C3:        S2UR   UR29, SR_CTAID.Z {!1,+5.W}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:155694
+000E220000002600`00000000000879C3:        S2UR   UR8,  SR_CTAID.Y {!1,+1.W}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:156543
+000E220000005000`00000000000479C3:        S2UR   UR4,  SR_CLOCKLO {!1,+1.W}; // examples/sm_80/samples/concurrentKernels.sass:712
+
+
+000FE20005000000`0000000205028207:  @!P0  SEL   R2,  R5,  R2,          !P2 {!1}; // examples/sm_80/samples/segmentationTree.sass:165986
+000FE40000800000`FFFFFFFFFF050807:  @P0   SEL   R5,  RZ,  0xffffffff,   P1 {!2}; // examples/sm_80/samples/binaryPartitionCG.sass:726
+000FCC0000000000`00800000140E7A07:        SEL   R14, R20, c[0x2][0x0],  P0 {!6,Y}; // examples/sm_80/samples/bisect_large.sass:6599
+000FE40001000000`000000FF0B087207:        SEL   R8,  R11, RZ,           P2 {!2}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1348
+000FE2000D000000`0000000400078C07:  @!P0  SEL   R7,  R0,  UR4,         !P2 {!1}; // examples/sm_80/samples/segmentationTree.sass:162640
+0C0FE40005000000`000000090E0A7207:        SEL   R10, R14.reuse, R9.reuse, !P2 {!2}; // examples/sm_80/samples/segmentationTree.sass:165338
+
+
+000FE40000000200`000000181212781A:        SGXT        R18, R18, 0x18 {!2};  // examples/sm_80/samples/convolutionTexture.sass:977
+000FC60000000000`000000010202781A:        SGXT.U32    R2,  R2,  0x1 {!3,Y};   // examples/sm_80/samples/bitonicSort.sass:4969
+000FCA0000000000`000000020C0C881A:  @!P0  SGXT.U32    R12, R12, 0x2 {!5,Y}; // examples/sm_80/libs/cusparse64_11/Program.495.sm_80.sass:45334
+000FE40000000000`000000020B0B721A:        SGXT.U32    R11, R11, R2 {!2};
+000FE40000000000`000000020B0B781A:        SGXT.U32    R11, R11, 0x2 {!2};
+000FE40000000000`00000D000B0B7A1A:        SGXT.U32    R11, R11, c[0x0][0x34] {!2};
+000FE40008000000`000000020B0B7A1A:        SGXT.U32    R11, R11, cx[UR2][0x0] {!2};
+000FE40008000000`000000020B0B7C1A:        SGXT.U32    R11, R11, UR2 {!2};
+000FE40000000800`000000020B0B781A:        SGXT.W.U32  R11, R11, 0x2 {!2};
+000FE40000000200`000000020B0B781A:        SGXT        R11, R11, 0x2 {!2};
+000FE40000000A00`000000020B0B781A:        SGXT.W      R11, R11, 0x2 {!2};
+
+
+001FE20000011400`0000001FFF057819:        SHF.R.S32.HI  R5,  RZ, 0x1f, R0 {!1,^1}; // examples/sm_80/samples/alignedTypes.sass:3537
+000FE20000011605`00000017FF037819:        SHF.R.U32.HI  R3,  RZ, 0x17, R5 {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1279
+000FE400000006FF`0000000605067219:        SHF.L.U32     R6,  R5, R6,   RZ {!2};  // examples/sm_80/samples/BezierLineCDP.sass:1367
+000FE2000001164D`00000004FF5F7819:        SHF.R.U32.HI  R95, RZ, 0x4, R77 {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7810
+040FE400000006FF`00005C0002037A19:        SHF.L.U32     R3,  R2.reuse, c[0x0][0x170], RZ {!2}; // examples/sm_80/samples/fastWalshTransform.sass:1326
+000FE400000000FF`0000000A090A7219:        SHF.L.S64 R10, R9, R10, RZ {!2};
+000FE400000002FF`0000000A090A7219:        SHF.L.U64 R10, R9, R10, RZ {!2};
+000FE400000004FF`0000000A090A7219:        SHF.L.S32 R10, R9, R10, RZ {!2};
+000FE400000006FF`0000000A090A7219:        SHF.L.U32 R10, R9, R10, RZ {!2};
+
+
+000E6200000200FF`0420000017007989:        SHFL.UP          P1, R0, R23, 0x1, RZ {!1,+2.W}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4267
+000E6800000E0000`08201F000F047F89:        SHFL.DOWN        PT, R4, R15, 0x1, 0x1f {!4,+2.W}; // examples/sm_80/samples/c++11_cuda.sass:19700
+000E240000000006`0000000304047389:        SHFL.IDX         P0, R4, R4, R3, R6 {!2,+1.W}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:3491
+000FE800000E0000`0E001F0021057F89:        SHFL.BFLY        PT, R5, R33, 0x10, 0x1f {!4}; // examples/sm_80/samples/conjugateGradientMultiDeviceCG.sass:6817
+
+
+0001E8000C101904`000000020A007985:        ST.E             [R10.64], R2 {!4,+1.R}; // examples/sm_80/samples/BezierLineCDP.sass:1684
+0001E8000C101B04`000008080A007985:        ST.E.64          [R10.64+0x8], R8 {!4,+1.R}; // examples/sm_80/samples/BezierLineCDP.sass:1685
+0003E4000C115906`00000C0318007985:        ST.E.STRONG.SYS  [R24.64+0xc], R3 {!2,+2.R}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4652
+0001E8000C115904`0000001D08008985:  @!P0  ST.E.STRONG.SYS  [R8.64], R29 {!4,+1.R}; // examples/sm_80/samples/cdpQuadtree.sass:7614
+002FE2000C101D08`0010000C48007985:        ST.E.128         [R72.64+0x1000], R12 {!1,^2}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:7215
+0003E4000C10FB04`0001001202007985:        ST.E.64.STRONG.GPU [R2.64+0x100], R18 {!2,+2.R}; // examples/sm_80/samples/lineOfSight.sass:14940
+000FE2000C10150A`000000185600D985:  @!P5  ST.E.U16         [R86.64], R24 {!1};   // examples/sm_80/libs/cusolver64_10/Program.2607.sm_80.sass:152044
+0003E4000C100D12`0001004C5E00A985:  @!P2  ST.E.128         [R94.64+UR18+0x100], R76 {!2,+2.R}; // examples/sm_80/libs/cusolver64_10/Program.2624.sm_80.sass:38039
+0001F2000C10F106`0000200604007985:        ST.E.U8.STRONG.GPU [R4.64+0x20], R6 {!9,+1.R}; // examples/sm_80/libs/cusparse64_11/Program.99.sm_80.sass:11452
+
+
+0201E2000C101104`0000030D02007986:        STG.E.U8 [R2.64+0x3], R13 {!1,+1.R,^6}; // examples/sm_80/samples/alignedTypes.sass:3429
+0041D8000C101504`0000000304007986:        STG.E.U16 [R4.64], R3 {!12,Y,+1.R,^3}; // examples/sm_80/samples/alignedTypes.sass:3488
+0001E2000C101904`0000200310007986:        STG.E [R16.64+0x20], R3 {!1,+1.R}; // examples/sm_80/samples/BezierLineCDP.sass:1641
+0041D8000C101B04`0000000204007986:        STG.E.64 [R4.64], R2 {!12,Y,+1.R,^3}; // examples/sm_80/samples/alignedTypes.sass:3033
+0081F0000C101D04`0000100402007986:        STG.E.128 [R2.64+0x10], R4 {!8,+1.R,^4}; // examples/sm_80/samples/alignedTypes.sass:2840
+0007EC000C10E904`00000000FF007986:        STG.E.STRONG.GPU [UR4], R0 {!6,+4.R};  // examples/sm_80/libs/cusolver64_10/Program.2624.sm_80.sass:38732
+0001EC000C101904`0000000D02007986:        STG.E [R2.64], R13 {!6,+1.R};
+0001EC000C105904`0000000D02007986:        STG.E.CONSTANT.CTA [R2.64], R13 {!6,+1.R};
+0001EC000C109904`0000000D02007986:        STG.E.STRONG.SM.PRIVATE [R2.64], R13 {!6,+1.R};
+0001EC000C10D904`0000000D02007986:        STG.E.STRONG.GPU.PRIVATE [R2.64], R13 {!6,+1.R};
+0001EC000C111904`0000000D02007986:        STG.E.MMIO.GPU [R2.64], R13 {!6,+1.R};
+0001EC000C115904`0000000D02007986:        STG.E.STRONG.SYS [R2.64], R13 {!6,+1.R};
+0001EC000C119904`0000000D02007986:        STG.E.MMIO.SYS [R2.64], R13 {!6,+1.R};
+0001EC000C11D904`0000000D02007986:        STG.E.CONSTANT.VC.PRIVATE [R2.64], R13 {!6,+1.R};
+
+
+0001E40000100800`0000100C01007387:        STL       [R1+0x10], R12 {!2,+1.R}; // examples/sm_80/samples/cdpSimplePrint.sass:1263
+0005E20000100000`0000270C03007387:        STL.U8    [R3+0x27], R12 {!1,+3.R}; // examples/sm_80/samples/cdpSimplePrint.sass:1204
+0001E20000100A00`0000100801007387:        STL.64    [R1+0x10], R8 {!1,+1.R}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:5165
+0001E20000100C00`0000000801007387:        STL.128   [R1], R8 {!1,+1.R};   // examples/sm_80/samples/cdpQuadtree.sass:7364
+0001E20008100804`00001005FF000987:  @P0   STL       [UR4+0x10], R5 {!1,+1.R}; // examples/sm_80/libs/nppif64_11/Program.126.sm_80.sass:81431
+0005E40000100A00`0000000401006387:  @P6   STL.64    [R1], R4 {!2,+3.R};   // examples/sm_80/libs/nppif64_11/Program.126.sm_80.sass:81155
+
+
+0003E20000000A00`0000004451007388:        STS.64  [R81], R68 {!1,+2.R}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9244
+000FE20000000A00`0000004610007388:        STS.64  [R16], R70 {!1};      // examples/sm_80/samples/bf16TensorCoreGemm.sass:9251
+000FE20000000A00`0000204051007388:        STS.64  [R81+0x20], R64 {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9258
+000FE20000000C00`0006003446007388:        STS.128 [R70+0x600], R52 {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9976
+0041F40008000804`00000004FF007988:        STS     [UR4], R4 {!10,+1.R,^3}; // examples/sm_80/samples/cdpSimplePrint.sass:1070
+020FE80000004800`0000000207007388:        STS     [R7.X4], R2 {!4,^6};  // examples/sm_80/samples/cdpBitonicSort.sass:1233
+000FE80000008A00`000008020700A388:  @!P2  STS.64  [R7.X8+0x8], R2 {!4}; // examples/sm_80/samples/c++11_cuda.sass:29036
+000FE8000000CC00`0000800403008388:  @!P0  STS.128 [R3.X16+0x80], R4 {!4}; // examples/sm_80/samples/ParticleSystem_cuda.sass:68659
+0001E20000000800`00842807FF008388:  @!P0  STS     [0x8428], R7 {!1,+1.R}; // examples/sm_80/samples/ParticleSystem_cuda.sass:72319
+0081E40000000800`00000004FF000388:  @P0   STS     [RZ], R4 {!2,+1.R,^4}; // examples/sm_80/samples/ParticleSystem_cuda.sass:75863
+000FE80000004800`00B800693E007388:        STS     [R62.X4+0xb800], R105 {!4}; // examples/sm_80/samples/radixSortThrust.sass:211120
+
+
+000FE2000010A900`7000580312007B9D:        SUST.D.BA.2D.STRONG.SM.TRAP    [R18], R3, 0x0, 0x58 {!1}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1055
+004FE2000010A900`70005C0204007B9D:        SUST.D.BA.2D.STRONG.SM.TRAP    [R4],  R2, 0x0, 0x5c {!1,^3}; // examples/sm_80/samples/simpleSurfaceWrite.sass:1606
+000FE2000010A100`B000620704007B9D:        SUST.D.BA.3D.U8.STRONG.SM.TRAP [R4],  R7, 0x0, 0x62 {!1}; // examples/sm_80/samples/volumeFilter_kernel.sass:755
+
+
+040FC600009E03FF`100064FF12087B66:        TLD.SCR.LZ  RZ, R8, R18, 0x0, 0x64, 1D, 0x3 {!3,Y}; // examples/sm_80/samples/convolutionFFT2D.sass:2923
+000F6200009E01FF`10006CFF05057B66:        TLD.SCR.LZ  RZ, R5, R5,  0x0, 0x6c, 1D, 0x1 {!1,+6.W}; // examples/sm_80/samples/marchingCubes_kernel.sass:25350
+
+
+00016200019E01FF`300062100C0C7B60:        TEX.SCR.LL       RZ,  R12, R12, R16, 0x0, 0x62, 2D, 0x1 {!1,+6.W,+1.R}; // examples/sm_80/samples/bicubicTexture_cuda.sass:2369
+040FC200059E0F0E`30005A140E107B60:        TEX.SCR.LL.NODEP R14, R16, R14, R20, 0x0, 0x5a, 2D {!1,Y}; // examples/sm_80/samples/bindlessTexture_kernel.sass:960
+020F4200019E0F04`380000040C067361:        TEX.SCR.B.LL     R4,  R6,  R12, R4,             2D {!1,Y,+6.W,^6}; // examples/sm_80/samples/bindlessTexture_kernel.sass:1205
+040F4200059E01FF`5000601214127B60:        TEX.SCR.LL.NODEP RZ,  R18, R20, R18, 0x0, 0x60, 3D, 0x1 {!1,Y,+6.W}; // examples/sm_80/samples/volumeFilter_kernel.sass:717
+000F4200019E01FF`B0005E0402027B60:        TEX.SCR.LL       RZ,  R2,  R2,  R4,  0x0, 0x5e, ARRAY_2D, 0x1 {!1,Y,+6.W}; // examples/sm_80/samples/simpleLayeredTexture.sass:478
+10014200019E01FF`70005C0208027B60:        TEX.SCR.LL       RZ,  R2,  R8,  R2,  0x0, 0x5c, CUBE, 0x1 {!1,Y,+6.W,+1.R}; // examples/sm_80/samples/simpleCubemapTexture.sass:578
+
+
+000FE200080E0000`00000005000672BD:        UFLO.U32  UR6,      UR5 {!1};        // examples/sm_80/samples/c++11_cuda.sass:30089
+000FCC00080E0000`00000004000472BD:        UFLO.U32  UR4,      UR4 {!6,Y};      // examples/sm_80/libs/cusolver64_10/Program.1728.sm_80.sass:1649
+000FE200080C0000`00000004000672BD:        UFLO.U32  UR6, UP6, UR4 {!1};
+000FE200080D0000`00000004000672BD:        UFLO.U32  UR6, UP6, UR4 {!1};
+000FE200080E0000`00000005000678BD:        UFLO.U32  UR6,      0x5 {!1};
+
+
+000FE2000FFFE03F`0000000405057290:        UIADD3    UR5,           UR5,  UR4, URZ {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:11015
+000FE2000FFFE03F`800000043F097290:        UIADD3    UR9,           URZ, -UR4, URZ {!1}; // examples/sm_80/samples/bilateral_kernel.sass:1053
+000FC4000BFFE43F`0000000704047290:        UIADD3.X  UR4,           UR4,  UR7, URZ, UPT, !UPT {!2,Y}; // examples/sm_80/samples/bilateral_kernel.sass:1093
+000FE200087FE43F`000000053F057290:        UIADD3.X  UR5,           URZ,  UR5, URZ, UP0, !UPT {!1}; // examples/sm_80/samples/binaryPartitionCG.sass:692
+000FC8000FFFE03F`FFFFFFFF04047890:        UIADD3    UR4,           UR4, -0x1, URZ {!4,Y}; // examples/sm_80/samples/cdpBitonicSort.sass:941
+000FE4000FF1E13F`0000000504047290:        UIADD3    UR4, UP0,     -UR4,  UR5, URZ {!2}; // examples/sm_80/samples/matrixMul_kernel.sass:2598
+000FE200087FE43F`000000053F057290:        UIADD3.X  UR5,           URZ,  UR5, URZ, UP0, !UPT {!1};
+000FE200087DE43F`000000053F057290:        UIADD3.X  UR5, UP6,      URZ,  UR5, URZ, UP0, !UPT {!1};
+000FE2000B7FE43F`000000053F057290:        UIADD3.X  UR5,           URZ , UR5, URZ, UP6, !UPT {!1};
+000FE2000823E43F`000000053F057290:        UIADD3.X  UR5, UP1, UP2, URZ, UR5, URZ, UP0, !UPT {!1};
+
+
+000FC8000F8E023F`00000005040472A4:        UIMAD            UR4,      UR4,  UR5,        URZ {!4,Y}; // examples/sm_80/samples/bgr_resize.sass:723
+000FE4000F8E003F`00000001070678A4:        UIMAD.U32        UR6,      UR7,  0x1,        URZ {!2}; // examples/sm_80/libs/nppitc64_11/Program.21.sm_80.sass:87360
+000FC6000F8E0204`00000007080472A5:        UIMAD.WIDE       UR4,      UR8,  UR7,        UR4 {!3,Y}; // examples/sm_80/samples/marchingCubes_kernel.sass:18982
+000FE2000F8E003F`00000007060672A5:        UIMAD.WIDE.U32   UR6,      UR6,  UR7,        URZ {!1}; // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:3276
+000FE4000F800004`24924924080678A5:        UIMAD.WIDE.U32   UR6, UP0, UR8,  0x24924924, UR4 {!2}; // examples/sm_80/libs/cusolver64_10/Program.1881.sm_80.sass:68986
+000FC4000F820004`000000090A0672A5:        UIMAD.WIDE.U32   UR6, UP1, UR10, UR9,        UR4 {!2,Y}; // examples/sm_80/libs/cusolver64_10/Program.1881.sm_80.sass:116497
+000FC800080E0408`249249240A0478A5:        UIMAD.WIDE.U32.X UR4,      UR10, 0x24924924, UR8, UP0 {!4,Y}; // examples/sm_80/libs/cusolver64_10/Program.1881.sm_80.sass:72667
+
+
+000FE4000BF06270`000000080600728C:        UISETP.GE.AND     UP0, UPT, UR6,  UR8,   UPT {!2}; // examples/sm_80/samples/bilateral_kernel.sass:1602
+000FCC000BF04070`000001FF0400788C:        UISETP.GT.U32.AND UP0, UPT, UR4,  0x1ff, UPT {!6,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7744
+000FE2000BF06070`000002000400788C:        UISETP.GE.U32.AND UP0, UPT, UR4,  0x200, UPT {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:11063
+001FE2000BF06070`000000040800728C:        UISETP.GE.U32.AND UP0, UPT, UR8,  UR4,   UPT {!1,^1}; // examples/sm_80/samples/segmentationTree.sass:189353
+000FE2000BF06300`000000053F00728C:        UISETP.GE.AND.EX  UP0, UPT, URZ,  UR5,   UPT, UP0 {!1}; // examples/sm_80/samples/segmentationTree.sass:189365
+000FE4000BF25300`000000011E00788C:        UISETP.NE.AND.EX  UP1, UPT, UR30, 0x1,   UPT, UP0 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2624.sm_80.sass:266602
+
+
+000FE20000000800`00005C0000047AB9:        ULDC             UR4, c[0x0][0x170] {!1}; // examples/sm_80/samples/BezierLineCDP.sass:1738
+000FE40000000A00`0000460000047AB9:        ULDC.64          UR4, c[0x0][0x118] {!2}; // examples/sm_80/samples/asyncAPI.sass:239
+000FE20008000800`00C00100080D7ABB:        ULDC             UR13, c[0x3][UR8+0x4] {!1}; // examples/sm_80/samples/bilateral_kernel.sass:1404
+
+
+000FD2000F8E083F`0000000104047891:        ULEA             UR4, UR4, 0x1,        0x1 {!9,Y}; // examples/sm_80/samples/boxFilter_kernel.sass:11269
+000FC8000F8F083F`0000000504047291:        ULEA.HI          UR4, UR4, UR5,  URZ,  0x1 {!4,Y}; // examples/sm_80/samples/BlackScholes.sass:818
+000FE400080F1C0F`0000002206087291:        ULEA.HI.X        UR8, UR6, UR34, UR15, 0x3, UP0 {!2}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:80069
+000FE200080F0E3F`0000000C04047291:        ULEA.HI.X.SX32   UR4, UR4, UR12,       0x1, UP0 {!1}; // examples/sm_80/samples/nv12_to_bgr_planar.sass:1194
+
+
+000FC6000F8E333F`000000043F047292:        ULOP3.(~s1)      UR4, URZ, UR4,       URZ, 0x33, !UPT {!3,Y}; // examples/sm_80/samples/boxFilter_kernel.sass:12280
+000FCC000F8EC03F`FFFFFFF004047892:        ULOP3.(s0&s1)    UR4, UR4, 0xfffffff0, URZ, 0xc0, !UPT {!6,Y}; // examples/sm_80/libs/cublas64_11/Program.679.sm_80.sass:93431
+000FE2000F82C03F`000000FF053F7892:        ULOP3.LUT        UP1, URZ, UR5, 0xff, URZ, 0xc0, !UPT {!1}; // examples/sm_80/libs/cublas64_11/Program.735.sm_80.sass:4610
+000FE6000F8E3C3F`0000000111117892:        ULOP3.(s0^s1)    UR17, UR17, 0x1, URZ, 0x3c, !UPT {!3}; // examples/sm_80/libs/cusolver64_10/Program.2649.sm_80.sass:13427
+
+
+000FE20000000000`0000000100047882:        UMOV             UR4, 0x1 {!1}; // examples/sm_80/samples/bisect_small.sass:2434
+000FE40008000000`0000000900067C82:        UMOV             UR6, UR9 {!2}; // examples/sm_80/samples/bilateral_kernel.sass:1105
+
+
+000FE40003F0E170`000000000000789C:        UPLOP3.LUT       UP0, UPT, UPT, UPT, UPT, 0x8, 0x0 {!2}; // examples/sm_80/libs/cublas64_11/Program.686.sm_80.sass:242103
+000FC40003F0F070`000000000000789C:        UPLOP3.LUT       UP0, UPT, UPT, UPT, UPT, 0x80, 0x0 {!2,Y}; // examples/sm_80/libs/cusolver64_10/Program.1377.sm_80.sass:29051
+
+
+000FC80008000000`00000007000A72BF:        UPOPC   UR10, UR7 {!4,Y}; // examples/sm_80/libs/cublas64_11/Program.217.sm_80.sass:40870
+000FC80008000000`00000004000478BF:        UPOPC   UR4,  0x4 {!4,Y};
+
+
+000FE2000800003F`000088800B0B7896:        UPRMT  UR11, UR11, 0x8880, URZ {!1}; // examples/sm_80/libs/cublas64_11/Program.735.sm_80.sass:5609
+000FE2000800003F`0000771007077296:        UPRMT  UR7,  UR7,  UR16,   URZ {!1};
+000FE2000800003E`0000771007077296:        UPRMT  UR7,  UR7,  UR16,   UR62 {!1};
+000FE2000800003E`0000001107077296:        UPRMT  UR7,  UR7,  UR17,   UR62 {!1};
+000FE2000800003F`0000FFFF0B0B7896:        UPRMT  UR11, UR11, 0xffff, URZ {!1};
+
+
+000FE4000C000000`0000000604047287:        USEL   UR4,  UR4,  UR6, !UP0 {!2}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4908
+000FE20008000000`0000000E0C0C7287:        USEL   UR12, UR12, UR14, UP0 {!1}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:80865
+000FE4000C000000`0000000604047887:        USEL   UR4,  UR4,  0x6, !UP0 {!2};
+
+
+001FCC0008000200`000000180404789A:        USGXT       UR4, UR4, 0x18 {!6,Y,^1}; // examples/sm_80/samples/convolutionTexture.sass:984
+000FC80008000000`000000180404789A:        USGXT.U32   UR4, UR4, 0x18 {!4,Y}; // examples/sm_80/samples/bicubicTexture_cuda.sass:3414
+000FCC0008000000`000000020404789A:        USGXT.U32   UR4, UR4, 0x2  {!6,Y}; // examples/sm_80/libs/cusolver64_10/Program.1863.sm_80.sass:394145
+002FC60008003A00`000000180504789A:        USGXT.W     UR4, UR5, 0x18 {!3,Y,^2};
+002FC60008000200`000000180504729A:        USGXT       UR4, UR5, UR24 {!3,Y,^2};
+
+
+000FE2000800063F`0000000305067899:        USHF.L.U32       UR6, UR5, 0x3, URZ {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7765
+000FC40008011407`0000001F3F087899:        USHF.R.S32.HI    UR8, URZ, 0x1f, UR7 {!2,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:8324
+000FCC0008011605`000000063F067899:        USHF.R.U32.HI    UR6, URZ, 0x6, UR5 {!6,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:11191
+000FC40008010204`0000000706077299:        USHF.L.U64.HI    UR7, UR6, UR7, UR4 {!2,Y}; // examples/sm_80/samples/matrixMul_kernel.sass:2122
+000FE2000800120B`000000010A0A7899:        USHF.R.U64       UR10, UR10, 0x1, UR11 {!1}; // examples/sm_80/libs/cublas64_11/Program.231.sm_80.sass:6123
+000FE20008001005`0000000424247299:        USHF.R.S64       UR36, UR36, UR4, UR5 {!1}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3219229
+
+
+000FE200040E0100`0000000000067806:        VOTE.ANY         R6, PT, !P0 {!1};     // examples/sm_80/samples/binaryPartitionCG.sass:870
+000FE200038E0000`0000000000067806:        VOTE.ALL         R6, PT, PT {!1};      // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:2925
+
+
+000FE200038E0100`0000000000247886:        VOTEU.ANY        UR36, UPT, PT {!1};   // examples/sm_80/samples/cdpAdvancedQuicksort.sass:3566
+000FD800048E0100`0000000000047886:        VOTEU.ANY        UR4, UPT, !P1 {!12,Y}; // examples/sm_80/samples/reduction_kernel.sass:107605
+000FE200038E0000`0000000000047886:        VOTEU.ALL        UR4, UPT,  PT {!1};    // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4529
+000FD800048E0100`0000000000047886:        VOTEU.ANY        UR4, UPT, !P1 {!12,Y}; // examples/sm_80/samples/reduction_kernel.sass:118610
+
+
+000FE80003C00000`0000000200007348:        WARPSYNC.EXCLUSIVE       R2 {!4};            // examples/sm_80/samples/binaryPartitionCG.sass:745
+000FE80003800000`FFFFFFFF00007948:        WARPSYNC                 0xffffffff {!4};      // examples/sm_80/samples/bf16TensorCoreGemm.sass:7410
+000FE80003800000`0000000800007348:        WARPSYNC                 R8 {!4};              // examples/sm_80/samples/dxtc.sass:7929
+000FE80003800000`FFFFFFFF0000D948:  @!P5  WARPSYNC                 0xffffffff {!4};      // examples/sm_80/libs/cusparse64_11/Program.306.sm_80.sass:57669
+000FE80003800000`00FFF0000000DB48:  @!P5  WARPSYNC                 c[0x3][-0x40] {!4};
+000FE8000B800000`FFFFFFFF0000DD48:  @!P5  WARPSYNC                 URZ {!4};
+000FE80007000000`0000000800007348:        WARPSYNC            !P6, R8 {!4};
+
+
+000FE40003800000`0000000000007946:        YIELD             {!2};                // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4565
+000FE20003800000`0000000000007946:        YIELD             {!1};                // examples/sm_80/samples/newdelete.sass:6061
+000FE20007000000`0000000000007946:        YIELD         !P6 {!1};
