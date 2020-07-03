@@ -1,4 +1,4 @@
-module CollectOpcodes where
+module Main where
 
 import NVT.Driver
 import NVT.CUDASDK
@@ -9,6 +9,8 @@ import NVT.Bits
 import Control.Exception
 import Control.Monad
 import Data.List
+import System.Environment
+import System.Exit
 import System.FilePath
 import System.Directory
 import System.Process
@@ -20,6 +22,16 @@ sm_ver :: String
 sm_ver = "sm_80"
 -- sm_ver = "sm_75"
 
+main :: IO ()
+main = do
+  as <- getArgs
+  case as of
+    [] -> collectOps
+    _
+      | any (`elem`as) ["-h","--help"] ->
+        putStrLn "usage: collect_opcodes.exe"
+      | otherwise -> die "unexpected option"
+
 
 collectOps :: IO ()
 collectOps = body
@@ -29,8 +41,6 @@ collectOps = body
           --       tryParseFilteredRawInst line
           --       split base opcode off
           --       appendFile ("examples/" ++ base_op ++ "/") $
-          --
-          --
           createDirectoryIfMissing True output_root
           --
 --          samples_sass_files <-  filterSassOnly <$> getSubPaths "examples/sm_75/samples"

@@ -44,8 +44,7 @@ runPID ::
     FilePath ->
     String ->
     ParseResult u a
-runPID pma u file inp =
-  runIdentity $ runP pma u file inp
+runPID pma u file = runIdentity . runP pma u file
 
 
 runP :: Monad m
@@ -81,23 +80,33 @@ runP pma u file inp = body
                   drop 1 $ dropWhile (/=';') $
                     concatMap (\c -> if c == '\n' then "; " else [c]) (show err)
 
-pSemanticError :: (MonadTrans t, Monad m) => Loc -> String -> t (ExceptT Diagnostic m) a
-pSemanticError loc msg = pSemanticErrorDiag $ dCons loc msg
-pSemanticErrorDiag :: (MonadTrans t, Monad m) => Diagnostic -> t (ExceptT Diagnostic m) a
-pSemanticErrorDiag d = lift (throwE d)
 
 sourcePosToLoc :: P.SourcePos -> Loc
 sourcePosToLoc sp = lCons (P.sourceName sp) (P.sourceLine sp) (P.sourceColumn sp)
 
-pTrace :: String -> P m u ()
-pTrace msg = trace msg (return ())
+
+pSemanticError :: (MonadTrans t, Monad m) => Loc -> String -> t (ExceptT Diagnostic m) a
+pSemanticError loc msg = pSemanticErrorRethrow $ dCons loc msg
+pSemanticErrorRethrow :: (MonadTrans t, Monad m) => Diagnostic -> t (ExceptT Diagnostic m) a
+pSemanticErrorRethrow d = lift (throwE d)
+
+
+pTrace :: Monad m => String -> P m u ()
+pTrace = pTraceLAK 0
 pTraceLA :: Monad m => String -> P m u ()
 pTraceLA = pTraceLAK 8
 pTraceLAK :: Monad m => Int -> String -> P m u ()
 pTraceLAK k msg = do
   inp <- P.getInput
-  pTrace msg
-  pTrace ("lookahead: " ++ show (take k inp) ++ " ...")
+  loc <- pGetLoc
+  let inp_pfx = init (show (take k inp)) ++ sfx
+        where sfx
+                | length (take (k+1) inp) == k + 1 = "...\""
+                | otherwise = "\""
+      ctx
+        | k <= 0 = ""
+        | otherwise = "pTrace(" ++ lFormat loc ++ ": " ++ inp_pfx ++ "): "
+  trace (ctx ++ msg) (return ())
 
 pDebug :: (Monad m, Show a) => String -> P m u a -> P m u a
 pDebug lbl pa = do
@@ -176,18 +185,21 @@ pWhiteSpace = P.whiteSpace tokenParser
 pIdentifier :: Monad m => P m u String
 pIdentifier = P.identifier tokenParser
 
-pSymbol :: Monad m => String -> P m u String
-pSymbol = P.symbol tokenParser
-
-pSymbol_ :: Monad m => String -> P m u ()
-pSymbol_ str = pSymbol str >> return ()
-
+-- an identifier matching this string and not followed by an
+-- identifier character
+-- pKeyword "let" mismatches "let0" and "let_"
 pKeyword :: Monad m => String -> P m u ()
 pKeyword s = do
   P.string s
   P.notFollowedBy (P.alphaNum <|> P.oneOf "_")
   pWhiteSpace
   return ()
+
+pSymbol :: Monad m => String -> P m u String
+pSymbol = P.symbol tokenParser
+
+pSymbol_ :: Monad m => String -> P m u ()
+pSymbol_ str = pSymbol str >> return ()
 
 pFloating :: Monad m => P m u Double
 pFloating = P.float tokenParser

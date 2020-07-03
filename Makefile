@@ -14,6 +14,12 @@ install: nva.exe
 collect.exe: Makefile tools/CollectSamples.hs
 	mkdir -p build/libs
 	ghc  -hidir build/libs -odir build/libs --make tools/CollectSamples.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
+	strip $@
+
+collect_opcodes.exe: Makefile tools/CollectOpcodes.hs
+	mkdir -p build/libs
+	ghc  -hidir build/libs -odir build/libs --make tools/CollectOpcodes.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
+	strip $@
 
 
 clean:

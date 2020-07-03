@@ -44,16 +44,3 @@ instance Codeable Int where
   decode = Right . fromIntegral
   -- encode :: c -> Either String Word64
   encode = Right . fromIntegral
-
-
-padR :: Int -> String -> String
-padR k s = s ++ replicate (k - length s) ' '
-padL :: Int -> String -> String
-padL k s = replicate (k - length s) ' ' ++ s
-
-class Syntax s where
-  format :: s -> String
-
-  formatTypeName :: s -> String
-  formatTypeName = const ""
-

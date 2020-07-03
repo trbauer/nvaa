@@ -11,7 +11,12 @@ import NVT.CUDASDK
 import NVT.Diagnostic
 import NVT.Encoders.Codable
 import NVT.Encoders.InstEncoder
+--
 import NVT.Parsers.InstParser
+import NVT.Parsers.ListingParser
+import NVT.Parsers.NVParser
+import NVT.Parsers.Parser
+import NVT.Parsers.OperandParsers
 
 import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 
@@ -118,10 +123,10 @@ testAllNFF = testAllG False
 --   IMAD.WIDE        R2, R0, R37, c[0x0][0x160] {!10,Y};   000FD400078E0225`0000580000027625
 --
 -- TO READ:
---   LDG.E.SYS        R4, [R2] {!4,+3.W,+1.R}
+--   LDG.E.SYS   R4, [R2] {!4,+3.W,+1.R}
 --
 -- TO WRITE:
---   STG.E.SYS        [R2], R35 {!1};
+--   STG.E.SYS   [R2], R35 {!1};
 testInst :: String -> IO ()
 testInst syntax =
   case parseSampleInst syntax of
@@ -143,7 +148,6 @@ splitPrefixBits ln =
           | otherwise -> ("",ln)
         _ -> ("",ln)
     _ -> ("",ln)
-
 dropPrefixBits :: String -> String
 dropPrefixBits = snd . splitPrefixBits
 
@@ -155,21 +159,45 @@ testParseInst syntax = do
     Left err -> do
       putStrLn "ERROR: parsed SampleInst, but InstParser failed"
       putStrLn $ fmtDiag err
-    Right (ui,lrefs,ws) -> do
+    Right (ui,pis,ws) -> do
       unless (null ws) $ do
         putStrLn "WARNING:"
         mapM_ (putStrLn . fmtDiag) ws
-      let lbls = map (\(_,lbl) -> (lbl,0)) lrefs
-      case ui lbls of
+      case ui (pisLabelReferences pis) of
         Left err -> putStrLn $ fmtDiag err
         Right i -> putStrLn $ fmtInstIr i
 
 
-main :: IO ()
-main = do
-  flns <- drop 1 . lines <$> readFile "bs-raw.sass"
-  putStrLn $ parseLines flns
-  writeFile "test-file.sass" $ parseLines flns
+testListing :: FilePath -> IO ()
+testListing fp = do
+  inp <- readFile fp
+  length inp `seq` return ()
+  case parseListingG fp inp of
+    Left err -> do
+      putStrLn $ dFormatWithLines (lines inp) err
+      die "stopping"
+    Right (ts,ldefs) -> do
+      mapM_ print ldefs
+      forM_ ts $ \(kernel,is) -> do
+        putStrLn (kernel ++ ":")
+        mapM_ (putStrLn . format) is
+  return ()
+
+testListings :: FilePath -> IO ()
+testListings dir = do
+  ls <- map ((dir++"/")++) . sort .  filter (".sass"`isSuffixOf`) <$> listDirectory dir
+  forM_ ls $ \l -> do
+    putStrLn $ "testing: " ++ l
+    testListing l
+
+
+
+-----------------------------------------------------------------------
+-- main :: IO ()
+-- main = do
+--   flns <- drop 1 . lines <$> readFile "bs-raw.sass"
+--   putStrLn $ parseLines flns
+--   writeFile "test-file.sass" $ parseLines flns
 
 
 parseLines :: [String] -> String
@@ -215,19 +243,31 @@ parseAllOpsInFileK k fp = do
                   ln ++ "\n" ++
                   dFormatWithCurrentLine (lno,syntax) d ++ "\n\n" ++
                   "%  testParseInst " ++ show (dropWhile isSpace (stripTrailingComment syntax)) ++ "\n"
-              Right (ui,lrefs,ws) -> do
+              Right (ui,pis,ws) -> do
+                let lrefs = pisLabelReferences pis
                 when (not (null ws)) $ do
                   putStrLn "WARNINGS:"
                   mapM_ print ws
                 unless (null lrefs) $
                   putStrLn $ "induces labels: " ++ show lrefs
                 -- create some fake label references so branches print
-                let lbls = map (\(_,lbl) -> (lbl,0)) lrefs
-                case ui lbls of
+                case ui lrefs of
                   Left d -> putStrLn $ dFormat d
-                  Right i -> putStrLn $ fmtInstIr i
-                putStrLn ln
-                parse lns
+                  Right i -> do
+                    putStrLn ln
+                    putStrLn $ fmtInstIr i
+                    let (ws0,ws1) = (words syntax,words (format i))
+                    if validate_formatter && length ws0 /= length ws1
+                      then do
+                        putStrLn $
+                          "MISMATCH: on formatted inst tokens\n" ++
+                          "WS0: " ++ show ws0 ++ "\n" ++
+                          "WS1: " ++ show ws1 ++ "\n" ++
+                          ""
+                      else parse lns
+
+validate_formatter :: Bool
+validate_formatter = True
 
 
 testAllG :: Bool -> IO Bool
@@ -338,11 +378,10 @@ parseTestInst ::
 parseTestInst pc fp lno inp =
   case parseUnresolvedInst pc fp lno inp of
     Left err -> Left err
-    Right (ui,lrefs,ws) ->
-        case ui lbls of
+    Right (ui,pis,ws) ->
+        case ui (pisLabelReferences pis) of
           Left err -> Left err
           Right i -> Right (i,ws)
-      where lbls = map (\(_,lbl) -> (lbl,0)) lrefs
 
 
 testSampleInst :: (IO () -> IO ()) -> Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool -- (Int,Int)

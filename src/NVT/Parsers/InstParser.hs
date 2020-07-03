@@ -1,6 +1,7 @@
 module NVT.Parsers.InstParser where
 
-import NVT.Parsers.Parser
+import NVT.Parsers.NVParser
+import NVT.Parsers.OperandParsers
 import NVT.Bits
 import NVT.Diagnostic
 import NVT.Floats
@@ -19,13 +20,6 @@ import Text.Parsec((<|>),(<?>))
 import Text.Printf
 import qualified Text.Parsec           as P
 
-
-type LabelIndex = [(String,PC)]
-type Unresolved a = LabelIndex -> Either Diagnostic a
---
-type LabelRefs = [(PC,String)]
-type PIResult a = ParseResult LabelRefs a
-   -- Either Diagnostic (a,LabelRefs,[Diagnostic])
 
 parseResolvedInst ::
   PC ->
@@ -48,120 +42,14 @@ parseUnresolvedInst ::
   Int ->
   String ->
   PIResult (Unresolved Inst)
-parseUnresolvedInst pc = runPI (pInst pc)
+parseUnresolvedInst pc = runPI_WLNO (pInst pc)
 
-
-
-
--------------------------------------------------------------------------------
-sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
-sequenceUnresolved as lbl_ix = sequence (map ($lbl_ix) as)
--- sequenceUnresolved :: [Unresolved a] -> Unresolved [a]
--- sequenceUnresolved as lbl_ix = resolve as []
---   where resolve [] ras = reverse ras
---         resolve (ua:uas) ras =
---           case ua lbl_ix of
---             Left err -> Left err
---             Right a -> resolve uas (a:ras)
-
-runPI ::
-  PI a ->
-  FilePath ->
-  Int ->
-  String ->
-  PIResult a
-runPI pa fp lno inp =
-    case runPID p1 init_pst fp inp of
-      Left err -> Left err
-      Right (a,st,ws) -> Right (a,pisLabelReferences st,ws)
-  where p1 = do
-          sp <- P.getPosition
-          P.setPosition (P.setSourceLine sp lno)
-          pa
-
-testPI :: Show a => PI a -> String -> IO ()
-testPI = testPIF show
-testPIU :: Show a => LabelIndex -> PI (Unresolved a) -> String -> IO ()
-testPIU lix = testPIF fmt
-  where fmt ua =
-          case ua lix of
-            Left err -> show err
-            Right a -> show a
-testPIF :: (a -> String) -> PI a -> String -> IO ()
-testPIF fmt pa inp =
-  case runPI (pa <* P.eof) "<interactive>" 1 inp of
-    Left d -> putStrLn $ dFormatWithLines (lines inp) d
-
-    Right (a,lbls,_) -> do
-      mapM_ print lbls
-      putStrLn (fmt a)
-
-
-
-type PI a = PID PISt a
-
-init_pst :: PISt
-init_pst = PISt [] 0
-
-data PISt =
-  PISt {
-    pisLabelReferences :: ![(PC,String)]
-  , piSectionOffset :: !Int64
-  } deriving Show
-
-pSectionOffset :: PI Int64
-pSectionOffset = piSectionOffset <$> pGet
-
--------------------------------------------------------------------------------
-{-
-parseUnresolvedInsts ::
-  LabelIndex ->
-  PC ->
-  FilePath ->
-  Int ->
-  String ->
-  PIResult (Unresolved [Inst])
-parseUnresolvedInsts lbl_ix0 pc fp lno inp =
-  runPI (pBlocks pc lbl_ix0) fp lno inp
-
-testBlocks :: String -> IO ()
-testBlocks inp = testPIF fmt (pBlocks 0 []) inp
-  where fmt :: (Unresolved [Inst],LabelIndex) -> String
-        fmt (uis,_) =
-          case uis [] of
-            Left err -> dFormat err
-            Right is -> concatMap (\i -> show i ++ "\n") is
-
-pBlocks ::
-  PC ->
-  LabelIndex ->
-  PI (Unresolved [Inst],LabelIndex)
-pBlocks pc0 li0 = seqResult <$> pInstOrLabel [] pc0 li0
-  where seqResult (uis,li) = (sequenceUnresolved uis,li)
-
-        pInstOrLabel :: [Unresolved Inst] -> PC -> LabelIndex -> PI ([Unresolved Inst],LabelIndex)
-        pInstOrLabel ruis pc lbl_ix =
-            P.try pLabel <|> pInstNoFail <|> pEof
-          where pInstNoFail = do
-                  ui <- P.try (pInst pc)
-                  pInstOrLabel (ui:ruis) (pc+16) lbl_ix
-                pLabel = pWithLoc $ \loc -> do
-                  lbl <- pLabelChars
-                  pSymbol ":"
-                  case lbl`lookup`lbl_ix of
-                    Just x ->
-                      pSemanticError loc "label already defined"
-                    Nothing -> do
-                      pInstOrLabel ruis pc ((lbl,pc):lbl_ix)
-                pEof = do
-                  P.eof
-                  return (reverse ruis,lbl_ix)
--}
-box :: a -> [a]
-box a = [a]
 
 pInst :: PC -> PI (Unresolved Inst)
-pInst pc = pWhiteSpace >> body
+pInst pc = pWhiteSpace >> pInstNoPrefix pc
+
+pInstNoPrefix :: PC -> PI (Unresolved Inst)
+pInstNoPrefix pc = body
   where body = pWithLoc $ \loc -> do
           prd <- P.option PredNONE pPred
           op <- pOp
@@ -477,12 +365,47 @@ pInst pc = pWhiteSpace >> body
               pComplete [] $ resolveds [src0,src1]
 
             -- CALL.ABS.NOINC   `(cudaLaunchDeviceV2) {!5,Y,^1};
+            --
+            -- [31:24] optional reg (***defaults to 0's*** when absent)
+            -- [81:64]:[63:32] label input
+            -- [86] .NOINC
+            -- [90:87] predicate source
+            -- [regfile] enables UR and R0
+            --
+            -- CALL.ABS is opcode 0x143, CALL.REL uses opcode 0x144
             OpCALL -> do
-              src0 <- pSrc pc op -- I think this can be register too
-              pComplete [] [src0]
+              src0_p <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
+              src1_ru <- P.option sRC_RZ $ pSrcR <|> pSrcUR
+              src2 <- pSrcLbl pc op
+              pComplete [] [resolved src0_p,resolved src1_ru,src2]
 
-            -- CCTL.IVALL        {!5,Y};
-            OpCCTL -> pNullaryOp
+            --   CCTL.IVALL        {!5,Y};
+            --   CCTL.U.IVALL      {!5,Y};
+            --   CCTL.RS      [RZ] {!5,Y};
+            --   CCTL.IV      [R47+0xffff00] {!5,Y};
+            --
+            -- [24]     src0
+            -- [63:32]  src1-imm
+            -- [79:78]  {[default], .U, .C, .I}
+            -- [89:87]
+            --    0b000   .PF1 (prefetch 1)  [operand]
+            --    0b001   .PF2 (prefetch 2)  [operand]
+            --    0b010   .WB (write back)   [operand]
+            --    0b011   .IV  (invalidate)  [operand]
+            --    0b100   .IVALL (invalidate all?)  no operand
+            --    0b101   .RS (??)          [operand]
+            --    0b110   .IVALLP (invalidate all...) no operand
+            --    0b111   .WBALL (write back all)    no operand
+            --
+            OpCCTL -> do
+              srcs <-
+                P.option [sRC_RZ,sRC_I32_0] $ do
+                  pSymbol "["
+                  src0 <- pSrcR <|> pSrcUR
+                  src1_imm <- P.option sRC_I32_0 $ SrcI32 . fromIntegral <$> pIntTerm
+                  pSymbol "]"
+                  return [src0,src1_imm]
+              pComplete [] $ resolveds srcs
 
             --      CS2R     R6, SRZ {!1};
             --      CS2R.32  R5, SR_CLOCKLO {!7,Y,^2};
@@ -491,9 +414,9 @@ pInst pc = pWhiteSpace >> body
             OpCS2R -> pSR2RFamily
 
             --
-            --       DADD             R20,  R8,   c[0x3][0x8] {!2,+2.W,+1.R,^1};
+            --       DADD             R20,  R8,  c[0x3][0x8] {!2,+2.W,+1.R,^1};
             --       DADD             R14, -RZ, -R6 {!6,Y,+1.W,^1};
-            -- @P1   DADD             R20, -RZ,  -R14 {!10,Y,+1.W,^3};
+            -- @P1   DADD             R20, -RZ, -R14 {!10,Y,+1.W,^3};
             OpDADD -> pBinaryOp
 
             --   DEPBAR.LE  SB0, 0x0 {!4,Y}; (bit [44] is sb, [43:38] is imm val)
@@ -1582,7 +1505,7 @@ pOp = pWithLoc $ \loc -> do
   op_str <- pIdentifier
   case reads ("Op"++op_str) of
     [(op,"")] -> return op
-    _ -> pSemanticError loc $ "unrecognized mnemonic"
+    _ -> pSemanticError loc $ op_str ++ ": unrecognized mnemonic"
 
 
 pInstOpts :: Op -> PI (InstOptSet,Maybe Word8)
@@ -1618,7 +1541,6 @@ pInstOpts op
           return io
 
 
-
 pLop3Expr :: PI Word8
 pLop3Expr = pOrExpr
   where pOrExpr = pXOrExpr `P.chainl1` pOr
@@ -1635,587 +1557,6 @@ pLop3Expr = pOrExpr
           where pGrp = do {pSymbol "("; e<-pOrExpr; pSymbol ")"; return e}
                 pAtom = pOneOf [("s0",0xF0),("s1",0xCC),("s2",0xAA)]
                 pW8 = pHexImm <* pWhiteSpace
-
-
-pDsts :: Op -> PI [Dst]
-pDsts op = do
-    dst_pred_opt <- pDstPredOpt
-    dst <- pDst
-    return $ dst_pred_opt ++ [dst]
-  where pDstPredOpt
-          | oHasDstPred op = do
-              dp <- pDstP
-              pSymbol ","
-              return [dp]
-          | otherwise = return []
-
-
-pDst :: PI Dst
-pDst = pDstR <|> pDstP <|> pDstUP <|> pDstUR <|> pDstB
-pDstR :: PI Dst
-pDstR = pLabel "dst reg" $ DstR <$> pSyntax
-pDstB :: PI Dst
-pDstB = pLabel "dst barrier reg" $ DstB <$> pSyntax
-pDstP :: PI Dst
-pDstP = pLabel "dst pred reg" $ DstP <$> pSyntax
-pDstUP :: PI Dst
-pDstUP = pLabel "dst unif pred reg" $ DstUP <$> pSyntax
-pDstUR :: PI Dst
-pDstUR = pLabel "dst unif reg" $ DstUR <$> pSyntax
-
-
-resolved :: a -> Unresolved a
-resolved = const . Right
-resolveds :: [a] -> [Unresolved a]
-resolveds = map resolved
-
--- TODO: remove
-pSrcsN :: Int -> PC -> Op -> PI [Unresolved Src]
-pSrcsN 0 _  _  = return []
-pSrcsN n pc op = do
-  src0 <- pSrc pc op
-  srcs <- sequence $ replicate (n - 1) (pSymbol "," >> pSrc pc op)
-  return (src0:srcs)
--- TODO: remove
-pSrcs :: PC -> Op -> PI [Unresolved Src]
-pSrcs pc op = P.sepBy (pSrc pc op) (pSymbol ",")
-
-
--- floating point (fp32 or fp64)
-pSrcRCUF :: PI Src
-pSrcRCUF = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcFlt32
-
--- pSrcRCUH2 :: PI Src
--- would parse a pair of fp16 and merge into a W32
--- need an FP32 to FP16 conversion routine
-
--- integral
-pSrcRCUI :: PI Src
-pSrcRCUI = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcInt32
-
-
--- TODO: remove
-pSrc :: PC -> Op -> PI (Unresolved Src)
-pSrc pc = pWithLoc . pSrcAt pc
-pSrcAt :: PC -> Op -> Loc -> PI (Unresolved Src)
-pSrcAt pc op loc = P.try pNonLabel <|> pSrcLblAt pc op loc
-  where pNonLabel :: PI (Unresolved Src)
-        pNonLabel = alwaysSucceeds <$> pCases
-          where pCases =
-                  P.try pImmNonLabel <|>
-                  pSrcCCX <|>
-                  pSrcR <|>
-                  pSrcSR <|>
-                  pSrcUR <|>
-                  pSrcUP <|>
-                  pSrcP <|>
-                  pSrcB
-
-        pImmNonLabel
-          | oIsBranch op = pSrcI49 op
-          | otherwise = pSrcI32 op
-
-        alwaysSucceeds :: Src -> Unresolved Src
-        alwaysSucceeds src _ = Right (srcIntern src)
-
-pSrcLbl :: PC -> Op -> PI (Unresolved Src)
-pSrcLbl pc = pWithLoc . pSrcLblAt pc
-pSrcLblAt :: PC -> Op -> Loc -> PI (Unresolved Src)
-pSrcLblAt pc op loc = pLabel "label expression" $ do
-  e <- pLExpr pc
-  let eval :: Unresolved Src
-      eval lix
-        | oIsBranch op = SrcImm . Imm49 . fromIntegral <$> evalLExpr lix e
-        | otherwise = do
-          val <- evalLExpr lix e
-          if val < -2^31 || val > 2^31-1
-            then Left (dCons loc "value overflows 32b imm")
-            else return (SrcI32 (fromIntegral val))
-  -- FIXME: for BR we need to use big op
-  return eval
-
-
--- imm32, but can be a symbol too
-pSrcI32OrL32 :: PC -> Op -> PI (Unresolved Src)
-pSrcI32OrL32 pc op = pLabel "imm operand" $
-  P.try (pSrcLbl pc op) <|> resolved <$> pSrcI32 op
-
-
--- LDC wedges src0 into the src1 expression
--- c[0x3][R3+0x8]
--- cx[UR3][R0+0x8]
-pXLdcSrcs :: PI Src -> Src -> PI [Src]
-pXLdcSrcs pSrcXR xrz = pLabel "const addr" $ pInd <|> pDir
-  where pDir = do
-          pSymbol "c"
-          pSymbol "["
-          s <- pSignedInt
-          pSymbol "]"
-          pSurfOff (SurfImm s)
-        --
-        pInd = do
-          P.try (pSymbol "cx")
-          pSymbol "["
-          u <- pSyntax
-          pSymbol "]"
-          pSurfOff (SurfReg u)
-        --
-        --  ...[R13+0x10]
-        --  ...[R13-0x10]
-        --  ...[R13+-0x10]
-        --  ...[R13]
-        --  ...[0x10] -- means RZ+...
-        pSurfOff :: Surf -> PI [Src]
-        pSurfOff surf = do
-          pSymbol "["
-          let pOffsetTerm = pIntTerm
-              -- handles both [R13] and [R13+...]
-              pRegSum = P.try $ do
-                r <- pSrcXR
-                off <- P.option 0 pOffsetTerm
-                return [r, SrcCon msEmpty surf off]
-              --
-              pImmOnly = do
-                off <- pOffsetTerm <|> pInt
-                return [xrz, SrcCon msEmpty surf off]
-          --
-          srcs <- pRegSum <|> pImmOnly
-          pSymbol "]"
-          return srcs
-
-pSrcR_MMA :: PI Src
-pSrcR_MMA = pLabel "reg src" $ pSrcR_WithModSuffixes [ModREU,ModROW,ModCOL]
-
-
-pSrcCCXH2 :: PI Src
-pSrcCCXH2 = pLabel "const src" $ do
-  SrcCon ms s o <- pSrcCCX
-  ms_sfx <- pAddModRegSuffixesFrom [ModH0_H0,ModH1_H1]
-  return $ SrcCon (ms`msUnion`ms_sfx) s o
-
-
-pSrcRH2 :: PI Src
-pSrcRH2 = pLabel "reg src" $ pSrcR_WithModSuffixes [ModREU,ModH0_H0,ModH1_H1]
-pSrcURH2 :: PI Src
-pSrcURH2 = pLabel "uniform reg src" $ pSrcUR_WithModSuffixes [ModREU,ModH0_H0,ModH1_H1]
-
-pDstRH2 :: PI Dst
-pDstRH2 = pLabel "dst reg" $ do
-  dst_r <- pSyntax
-  ms_sfx <- pAddModRegSuffixesFrom [ModH0_H0,ModH1_H1]
-  return $ DstRms ms_sfx dst_r
-
--- e.g. R10, R10.H0_H0, or c[0][0], c[0][0].H1_H1, or pair of imm16
--- TODO: pair ImmH2
-pSrcXH2s :: PI [Src]
-pSrcXH2s =
-  box <$> P.try pSrcRH2 <|>
-    box <$> P.try pSrcCCXH2 <|>
-    box <$> P.try pSrcURH2 <|>
-    pSrcImmH2
-
-
-pSrcCCX :: PI Src
-pSrcCCX = pLabel "const src" $ P.try pConstInd <|> P.try pConstDir
-  where pConstDir :: PI Src
-        pConstDir = do
-          let pCon = do
-                pSymbol "c"
-                pSymbol "["
-                s <- pInt
-                pSymbol "]"
-                pSymbol "["
-                o <- pSignedInt
-                pSymbol "]"
-                return (SurfImm s,o)
-          ((s,o),ms_neg_abs) <- pWithNegAbs pCon
-          return $ SrcCon ms_neg_abs s o
-
-        pConstInd :: PI Src
-        pConstInd = do
-          ((u,o),ms_neg_abs) <-
-            pWithNegAbs $ do
-              pSymbol "cx"
-              pSymbol "["
-              u <- pSyntax
-              pSymbol "]"
-              pSymbol "["
-              o <- pSignedInt
-              pSymbol "]"
-              return (SurfReg u,o)
-          return $ SrcCon ms_neg_abs u o
-
-
-pSignedInt :: PI Int
-pSignedInt = do
-  sign <- P.option id $ pSymbol "-" >> return negate
-  sign <$> pInt
-
-
-pSrcImmH2 :: PI [Src]
-pSrcImmH2 = do
-  -- TODO: these are really supposed to be packed into a single operand
-  s0 <- pSrcFlt32
-  s1 <- pSymbol "," >> pSrcFlt32
-  return [s0,s1]
-
--- rejects 32@hi... and 32@lo...
-pSrcI49 :: Op -> PI Src
-pSrcI49 op = pLabel "imm49" $ srcIntern <$> pSrcImmNonBranch49 op
-pSrcImmNonBranch49 :: Op -> PI Src
-pSrcImmNonBranch49 op = do
-  imm <- fromIntegral <$> pIntImm64
-  P.notFollowedBy (P.char '@')
-  pWhiteSpace
-  return $ SrcImm (Imm49 imm)
-
--- cannot be a label
-pSrcI8 :: PI Src
-pSrcI8 = pLabel "imm8" $ srcIntern <$> pIt
-  where pIt = pLexeme $ do
-          w8 <- pImmA :: PI Word8 -- will fail gracefully on overflow
-          return (SrcImm (Imm32 (fromIntegral w8)))
-
-pSrcI32 :: Op -> PI Src
-pSrcI32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
-pSrcImmNonBranch32 :: Op -> PI Src
-pSrcImmNonBranch32 op = do
-    imm <- pVal32
-    P.notFollowedBy (P.char '@')
-    pWhiteSpace
-    return $ SrcI32 imm
-  where pVal32
-          -- TODO: should we convert integer to FP?
-          | oIsFP op = pFltImm32 <|> pIntImm32
-          | otherwise = pIntImm32
-
-pSrcFlt32 :: PI Src
-pSrcFlt32 = pLabel "imm operand" $ SrcI32 <$> pFltImm32
-
-pSrcInt32 :: PI Src
-pSrcInt32 = pLabel "imm operand" $ SrcI32 <$> pIntImm32
-
-
--- e.g. +0x10 or -0x10 or +-0x10
-pIntTerm :: PI Int
-pIntTerm =  pPlusX <|> pMinus
-  where pOff modf = modf <$> pInt
-        pMinus = pSymbol "-" >> pOff negate
-        pPlusX = do
-          pSymbol "+"
-          pMinus <|> pOff id
-
-
-pNegationBitwise :: PI ModSet
-pNegationBitwise =
-  pSymbol "-" >> return (msSingleton ModANEG)
-pNegationNumeric :: PI ModSet
-pNegationNumeric =
-  pSymbol "~" >> return (msSingleton ModBNEG)
-pNegationLogical :: PI ModSet
-pNegationLogical = P.option msEmpty $
-  pSymbol "!" >> return (msSingleton ModLNEG)
-
-pNegationBitwiseOrNumericOpt :: PI ModSet
-pNegationBitwiseOrNumericOpt = P.option msEmpty $
-  pNegationNumeric <|> pNegationBitwise
-
--- how to make this work with <$>...<*>...<*>...
--- pWithNegAbsC :: PI a -> PI (Bool -> Bool -> PI a)
-
-pWithNegAbs :: PI a -> PI (a,ModSet)
-pWithNegAbs pBody = do
-  ms_neg <- pNegationBitwiseOrNumericOpt
-  let pWithAbs = do
-        pSymbol "|"
-        r <- pBody
-        pSymbol "|"
-        return (r,True)
-  (r,abs) <- pWithAbs <|> (pBody >>= \r -> return (r,False))
-  let char x a = if x then msSingleton a else msEmpty
-  let ms = msIntern $ msUnion ms_neg $ char abs ModABS
-  return (r,ms)
-
-
-pAddModRegSuffixesFrom :: [Mod] -> PI ModSet
-pAddModRegSuffixesFrom ms = msIntern . msFromList <$> P.many (pOneOf opts)
-  where opts = map (\m -> (msFormatSuffix m,m)) ms
-
-pSrcR :: PI Src
-pSrcR = pSrcR_WithModSuffixes [ModREU]
-
-pSrcR_WithModSuffixes :: [Mod] -> PI Src
-pSrcR_WithModSuffixes ms = pLabel "reg operand" $ do
-  (reg,ms_pfx) <- pWithNegAbs (pLabel "reg" pSyntax)
-  ms_sfx <- pAddModRegSuffixesFrom ms
-  return $ SrcReg (msIntern (ms_pfx`msUnion`ms_sfx)) (RegR reg)
-
-pSrcUR_WithModSuffixes :: [Mod] -> PI Src
-pSrcUR_WithModSuffixes ms = pLabel "uniform reg operand" $ do
-  (reg,ms_pfx) <- pWithNegAbs (pLabel "uniform reg" pSyntax)
-  ms_sfx <- pAddModRegSuffixesFrom ms
-  return $ SrcReg (msIntern (ms_pfx`msUnion`ms_sfx)) (RegUR reg)
-
-
-pSrcSB :: PI Src
-pSrcSB = pLabel "sb reg operand" $ SrcReg msEmpty . RegSB <$> pSyntax
-
-pSrcSR :: PI Src
-pSrcSR = pLabel "sys reg operand" $ SrcReg msEmpty . RegSR <$> parse
-  where parse = P.try pUnderbarTidCtaid <|> pSyntax
-        pUnderbarTidCtaid =
-          -- we accept these with a dot, but we also allow
-          -- the more IR-consistent form here (SR_TID.X)
-          --
-          -- the regular form pSyntax will replace the _ with a .
-          -- to match nvdisasm's output; thus we favor the nvdisasm
-          -- version in output and whatnot
-          (pSymbol "SR_TID_X" >> return SR_TID_X) <|>
-          (pSymbol "SR_TID_Y" >> return SR_TID_Y) <|>
-          (pSymbol "SR_TID_Z" >> return SR_TID_Z) <|>
-          (pSymbol "SR_CTAID_X" >> return SR_TID_X) <|>
-          (pSymbol "SR_CTAID_Y" >> return SR_TID_Y) <|>
-          (pSymbol "SR_CTAID_Z" >> return SR_TID_Z)
-
-pSrcUR :: PI Src
-pSrcUR = pLabel "uniform src operand" $ do
-  (ur,ms) <- pWithNegAbs pSyntax
-  return (Src_UR ms ur)
-
-pSrcP :: PI Src
-pSrcP = pLabel "predicate src operand" $ do
-  ms <- pNegationLogical
-  Src_P ms <$> pSyntax
-pSrcUP :: PI Src
-pSrcUP = pLabel "uniform predicate src operand" $ do
-  ms <- pNegationLogical
-  Src_UP ms <$> pSyntax
-
-
-pSrcB :: PI Src
-pSrcB = pLabel "convergence barrier reg operand" $ Src_B msEmpty <$> pSyntax
-
-
-pLExpr :: PC -> PI LExpr
-pLExpr pc = pBitExpr
-  where pBitExpr = pAddExpr
-        pAddExpr = P.chainl1 pMulExpr pAddOp
-          where pAddOp = pOp "+" LExprAdd <|> pOp "-" LExprSub
-        pMulExpr = P.chainl1 pUnrExpr pMulOp
-          where pMulOp = pOp "*" LExprMul <|> pOp "/" LExprDiv <|> pOp "/" LExprMod
-        pOp sym cons = pWithLoc $ \loc -> pSymbol sym >> return (cons loc)
-
-        pUnrExpr = pUnOp "-" LExprNeg <|> pUnOp "~" LExprCompl <|> pPrimExpr
-          where pUnOp sym cons = pWithLoc $ \loc -> do
-                  pSymbol sym
-                  e <- pUnrExpr
-                  return $ cons loc e
-        pPrimExpr = pWithLoc pPrimExprBody
-        pPrimExprBody loc =
-            pTryFunc "fun@fdesc" LExprFunFDesc <|>
-            pTryFunc "32@lo" LExprLo32 <|>
-            pTryFunc "32@hi" LExprHi32 <|>
-            P.try pTickExpr <|> -- `(...)
-            P.try pLabel <|>
-            pGroup <|>
-            pLit
-          where -- e.g. foo or foo@srel
-                pLabel :: PI LExpr
-                pLabel = do
-                  ident <- pLabelChars
-                  when (ident `elem` ["c","cx"]) $
-                    P.notFollowedBy (P.char '[') -- not const operands (c[... or cx[...)
-                  pModify $ \ps -> ps{pisLabelReferences = (pc,ident):pisLabelReferences ps}
-                  cons <-
-                    P.option id $ pWithLoc $ \loc -> do
-                      --
-                      pSymbol "@srel"
-                      soff <- pSectionOffset
-                      return (LExprSRel loc soff)
-                  pWhiteSpace
-                  return $ cons $ LExprLabel loc ident
-                pGroup = do
-                  pSymbol "("
-                  e <- pBitExpr
-                  pSymbol ")"
-                  return e
-                pLit = LExprImm loc <$> (pImmA <* pWhiteSpace)
-                --
-                pTryFunc :: String -> (Loc -> LExpr -> LExpr) -> PI LExpr
-                pTryFunc sym cons = P.try $ do
-                  pSymbol sym
-                  pSymbol "("
-                  e <- pBitExpr
-                  pSymbol ")"
-                  return (cons loc e)
-                --
-                pTickExpr = pSymbol "`" >> pPrimExpr
-
-
-pLabelChars :: PI String
-pLabelChars = pDotLabel <|> pNonDotLabel
-  where pDotLabel = do
-          pfx <- P.option "" (P.char '.' >> return ".")
-          (pfx++) <$> pNonDotLabel
-
-        pNonDotLabel = do
-          let pOtherIdentChar = P.oneOf "_$"
-          c0 <- P.letter <|> pOtherIdentChar
-          sfx <- P.many $ P.alphaNum <|> pOtherIdentChar
-          return (c0:sfx)
-
-evalLExpr :: LabelIndex -> LExpr -> Either Diagnostic Int64
-evalLExpr lix = eval
-  where eval :: LExpr -> Either Diagnostic Int64
-        eval le =
-          case le of
-            LExprAdd loc ll l2 -> applyBin loc ll l2 (+)
-            LExprSub loc ll l2 -> applyBin loc ll l2 (-)
-            LExprMul loc ll l2 -> applyBin loc ll l2 (*)
-            LExprDiv loc ll l2 -> applyBinDiv loc ll l2 div
-            LExprMod loc ll l2 -> applyBinDiv loc ll l2 mod
-            LExprNeg _ l -> applyUnr l negate
-            LExprCompl _ l -> applyUnr l complement
-            LExprImm _ val -> return val
-            --
-            LExprLo32 _ le -> applyUnr le (.&.0xFFFFFFFF)
-            LExprHi32 _ le -> applyUnr le ((.&.0xFFFFFFFF) . (`shiftR`32))
-            LExprSRel loc soff le ->
-              case eval le of
-                Left d -> Left d
-                Right val -> return (val - soff)
-            LExprFunFDesc _ le ->
-              -- FIXME: implement this at some point
-              -- I don't know what a "function descriptor"
-              eval le
-            --
-            LExprLabel loc sym ->
-              case sym `lookup` lix of
-                Nothing -> err loc $ sym ++ ": unbound symbol"
-                Just val -> return (fromIntegral val)
-
-        applyBin = applyBinG False
-        applyBinDiv = applyBinG True
-
-        applyBinG ::
-          Bool ->
-          Loc ->
-          LExpr -> LExpr -> (Int64 -> Int64 -> Int64) ->
-          Either Diagnostic Int64
-        applyBinG div loc e1 e2 f = do
-          v1 <- eval e1
-          v2 <- eval e2
-          if div && v2 == 0 then err loc "division by 0"
-            else return (f v1 v2)
-
-        applyUnr :: LExpr -> (Int64 -> Int64) -> Either Diagnostic Int64
-        applyUnr le f = f <$> eval le
-
-        err :: Loc -> String -> Either Diagnostic a
-        err loc = Left . dCons loc
-
--- Label expressions
---
--- EXAMPLE:
--- _Z10testKerneli: 32@lo((_Z10testKerneli + .L_3@srel))
--- ...
---  /*0120*/       MOV              R20, 32@lo((_Z10testKerneli + .L_3@srel)) {!2};  /* 000FE40000000F00`0000000000147802 */
---  /*0130*/       MOV              R21, 32@hi((_Z10testKerneli + .L_3@srel)) {!7,Y};  /* 000FCE0000000F00`0000000000157802 */
---  /*0140*/       CALL.ABS.NOINC   `(__assertfail) {!5,Y};                    /* 000FCA0003C00000`0000000000007943 */
--- .L_3:
--- ....
---
--- 32@lo((_Z10testKerneli + .L_3@srel)) must mean the low 32 bits of the sum of
--- _Z10testKerneli (device function offset) and the section-relative offset of
--- the label .L_3 (0x150 in this example).  The CUDA binary has:
--- Relocation section '.rela.text._Z10testKerneli' at offset 0xe98 contains 2 entries:
---  Offset          Info           Type           Sym. Value    Sym. Name + Addend
--- 000000000130  000a00000039 unrecognized: 39      0000000000000000 _Z10testKerneli + 150
--- 000000000120  000a00000038 unrecognized: 38      0000000000000000 _Z10testKerneli + 150
---
--- .section .rela.text._Z10testKerneli     RELA
--- 288    _Z10testKerneli    R_CUDA_ABS32_LO_32    336 (0x120)
--- 304    _Z10testKerneli    R_CUDA_ABS32_HI_32    336 (0x130)
---
--- EXAMPLE: 32@lo(fun@fdesc(_Z26computeBezierLinePositionsiP10BezierLinei))
--- computeBezierLinePositions(int, BezierLine*, int)
---  /*04F0*/       UMOV             UR4, 32@lo(fun@fdesc(_Z26computeBezierLinePositionsiP10BezierLinei)) {!1};  /* 000FE20000000000`0000000000047882 */
---  ...
---  /*0510*/       UMOV             UR5, 32@hi(fun@fdesc(_Z26computeBezierLinePositionsiP10BezierLinei)) {!1};  /* 000FE20000000000`0000000000057882 */
--- % readelf -r has
--- 00000000000004f0  000000180000003e unrecognized: 3e      0000000000000000 _Z26computeBezierLinePositionsiP10BezierLinei
--- 0000000000000510  000000180000003f unrecognized: 3f      0000000000000000 _Z26computeBezierLinePositionsiP10BezierLinei
--- ..
---   .section .rel.text._Z21computeBezierLinesCDPP10BezierLinei	REL
---   1296    _Z26computeBezierLinePositionsiP10BezierLinei    R_CUDA_FUNC_DESC32_HI_32
---   1264    _Z26computeBezierLinePositionsiP10BezierLinei    R_CUDA_FUNC_DESC32_LO_32
-data LExpr =
-  ---------------------------------------------------------------------
-  -- binary additive expressions
-    LExprAdd !Loc !LExpr !LExpr
-  | LExprSub !Loc !LExpr !LExpr
-  -- binary multiplicative expressions
-  | LExprMul !Loc !LExpr !LExpr
-  | LExprDiv !Loc !LExpr !LExpr
-  | LExprMod !Loc !LExpr !LExpr
-  -- unary expressions
-  | LExprNeg   !Loc !LExpr -- -E
-  | LExprCompl !Loc !LExpr -- ~E
-  --
-  ---------------------------------------------------------------------
-  -- primary expressions
-  --
-  -- an immediate
-  | LExprImm !Loc !Int64
-  -- a symbol
-  | LExprLabel !Loc !String -- e.g. ".L_15"
-  --
-  -- label functions
-  | LExprLo32 !Loc !LExpr -- 32@lo(<LExpr>)
-  | LExprHi32 !Loc !LExpr -- 32@hi(<LExpr>)
-  --
-  -- I think this is section relative offset
-  -- .L_3@srel would be the offset of .L_3 relative to the section we are in
-  | LExprSRel !Loc !Int64 !LExpr -- <LExpr>@srel (section offset is given)
-  --
-  -- R_CUDA_FUNC_DESC32_HI_32/R_CUDA_FUNC_DESC32_LO_32
-  -- usually (always?) nested in a 32@lo(...)
-  | LExprFunFDesc !Loc !LExpr -- fun@fdesc(<LExpr>)
-  deriving Show
-
-
-pIntImm32 :: PI Word32
-pIntImm32 = do
-  -- Were we to use Int32, then fromIntegral to Word64 would sign extend
-  -- and create a value that won't fit in encoding.
-  --
-  -- The function negate :: Word32 -> Word32 is still two's-complement
-  let pImmS32 = pImmA :: PI Word32
-  maybeNegate <- P.option id (pSymbol "-" >> return negate)
-  maybeNegate <$> pImmS32
-pIntImm64 :: PI Word64
-pIntImm64 = do
-  let pImmS64 = pImmA :: PI Word64
-  maybeNegate <- P.option id (pSymbol "-" >> return negate)
-  maybeNegate <$> pImmS64
-
-pFltImm32 :: PI Word32
-pFltImm32 = do
-    let pNegSign = pSymbol "-" >> return (flip complementBit 31)
-        pSignFunc =
-          pNegSign <|> (P.option id (pSymbol "+" >> return id))
-    neg <- pSignFunc
-    neg <$> (pInf <|> pQNan <|> P.try pNonInf <|> pWholeNumberFlt)
-  where pInf = pSymbol "INF" >> return 0x7F800000
-        -- pNan = pSymbol "NAN" >> return 0x7FC00000
-        pQNan = pSymbol "QNAN" >> return 0x7FC00000
-        pNonInf = fromIntegral . floatToBits . doubleToFloat <$> pFloating
-        pWholeNumberFlt = do
-          f32 <- read <$> P.many1 P.digit :: PI Float
-          -- do I want a not-followed by?
-          pWhiteSpace
-          return (floatToBits f32)
-
 
 
 -- {!8,Y,+2.R,+3.W,^4,^1}
@@ -2259,9 +1600,4 @@ pInstOptDebug = do
     pTrace $ concatMap (\(s,_) -> show s ++ "\n") (orderByLen es)
     pOneOfKeyword "" es
   where es = map (\e -> (format e,e)) [toEnum 0 ..]
-
-pSyntax :: (Enum s,Syntax s) => PI s
-pSyntax = pLabel tnm $ pOneOfKeyword tnm es
-  where es = map (\e -> (format e,e)) [toEnum 0 ..]
-        tnm = formatTypeName (snd (head es))
 
