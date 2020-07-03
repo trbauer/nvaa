@@ -11,6 +11,24 @@ import Debug.Trace
 import Text.Parsec((<|>),(<?>))
 import qualified Text.Parsec           as P
 
+{-
+parseCubinListing :: FilePath -> String -> Either Diagnostic (CubinListing,LabelIndex)
+parseCubinListing fp inp =
+  case runPI pCubinListing fp inp of
+    Left err -> Left err
+    Right (ts,pis,_) -> return (ts,pisLabelDefinitions pis)
+
+
+pCubinListing :: PI [TextSection]
+pCubinListing = do
+  sm_ver <- pListingHeader
+  tss <- sequenceUnresolved . concat <$> P.many pListingElem
+  --
+  ds <- pisLabelDefinitions <$> pGet
+  case tss ds of
+    Left err -> pSemanticErrorRethrow err
+    Right tss -> return tss
+-}
 
 type TextSection = (String,[Inst])
 -- data TextSection =
@@ -54,7 +72,7 @@ pListingHeader = pLabel "listing header (.headerflags ...)" $ do
           _ -> pSemanticError loc (sm ++ ": unsupported sm version")
 
 pListingElem :: PI [Unresolved TextSection]
-pListingElem = P.try pTextSec <|> pOtherChar
+pListingElem = pTextSec <|> pOtherChar
   where -- pOtherLine = pAnyLine >> return [] <* pWhiteSpace
         pTextSec = do
           ts <- pTextSection
@@ -75,7 +93,7 @@ pAnyLine = pLabel "any line" $ do
 
 pTextSection :: PI (Unresolved TextSection)
 pTextSection = pLabel "text section" $ do
-  kernel_name <- pTextSectionStart
+  kernel_name <- P.try pTextSectionStart
   --
   uinsts <- pInsts 0
   --

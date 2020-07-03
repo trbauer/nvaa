@@ -173,9 +173,7 @@ testListing fp = do
   inp <- readFile fp
   length inp `seq` return ()
   case parseListingG fp inp of
-    Left err -> do
-      putStrLn $ dFormatWithLines (lines inp) err
-      die "stopping"
+    Left err -> die $ dFormatWithLines (lines inp) err
     Right (ts,ldefs) -> do
       mapM_ print ldefs
       forM_ ts $ \(kernel,is) -> do

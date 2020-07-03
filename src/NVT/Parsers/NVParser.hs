@@ -25,7 +25,6 @@ import qualified Text.Parsec           as P
 
 
 
-type LabelIndex = [(String,PC)]
 type Unresolved a = LabelIndex -> Either Diagnostic a
 --
 type PIResult a = ParseResult PISt a

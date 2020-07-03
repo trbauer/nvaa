@@ -5,6 +5,7 @@ module NVT.IR.Types where
 import NVT.Bits
 import NVT.Encoders.Codable
 import NVT.IR.Op
+import NVT.IR.LExpr
 import NVT.IR.Syntax
 import NVT.Loc
 import qualified NVT.EnumSet as ES
@@ -31,7 +32,18 @@ import qualified Data.Map.Strict as DM
 
 
 type PC = Int
+type LabelIndex = [(String,PC)]
 
+{-
+newtype LabelMap = LabelMap (DM.Map String PC)
+  deriving (Show,Eq)
+
+lmEmpty :: LabelMap
+lmEmpty
+
+lmElem :: String -> LabelMap -> Bool
+lmElem s (LabelMap m) =
+-}
 
 data Inst =
   Inst {
@@ -140,6 +152,7 @@ data Src =
     SrcReg !ModSet !Reg
   | SrcCon !ModSet !Surf !Int
   | SrcImm !Imm
+  | SrcLExpr !LExpr
   | SrcTex !TexOp
   deriving (Show,Eq,Ord)
 pattern SrcRZ :: Src
