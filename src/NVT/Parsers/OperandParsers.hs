@@ -84,7 +84,7 @@ pSrcLblAt pc op loc = pLabel "label expression" $ do
         | otherwise = do
           val <- evalLExpr lix e
           if val < -2^31 || val > 2^31-1
-            then Left (dCons loc "value overflows 32b imm")
+            then Left (dCons loc $ show val ++ ": value overflows 32b imm")
             else return (SrcI32 (fromIntegral val))
   -- FIXME: for BR we need to use big op
   return eval
@@ -93,7 +93,7 @@ pSrcLblAt pc op loc = pLabel "label expression" $ do
 -- imm32, but can be a symbol too
 pSrcI32OrL32 :: PC -> Op -> PI (Unresolved Src)
 pSrcI32OrL32 pc op = pLabel "imm operand" $
-  P.try (pSrcLbl pc op) <|> resolved <$> pSrcI32 op
+  P.try (resolved <$> pSrcI32 op) <|> pSrcLbl pc op
 
 
 -- LDC wedges src0 into the src1 expression

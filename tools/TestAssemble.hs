@@ -208,19 +208,24 @@ parseLines (ln0:ln1:lns) =
 
 -- slog :: String -> Int -> IO ()
 -- slog f k = parseAllOpsInDir f k "examples\\sm_80.1\\ops"
-slog :: IO ()
-slog = parseAllOpsInFile "tests\\sm_80\\instructions.sass"
+slog :: Bool -> IO ()
+slog vrb = parseAllOpsInFile vrb "tests\\sm_80\\instructions.sass"
 
-parseAllOpsInDir :: String -> Int -> FilePath -> IO ()
-parseAllOpsInDir filt k dir = do
+validate_formatter :: Bool
+validate_formatter = False -- True
+
+
+
+parseAllOpsInDir :: Bool -> String -> Int -> FilePath -> IO ()
+parseAllOpsInDir vrb filt k dir = do
   sass_fs <- filter (".sass"`isSuffixOf`) <$> getSubPaths dir
-  mapM_ (parseAllOpsInFileK k) (filter ((>=filt) . takeFileName) sass_fs)
+  mapM_ (parseAllOpsInFileK vrb k) (filter ((>=filt) . takeFileName) sass_fs)
 
-parseAllOpsInFile :: FilePath -> IO ()
-parseAllOpsInFile = parseAllOpsInFileK (-1)
+parseAllOpsInFile :: Bool -> FilePath -> IO ()
+parseAllOpsInFile vrb = parseAllOpsInFileK vrb (-1)
 
-parseAllOpsInFileK :: Int -> FilePath -> IO ()
-parseAllOpsInFileK k fp = do
+parseAllOpsInFileK :: Bool -> Int -> FilePath -> IO ()
+parseAllOpsInFileK vrb k fp = do
     putStrLn ""
     putStrLn $ takeFileName fp ++ ": ===================================="
     flns <- zip [1..] . lines <$> readFile fp
@@ -246,14 +251,17 @@ parseAllOpsInFileK k fp = do
                 when (not (null ws)) $ do
                   putStrLn "WARNINGS:"
                   mapM_ print ws
-                unless (null lrefs) $
+                when (not (null lrefs) && vrb) $
                   putStrLn $ "induces labels: " ++ show lrefs
                 -- create some fake label references so branches print
                 case ui lrefs of
-                  Left d -> putStrLn $ dFormat d
+                  Left d -> do
+                    putStrLn "ERROR HERE"
+                    putStrLn $ dFormatWithCurrentLine (lno,syntax) d
                   Right i -> do
-                    putStrLn ln
-                    putStrLn $ fmtInstIr i
+                    when vrb $ do
+                      putStrLn ln
+                      putStrLn $ fmtInstIr i
                     let (ws0,ws1) = (words syntax,words (format i))
                     if validate_formatter && length ws0 /= length ws1
                       then do
@@ -264,8 +272,6 @@ parseAllOpsInFileK k fp = do
                           ""
                       else parse lns
 
-validate_formatter :: Bool
-validate_formatter = True
 
 
 testAllG :: Bool -> IO Bool

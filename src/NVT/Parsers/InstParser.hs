@@ -1217,13 +1217,13 @@ pInstNoPrefix pc = body
             OpULOP3 -> do
               dst_p <- P.option [dST_UPT] $ do
                 box <$> pDstUP <* pSymbol ","
-              dst <- pDstUR <* pSymbol ","
+              dst <- pDstUR
               --
-              src0 <- pSrcUR <* pSymbol ","
-              src1 <- pSrcURI <* pSymbol ","
-              src2 <- pSrcUR <* pSymbol ","
-              src3_lut <- pLop3LutOptSrc m_lop3_opt <* pSymbol ","
-              src4_pr <- pSrcUP
+              src0 <- pSymbol "," >> pSrcUR
+              src1 <- pSymbol "," >> pSrcURI
+              src2 <- pSymbol "," >> pSrcUR
+              src3_lut <- pSymbol "," >> pLop3LutOptSrc m_lop3_opt
+              src4_pr <- pSymbol "," >> pSrcUP
               --
               pComplete (dst_p++[dst]) (resolved src0:src1:resolveds [src2,src3_lut,src4_pr])
 
