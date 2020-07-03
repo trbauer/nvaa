@@ -152,7 +152,7 @@ data Src =
     SrcReg !ModSet !Reg
   | SrcCon !ModSet !Surf !Int
   | SrcImm !Imm
-  | SrcLExpr !LExpr
+  | SrcImmExpr !Loc !LExpr
   | SrcTex !TexOp
   deriving (Show,Eq,Ord)
 pattern SrcRZ :: Src

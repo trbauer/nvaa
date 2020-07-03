@@ -21,19 +21,6 @@ import Text.Printf
 import qualified Text.Parsec           as P
 
 
-parseResolvedInst ::
-  PC ->
-  FilePath ->
-  Int ->
-  String ->
-  Either Diagnostic (Inst,[Diagnostic]) -- not a PIResult because we drop labels
-parseResolvedInst pc fp lno syntax =
-  case parseUnresolvedInst pc fp lno syntax of
-    Left err -> Left err
-    Right (ci,lrefs,ws) ->
-      case ci [] of
-        Left err -> Left err
-        Right i -> Right (i,ws)
 
 
 parseUnresolvedInst ::
@@ -41,181 +28,282 @@ parseUnresolvedInst ::
   FilePath ->
   Int ->
   String ->
-  PIResult (Unresolved Inst)
+  PIResult Inst
 parseUnresolvedInst pc = runPI_WLNO (pInst pc)
 
 
-pInst :: PC -> PI (Unresolved Inst)
+pInst :: PC -> PI Inst
 pInst pc = pWhiteSpace >> pInstNoPrefix pc
 
-pInstNoPrefix :: PC -> PI (Unresolved Inst)
+pInstNoPrefix :: PC -> PI Inst
 pInstNoPrefix pc = body
   where body = pWithLoc $ \loc -> do
           prd <- P.option PredNONE pPred
           op <- pOp
           (ios,m_lop3_opt) <- pInstOpts op
           --
-          let pComplete :: [Dst] -> [Unresolved Src] -> PI (Unresolved Inst)
+          let pComplete :: [Dst] -> [Src] -> PI Inst
               pComplete dsts srcs =
                 pCompleteInst loc prd op ios dsts srcs []
 
           let -- general variable operand (e.g. src1 in unary/binary ops)
               -- (note unary usually uses src1 instead of src0)
-              pSrcX :: PI (Unresolved Src)
+              pSrcX :: PI Src
               pSrcX
-                | oIsFP op = resolved <$> pSrcRCUF
-                | otherwise = resolved <$> pSrcRCUI
+                | oIsFP op = pSrcRCUF
+                | otherwise = pSrcRCUI
 
               -- used to parse SRC1, SRC2 in ternary
-              pSrc_RX_XR :: PI [Unresolved Src]
-              pSrc_RX_XR = P.try (tryOrd pR pSrcX) <|> (tryOrd pSrcX pR)
-                where pR = resolved <$> pSrcR
-
-                      tryOrd p1 p2 = do
+              pSrc_RX_XR :: PI [Src]
+              pSrc_RX_XR = P.try (tryOrd pSrcR pSrcX) <|> (tryOrd pSrcX pSrcR)
+                where tryOrd p1 p2 = do
                         src1 <- p1
                         src2 <- pSymbol "," >> p2
                         return [src1,src2]
 
               -- UR, R, IMM
-              pSrcURI :: PI (Unresolved Src)
-              pSrcURI = P.try (resolved <$> pSrcUR) <|> pSrcI32OrL32 pc op
+              pSrcURI :: PI Src
+              pSrcURI = P.try pSrcUR <|> pSrcI32OrL32 pc op
 
-             -- e.g. NOP, ERRBAR, ...
-              pNullaryOp :: PI (Unresolved Inst)
+              -- [Pred, ] Reg
+              pDstsP_R :: PI [Dst]
+              pDstsP_R = do
+                dst_pred <- P.option [] $ P.try $ do
+                  p <- pDstP <* pSymbol ","
+                  return [p]
+                dst_reg <- pDstR
+                return $ dst_pred ++ [dst_reg]
+
+              pBareSrcR :: PI Src
+              pBareSrcR = pLabel "reg" $ Src_R msEmpty <$> pSyntax
+
+              pModSetSuffixesOptOneOf :: [Mod] -> PI ModSet
+              pModSetSuffixesOptOneOf ms = do
+                let msSingleton s = msFromList [s]
+                    opts = map (\m -> ("." ++ drop 3 (show m),m))
+                P.option msEmpty $ msSingleton <$> pOneOf (opts ms)
+
+              -- for LOP3 and PLOP3 we may or may not have the LUT code as a source,
+              -- but we want it to match
+              --
+              -- PLOP3.((s0|s1)&s2) P0, PT, P0, P1, PT, 0xa8, 0x0 {!13,Y};
+              --                                        ^^^^
+              --  LOP3.(s0&s1)    P2,  RZ,  R35, 0x7fffffff,  RZ, 0xc0, !PT {!4,Y}; // examples/sm_75/samples\bilateral_kernel.sass:1557
+              --                                                  ^^^^
+              pLop3LutOptSrc :: PI Src
+              pLop3LutOptSrc =
+                case m_lop3_opt of
+                  -- if they didn't give us an explicit code, it better be here
+                  Nothing -> pSrcI8
+                  Just lop3_opt -> do
+                    -- if they gave us a code earlier, it better match
+                    -- anything parsed here
+                    loc_hex_lut <- pGetLoc
+                    m_hex_lut <- P.optionMaybe (pImmA :: PI Word8)
+                    case m_hex_lut of
+                      Just hex_lut
+                        | hex_lut /= lop3_opt ->
+                          pSemanticError
+                            loc_hex_lut
+                            ("mismatch between inst opt logical option expression and classic-form LUT operand; inst. opt expression evaluates to " ++ printf "0x02X" lop3_opt)
+                      _ -> return () -- better that they omit it
+                    return (SrcImm (Imm32 (fromIntegral lop3_opt)))
+
+              --  R (+ UR) (+ IMM)
+              --       UR  (+ IMM)
+              --       IMM (+ UR)
+              --
+              -- TODO: support for LDS offsets and the other [91:90] stuff
+              pLDST_Addrs :: Op -> PI (Src,Src,Src)
+              pLDST_Addrs op = do
+                let pBareSrcUR :: PI Src
+                    pBareSrcUR = pLabel "ureg" $ Src_UR msEmpty <$> pSyntax
+                let pR_UR_IMM = do
+                      -- technically LDS/STS don't permit .U32 or .64
+                      src_addr <-
+                        if oIsSLM op
+                          then pSrcR_WithModSuffixes [ModX4,ModX8,ModX16]
+                          else pSrcR_WithModSuffixes [ModU32,Mod64]
+                      (_,src_ur,src_imm) <-
+                        P.option (sRC_RZ,sRC_URZ,sRC_I32_0) $ do
+                          pSymbol "+"
+                          P.try pUR_IMM <|> pIMM_UR
+                      return (src_addr,src_ur,src_imm)
+                    pUR_IMM :: PI (Src,Src,Src)
+                    pUR_IMM = do
+                      ur <- pBareSrcUR
+                      imm <- P.option sRC_I32_0 $ pSymbol "+" >> pSrcI32 op
+                      return (sRC_RZ,ur,imm)
+                    pIMM_UR :: PI (Src,Src,Src)
+                    pIMM_UR = do
+                      imm <- pSrcI32 op
+                      ur <- P.option sRC_URZ $ pSymbol "+" >> pBareSrcUR
+                      return (sRC_RZ,ur,imm)
+                pSymbol "["
+                r <- P.try pUR_IMM <|> P.try pIMM_UR <|> pR_UR_IMM
+                pSymbol "]"
+                return r
+
+              -------------------------------------------------------------------
+              --
+
+              -- e.g. NOP, ERRBAR, ...
+              pNullaryOp :: PI Inst
               pNullaryOp = pComplete [] []
 
               -- e.g. BFREV, F2F
-              pUnaryOp :: PI (Unresolved Inst)
+              pUnaryOp :: PI Inst
               pUnaryOp = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcX
                 pComplete [dst] [src0]
 
               -- e.g. MOVM
-              pUnaryOpR :: PI (Unresolved Inst)
+              pUnaryOpR :: PI Inst
               pUnaryOpR = do
                 dst <- pDstR
                 let pTrap = pWithLoc $ \loc -> do
                       pSrcX
                       pSemanticError loc "this op requires reg operand"
                 src0 <- pSymbol "," >> (pSrcR <|> pTrap)
-                pComplete [dst] [resolved src0]
+                pComplete [dst] [src0]
 
-              pUUnaryOp :: PI (Unresolved Inst)
+              pUUnaryOp :: PI Inst
               pUUnaryOp = do
                 dst <- pDstUR
                 src0 <- pSymbol "," >> pSrcURI
                 pComplete [dst] [src0]
 
-              pS2XROp :: PI Dst -> PI (Unresolved Inst)
+              pS2XROp :: PI Dst -> PI Inst
               pS2XROp pDst = do
                 dst <- pDst
                 src <- pSymbol "," >> pSrcSR
-                pComplete [dst] [resolved src]
+                pComplete [dst] [src]
 
               -- CS2R and S2R
-              pSR2RFamily :: PI (Unresolved Inst)
+              pSR2RFamily :: PI Inst
               pSR2RFamily = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcSR
-                pComplete [dst] [resolved src0]
+                pComplete [dst] [src0]
 
               --  IMNMX   R3, R0, 0x4, !PT {!4,Y,^1};
-              pSelectOp :: PI (Unresolved Inst)
+              pSelectOp :: PI Inst
               pSelectOp = do
                 dst <- pDst
                 srcs <- pSymbol "," >> pSrc_RX_XR
-                src2_pr <- pSymbol "," >> resolved <$> pSrcP
+                src2_pr <- pSymbol "," >> pSrcP
                 pComplete [dst] (srcs ++ [src2_pr])
 
               -- a simple binary op without fancy stuff
               --   e.g. BMSK
-              pBinaryOp :: PI (Unresolved Inst)
+              pBinaryOp :: PI Inst
               pBinaryOp = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcR
                 src1 <- pSymbol "," >> pSrcX
-                pComplete [dst] [resolved src0,src1]
+                pComplete [dst] [src0,src1]
 
               -- a simple binary op without fancy stuff
               --   e.g. BMSK    R22, R19,  R22
-              pBinaryOpRR :: PI (Unresolved Inst)
+              pBinaryOpRR :: PI Inst
               pBinaryOpRR = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcR
                 src1 <- pSymbol "," >> pSrcR
-                pComplete [dst] (resolveds [src0,src1])
+                pComplete [dst] [src0,src1]
 
               -- HADD2, HMUL2
-              pBinaryOpH2 :: PI (Unresolved Inst)
+              pBinaryOpH2 :: PI Inst
               pBinaryOpH2 = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcRH2
                 src1s <- pSymbol "," >> pSrcXH2s
-                pComplete [dst] (resolveds $ src0:src1s)
+                pComplete [dst] (src0:src1s)
 
               -- simple ternary ops (no predicates/carry out/carry)
-              pTernaryOp :: PI (Unresolved Inst)
+              pTernaryOp :: PI Inst
               pTernaryOp = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcR
                 src12 <- pSymbol "," >> pSrc_RX_XR
-                pComplete [dst] (resolved src0:src12)
+                pComplete [dst] (src0:src12)
 
-              pTernaryOpH2 :: PI (Unresolved Inst)
+              pTernaryOpH2 :: PI Inst
               pTernaryOpH2 = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcRH2
-                let pXR :: PI [Unresolved Src]
+                let pXR :: PI [Src]
                     pXR = do
                       src1s <- pSymbol "," >> pSrcXH2s
                       src2 <- pSymbol "," >> pSrcRH2
-                      return $ resolveds $ src1s ++ [src2]
-                    pRX :: PI [Unresolved Src]
+                      return (src1s ++ [src2])
+                    pRX :: PI [Src]
                     pRX = do
                       src1 <- pSymbol "," >> pSrcRH2
                       src2s <- pSymbol "," >> pSrcXH2s
-                      return $ resolveds (src1:src2s)
+                      return (src1:src2s)
                 src12s <- P.try pXR <|> pRX
-                pComplete [dst] (resolved src0:src12s)
+                pComplete [dst] (src0:src12s)
 
               -- e.g. HMMA/DMMA uses all R
-              pTernaryOpRRR :: PI (Unresolved Inst)
+              pTernaryOpRRR :: PI Inst
               pTernaryOpRRR = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcR
                 src1 <- pSymbol "," >> pSrcR
                 src2 <- pSymbol "," >> pSrcR
-                pComplete [dst] (resolveds [src0,src1,src2])
+                pComplete [dst] [src0,src1,src2]
 
               -- e.g. DSETP/FSETP
-              pSETP :: PI (Unresolved Inst)
+              pSETP :: PI Inst
               pSETP = do
                 dst0 <- pDstP
                 dst1 <- pSymbol "," >> pDstP
-                src0 <- pSymbol "," >> resolved <$> pSrcR
+                src0 <- pSymbol "," >> pSrcR
                 src1 <- pSymbol "," >> pSrcX
-                src2 <- pSymbol "," >> resolved <$> pSrcP
+                src2 <- pSymbol "," >> pSrcP
                 pComplete [dst0,dst1] [src0,src1,src2]
 
-              pLDX :: PI (Unresolved Inst)
-              pLDX = pLdOp  loc prd op ios
-              pSTX :: PI (Unresolved Inst)
-              pSTX = pStOp loc prd op ios
-              pATX :: PI (Unresolved Inst)
-              pATX = pAtOp loc prd op ios
+              pLDX :: PI Inst
+              pLDX = do
+                let pDstPred = do
+                      p <- pDstP
+                      pSymbol_ ","
+                      return [p]
+                dst_p <- if InstOptZD`iosElem`ios then pDstPred else return []
+                dst_r <- pDstR
+
+                (r_addr,ur_off,i_off) <- pSymbol "," >> pLDST_Addrs op
+                -- TODO: fix the IR list length
+                pComplete (dst_p++[dst_r]) [r_addr,ur_off,i_off]
+
+              pATX :: PI Inst
+              pATX = do
+                dsts <- pDstsP_R
+                (r_addr,ur_off,i_off) <- pSymbol "," >> pLDST_Addrs op
+                -- src1, src2 are absent depending on how many operands the atomic has
+                -- e.g. CAS has two
+                src1 <- P.option sRC_RZ $ pSymbol "," >> pBareSrcR
+                src2 <- P.option sRC_RZ $ pSymbol "," >> pBareSrcR -- CAS has extra param
+                pComplete dsts [r_addr,ur_off,i_off,src1,src2]
+
+              pSTX :: PI Inst
+              pSTX = do
+                (r_addr,ur_off,i_off) <- pLDST_Addrs op
+                r_data <- pSymbol "," >> pBareSrcR
+                pComplete [] [r_addr,ur_off,i_off,r_data]
 
               -- TEX, TLD
               --
-              -- starts just before the comma preceding
-              -- the soup of trailing parameters
+              -- starts just before the comma preceding the soup of trailing parameters
               -- TEX.SCR.B.LL     R4,  R6,  R12, R4,             2D {!1,Y,+6.W,^6};
               --                                   ^
               -- TEX.SCR.LL       RZ,  R2,  R2,  R4,  0x0, 0x5e, ARRAY_2D, 0x1 {!1,Y,+6.W};
               --                                   ^
               -- TLD.SCR.LZ  RZ, R8, R18, 0x0, 0x64, 1D, 0x3 {!3,Y};
               --                        ^
-              pTextureOp :: Dst -> [Src] -> PI (Unresolved Inst)
+              pTextureOp :: Dst -> [Src] -> PI Inst
               pTextureOp dst srcs = do
                 -- maybe a pair of imm
                 pSymbol ","
@@ -229,7 +317,7 @@ pInstNoPrefix pc = body
                       return ([src3a,src3b],src4)
                 (src3s,src4) <- P.try pNoImms <|> pImmsFirst
                 src5_opt <- P.option [] $ pSymbol "," >> box <$> pSrcI32 op
-                pComplete [dst] (resolveds $ srcs ++ src3s ++ [src4] ++ src5_opt)
+                pComplete [dst] (srcs ++ src3s ++ [src4] ++ src5_opt)
 
           --
           case op of
@@ -237,7 +325,7 @@ pInstNoPrefix pc = body
               -- ARRIVES.LDGSTSBAR.64 [URZ+0x800]
               -- disassembler permits R#
               (r_addr,ur_off,i_off) <- pLDST_Addrs op
-              pComplete [] (resolveds [r_addr,ur_off,i_off])
+              pComplete [] [r_addr,ur_off,i_off]
 
             ld_st_op
               | oIsAT op -> pATX
@@ -256,7 +344,7 @@ pInstNoPrefix pc = body
             OpB2R -> do
               dst <- pDstR -- [23:16]
               src0 <- P.option sRC_PT $ pSymbol "," >> (pSrcP <|> pSrcI8)
-              pComplete [dst] [resolved src0]
+              pComplete [dst] [src0]
 
             --                                   [57:54]  [53:42]  [90:87]
             --       BAR.SYNC                     0x0      [0x0]        {!6};
@@ -277,7 +365,7 @@ pInstNoPrefix pc = body
                     src2 <- P.option sRC_PT $ pSymbol "," >> pSrcP
                     return [src0,sRC_I32_0,src2]
               srcs <- P.option [sRC_I32_0,sRC_I32_0,sRC_PT] $ P.try pIIX <|> pIX
-              pComplete [] (resolveds srcs)
+              pComplete [] srcs
 
             -- Move Convergence Barrier State
             --                  DST  SRC0   SRC1
@@ -288,7 +376,7 @@ pInstNoPrefix pc = body
               dsts <- P.option [] $ box <$> pDstR <* pSymbol "," -- [23:16]
               src0 <- pSrcB -- [29:24]
               maybe_src1 <- P.option [] $ box <$> (pSymbol "," >> pSrcR) -- [39:32]
-              pComplete dsts $ resolveds (src0:maybe_src1)
+              pComplete dsts (src0:maybe_src1)
 
             --
             --               DST  SRC0  SRC1
@@ -307,12 +395,12 @@ pInstNoPrefix pc = body
             -- BPT.TRAP         0x1 {!5,^1};
             OpBPT -> do
               src0 <- pSrcI32 op
-              pComplete [] [resolved src0]
+              pComplete [] [src0]
 
-            -- @!P0  BRA            `(.L_1) {!5};
-            -- @!P1  BRA      !P2,  `(.L_18) {!5};
-            --       BRA.DIV  ~URZ, `(.L_989) {!6};
-            -- @!P4  BRA.INC         0x210 {!12,Y}
+            -- @!P0  BRA                 `(.L_1) {!5};
+            -- @!P1  BRA      !P2,       `(.L_18) {!5};
+            --       BRA.DIV       ~URZ, `(.L_989) {!6};
+            -- @!P4  BRA.INC             0x210 {!12,Y}
             --
             -- label [81:64]:[63:32]
             -- also
@@ -322,14 +410,14 @@ pInstNoPrefix pc = body
             OpBRA -> do
               maybe_src_pr <- P.option [] $ box <$> (pSrcP <* pSymbol ",")
               src0 <- pSrcLbl pc op
-              pComplete [] (resolveds maybe_src_pr ++ [src0])
+              pComplete [] (maybe_src_pr ++ [src0])
 
             -- @!P1  BREAK            !P2, B1 {!1};
             -- src predicate is [90:87] and PT 0b0111 is the default
             OpBREAK -> do
               src_pr <- P.option sRC_PT $ (pSrcP <* pSymbol ",")
               src0 <- pSrcB
-              pComplete [] (resolveds [src_pr, src0])
+              pComplete [] [src_pr, src0]
 
             -- BRX      R8  -0x1a50 {!5};
             -- BRX !P6, R12 -0xb50 {!5};
@@ -338,7 +426,7 @@ pInstNoPrefix pc = body
               src0 <- pSrcR
               -- no comma
               src1 <- pSrcI32 op
-              pComplete [] (resolveds [src_pr, src0, src1])
+              pComplete [] [src_pr, src0, src1]
 
             -- BRXU         UR4 -0x1840 {!5,Y};
             -- BRXU     P6, UR4 -0x1840 {!5,Y};
@@ -348,21 +436,21 @@ pInstNoPrefix pc = body
               src0 <- pSrcUR
               -- no comma
               src1 <- pSrcI32 op
-              pComplete [] (resolveds [src_pr,src0, src1])
+              pComplete [] [src_pr,src0, src1]
 
             -- BSSY             B0, `(.L_31) {!12,Y};
             OpBSSY -> do
               src0 <- pSrcB
               pSymbol ","
               src1 <- pSrcLbl pc op
-              pComplete [] (resolved src0:[src1])
+              pComplete [] [src0,src1]
 
             -- BSYNC      B1 {!5}; // PT implied
             -- BSYNC !P5, B2 {!5};
             OpBSYNC -> do
               src0 <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
               src1 <- pSrcB
-              pComplete [] $ resolveds [src0,src1]
+              pComplete [] [src0,src1]
 
             -- CALL.ABS.NOINC   `(cudaLaunchDeviceV2) {!5,Y,^1};
             --
@@ -377,7 +465,7 @@ pInstNoPrefix pc = body
               src0_p <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
               src1_ru <- P.option sRC_RZ $ pSrcR <|> pSrcUR
               src2 <- pSrcLbl pc op
-              pComplete [] [resolved src0_p,resolved src1_ru,src2]
+              pComplete [] [src0_p,src1_ru,src2]
 
             --   CCTL.IVALL        {!5,Y};
             --   CCTL.U.IVALL      {!5,Y};
@@ -405,7 +493,7 @@ pInstNoPrefix pc = body
                   src1_imm <- P.option sRC_I32_0 $ SrcI32 . fromIntegral <$> pIntTerm
                   pSymbol "]"
                   return [src0,src1_imm]
-              pComplete [] $ resolveds srcs
+              pComplete [] srcs
 
             --      CS2R     R6, SRZ {!1};
             --      CS2R.32  R5, SR_CLOCKLO {!7,Y,^2};
@@ -436,7 +524,7 @@ pInstNoPrefix pc = body
                   bs <- P.many $ pSymbol "," >> pBitIx
                   pSymbol "}"
                   return (SrcI32 (foldl' setBit 0 (b0:bs)))
-              pComplete [] (resolveds [src0, src1, src2])
+              pComplete [] [src0, src1, src2]
 
             -- DFMA        R8,   R36, R36, R8  {!6,Y,+1.W,^1};
             -- DFMA        R10,  R6,  R10, 0.5 {!4,Y,^1};
@@ -503,7 +591,7 @@ pInstNoPrefix pc = body
               dst <- pDstP
               src0 <- pSymbol "," >> pSrcR
               src1 <- pSymbol "," >> pSrcX
-              pComplete [dst] (resolved src0:[src1])
+              pComplete [dst] [src0,src1]
 
             -- @!P1  FFMA         R39, R39, R10, R2 {!2};
             --       FFMA         R10, -R3.reuse, R5, R6 {!2};
@@ -565,7 +653,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcRH2
               src1s <- pSymbol "," >> pSrcXH2s
               src_p <- pSymbol "," >> pSrcP
-              pComplete [dst] (resolveds $ src0:src1s ++ [src_p])
+              pComplete [dst] (src0:src1s ++ [src_p])
 
             -- I think:         DST  DST  DST        SRC0        [SRC1]     SRCPR
             --  HSETP2.NE.AND    P1,  PT,  R64,       RZ,                      PT {!2};
@@ -582,7 +670,7 @@ pInstNoPrefix pc = body
               src1s <- pSymbol "," >> pSrcXH2s
               src_p <- pSymbol "," >> pSrcP
               --
-              pComplete dsts (resolveds ([src0] ++ src1s ++ [src_p]))
+              pComplete dsts (src0:src1s ++ [src_p])
 
             -- I2F           R4,  R16 {!1,+2.W,+1.R}; // examples/sm_80/samples/BezierLineCDP.sass:1739
             -- I2F.U32.RP    R4,  0x20 {!1,+1.W};   // examples/sm_80/samples/bf16TensorCoreGemm.sass:7074
@@ -605,7 +693,7 @@ pInstNoPrefix pc = body
                   pSrcUR_WithModSuffixes byte_selectors <|>
                   pSrcCCX_WithSfx <|>
                   pSrcInt32
-              pComplete [dst] [resolved src]
+              pComplete [dst] [src]
 
 
             -- I2I.U16.S32.SAT  R10, R10 {!2};        // examples/sm_80/libs/nppial64_11/Program.28.sm_80.sass:142955
@@ -648,7 +736,7 @@ pInstNoPrefix pc = body
                   return (ci1,ci2)
               pComplete
                 [dst,dst_co1,dst_co2]
-                ([resolved src0] ++ src12s ++ resolveds [src_ci1,src_ci2])
+                ([src0] ++ src12s ++ [src_ci1,src_ci2])
 
             -- IDP.4A.U8.S8 R69, R37, c[0x2][0x0], R40 {!1}
             --
@@ -688,8 +776,7 @@ pInstNoPrefix pc = body
               src12s <- pSymbol "," >> pSrc_RX_XR
               src3_ci <- P.option sRC_NPT $ P.try $ pSymbol "," >> pSrcP
               --
-              pComplete [dst,dst_co] $
-                resolved src0:src12s ++ [resolved src3_ci]
+              pComplete [dst,dst_co] $ (src0:src12s ++ [src3_ci])
 
             -- IMMA.16816.U8.U8 R8, R2.reuse.ROW, R26.COL, R8 {!4,+2.W,+1.R,^3};
             OpIMMA -> do
@@ -697,7 +784,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcR_MMA
               src1 <- pSymbol "," >> pSrcR_MMA
               src2 <- pSymbol "," >> pSrcR
-              pComplete [dst] $ resolveds [src0,src1,src2]
+              pComplete [dst] [src0,src1,src2]
 
             --       IMNMX       R2,  R2, c[0x0][0x174], !PT {!4,Y}; // examples/sm_80/samples/boxFilter_kernel.sass:10553
             -- @P0   IMNMX.U32   R12, R8, R13, PT {!2,^3};
@@ -717,12 +804,12 @@ pInstNoPrefix pc = body
             OpISETP -> do
               dst0 <- pDstP
               dst1 <- pSymbol "," >> pDstP
-              src0 <- pSymbol "," >> resolved <$> pSrcR
+              src0 <- pSymbol "," >> pSrcR
               src1 <- pSymbol "," >> pSrcX
-              src2 <- pSymbol "," >> resolved <$> pSrcP
+              src2 <- pSymbol "," >> pSrcP
               -- .EX has an extra predicate
               src3 <- P.option sRC_PT $ pSymbol "," >> pSrcP -- 0b0111 (PT) if not set
-              pComplete [dst0,dst1] [src0,src1,src2,resolved src3]
+              pComplete [dst0,dst1] [src0,src1,src2,src3]
 
             --       LD.E        R4,   [R10.64] {!4,+3.W}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7204
             -- @!P2  LD.E.128    R136, [R172+0x80] {!2,+6.W,+2.R}; // examples/sm_80/libs/cusolver64_10/Program.2641.sm_80.sass:181621
@@ -742,7 +829,7 @@ pInstNoPrefix pc = body
             OpLDC -> do
               dst <- pDstR <* pSymbol ","
               srcs <- pXLdcSrcs pSrcR SrcRZ
-              pComplete [dst] (resolveds srcs)
+              pComplete [dst] srcs
 
             -- LDG.E       R7,   [R4.64] {!4,+3.W}; // examples/sm_80/samples/alignedTypes.sass:3280
             -- LDG.E.128   R128, [R114.64+0x50000] {!4,+4.W,^1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:10134
@@ -767,7 +854,7 @@ pInstNoPrefix pc = body
               pSymbol ","
               (r_addr,ur_off,i_off) <- pLDST_Addrs op
               src_p <- P.option sRC_PT $ pSymbol "," >> pSrcP
-              pComplete [] (resolveds [src0,SrcI32 imm,r_addr,ur_off,i_off,src_p])
+              pComplete [] [src0,SrcI32 imm,r_addr,ur_off,i_off,src_p]
 
             -- @P0   LDL.U8           R15, [R4+0x6] {!4,+5.W}; // examples/sm_80/libs/nvjpeg64_11/Program.36.sm_80.sass:39875
             --       LDL.LU           R38, [R1+0x14] {!4,+6.W,+1.R}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3108769
@@ -805,7 +892,7 @@ pInstNoPrefix pc = body
               --
               pComplete
                 [dst,dst_co]
-                [resolved src0,src1,resolved src2,resolved src3,resolved src4_ci]
+                [src0,src1,src2,src3,src4_ci]
 
             -- LEPC R130 {!2,^4}
             OpLEPC -> do
@@ -821,10 +908,10 @@ pInstNoPrefix pc = body
               --
               src0 <- pSymbol "," >> pSrcR
               src12s <- pSymbol "," >> pSrc_RX_XR
-              src3_lut <- pSymbol "," >> pLop3LutOptSrc m_lop3_opt
+              src3_lut <- pSymbol "," >> pLop3LutOptSrc
               src4 <- pSymbol "," >> pSrcP
               --
-              pComplete dsts (resolved src0:src12s ++ resolveds [src3_lut,src4])
+              pComplete dsts (src0:src12s ++ [src3_lut,src4])
 
             -- MATCH.ALL         R18, R34
             -- MATCH.ANY         R18, R34
@@ -833,7 +920,7 @@ pInstNoPrefix pc = body
             OpMATCH -> do
               dsts <- pDstsP_R
               src <- pSrcR
-              pComplete dsts [resolved src]
+              pComplete dsts [src]
 
             --       MEMBAR.ALL.GPU    {!6};   // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:2811
             -- @P5   MEMBAR.GPU        {!6};   // examples/sm_80/libs/cusolver64_10/Program.2588.sm_80.sass:124843
@@ -847,7 +934,7 @@ pInstNoPrefix pc = body
               dst <- pDstR
               src0 <- pSymbol "," >> pSrcX
               src1 <- P.option sRC_I32_15 $ pSymbol "," >> pSrcI8
-              pComplete [dst] $ [src0,resolved src1]
+              pComplete [dst] $ [src0,src1]
 
             -- MOVM.16.MT88     R12, R13 {!4,+1.W,+2.R,^3}; // examples/sm_80/libs/cusolver64_10/Program.2634.sm_80.sass:2866
             --
@@ -889,7 +976,7 @@ pInstNoPrefix pc = body
               pSymbol "," >> pSymbol "PR"
               src0 <- pSymbol "," >> pSrcR
               src1 <- pSymbol "," >> pSrcX
-              pComplete [dst] [resolved src0,src1]
+              pComplete [dst] [src0,src1]
 
             -- PLOP3.((s0|s1)&s2) P0, PT, P0, P1, PT, 0xa8, 0x0 {!13,Y};
             -- PLOP3.(s0&s1&s2)   P0, PT, PT, PT, UP0, 0x80, 0x0 {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9440
@@ -900,10 +987,10 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcP
               src1 <- pSymbol "," >> (pSrcP <|> pSrcUP)
               src2 <- pSymbol "," >>  (pSrcP <|> pSrcUP)
-              src3_lut <- pSymbol "," >> pLop3LutOptSrc m_lop3_opt -- [??]
+              src3_lut <- pSymbol "," >> pLop3LutOptSrc -- [??]
               src4_unk <- pSymbol "," >> pSrcI8 -- bits [23:16]
               --
-              pComplete [dst0,dst1] (resolveds [src0,src1,src2,src3_lut,src4_unk])
+              pComplete [dst0,dst1] [src0,src1,src2,src3_lut,src4_unk]
 
             -- @P0   POPC   R0, R3 {!2,+1.W};     // examples/sm_80/samples/cdpQuadtree.sass:8186
             --       POPC   R5, UR6 {!1,+2.W};    // examples/sm_80/libs/nppif64_11/Program.42.sm_80.sass:3462
@@ -916,7 +1003,7 @@ pInstNoPrefix pc = body
               dst <- pDstR
               src0 <- pSymbol "," >> pSrcR
               src12s <- pSymbol "," >> pSrc_RX_XR
-              pComplete [dst] $ resolved src0:src12s
+              pComplete [dst] (src0:src12s)
 
             -- QSPC.E.S   P1, RZ, [R12] {!2,+1.W};
             -- QSPC.E.G   P1, RZ, [R12] {!2,+1.W};
@@ -926,7 +1013,7 @@ pInstNoPrefix pc = body
             OpQSPC -> do
               dsts <- pDstsP_R
               (r_addr,ur_off,i_off) <- pSymbol "," >> pLDST_Addrs op
-              pComplete dsts (resolveds [r_addr,ur_off,i_off])
+              pComplete dsts [r_addr,ur_off,i_off]
 
             -- @P0  R2P  PR, R167.B1,  0x18 {!2};
             --      R2P  PR, R32,      0x7e {!13,Y}; // examples/sm_80/samples/MonteCarlo_kernel.sass:27677
@@ -938,7 +1025,7 @@ pInstNoPrefix pc = body
               pSymbol "PR" -- this always seems to be present, but I can't make it wiggle
               src0 <- pSymbol "," >> pSrcR_WithModSuffixes [ModB1,ModB2,ModB3,ModREU] -- [31:24]
               src1 <- pSymbol "," >> pSrcX -- R, C, I  ([63:32])
-              pComplete [] ([resolved src0, src1])
+              pComplete [] [src0, src1]
 
             -- @P3   R2UR     UR18, R4 {!8,+4.W,+2.R,^4};
             --       R2UR     UR5,  R13 {!1,+4.W,+2.R,^2}; // examples/sm_80/libs/cublas64_11/Program.1001.sm_80.sass:10784
@@ -950,7 +1037,7 @@ pInstNoPrefix pc = body
               dst_p <- P.option dST_PT $ pDstP <* pSymbol ","
               dst <- pDstUR
               src <- pSymbol "," >> pSrcR
-              pComplete [dst] [resolved src]
+              pComplete [dst] [src]
 
             -- RED.E.ADD.STRONG.GPU            [R4.64],      R11 {!4,+1.R};
             -- RED.E.ADD.F32.FTZ.RN.STRONG.GPU [R20.64+0x4], R2 {!5,+2.R};
@@ -975,7 +1062,7 @@ pInstNoPrefix pc = body
               (src0_addr,src0_ur_off,src0_i_off) <- pLDST_Addrs op
               pSymbol ","
               src1 <- pSrcR
-              pComplete [] (resolveds [src0_addr,src0_ur_off,src0_i_off,src1])
+              pComplete [] [src0_addr,src0_ur_off,src0_i_off,src1]
 
             -- REDUX.SUM.S32     UR6, R4 {!2,+1.W};
             -- REDUX.MAX.S32     UR6, R3 {!1,+1.W};
@@ -985,7 +1072,7 @@ pInstNoPrefix pc = body
             OpREDUX -> do
               dst <- pDstUR <* pSymbol ","
               src0 <- pSrcR
-              pComplete [dst] [resolved src0]
+              pComplete [dst] [src0]
 
             -- RET.ABS.NODEC    R20 0x0 {!5,^1};
             -- RET.REL.NODEC    R2 `(_Z27compute_bf16gemm_async_copyPK13__nv_bfloat16S1_PKfPfff) {!5}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9638
@@ -998,7 +1085,7 @@ pInstNoPrefix pc = body
               src1 <- pSrcR
               -- no comma
               src2 <- pSrcLbl pc op
-              pComplete [] [resolved src0,resolved src1,src2]
+              pComplete [] [src0,src1,src2]
 
             --       S2R  R3, SR_TID.X {!2,+1.W}; // examples/sm_80/samples/alignedTypes.sass:3463
             OpS2R -> pS2XROp pDstR
@@ -1039,7 +1126,7 @@ pInstNoPrefix pc = body
               src1 <- pSymbol "," >> pSrcX -- technically only R|I
               src2 <- pSymbol "," >> pSrcX -- technically only R|I
               --
-              pComplete [dst0,dst1] [resolved src0,src1,src2]
+              pComplete [dst0,dst1] [src0,src1,src2]
 
             --       ST.E   [R18.64], R23 {!4,+1.R,^3}; // examples/sm_80/samples/cdpQuadtree.sass:8603
             OpST -> pSTX
@@ -1063,8 +1150,7 @@ pInstNoPrefix pc = body
               src1 <- pSrcR <* pSymbol ","
               src2 <- pSrcImmNonBranch32 op
               src3s <- P.option [] $ box <$> (pSymbol "," >> pSrcImmNonBranch32 op)
-              pComplete [] $
-                resolveds ([src0_r_addr,src0_ur_off,src0_i_off] ++ src3s)
+              pComplete [] (src0_r_addr:src0_ur_off:src0_i_off:src3s)
 
             -- TEX.SCR.LL.NODEP R14, R16, R14, R20, 0x0, 0x5a, 2D      {!1,Y}
             -- TEX.SCR.LL       RZ,  R7,  R6,  R18, 0x0, 0x58, 2D, 0x1 {!3,Y,+6.W};
@@ -1129,7 +1215,7 @@ pInstNoPrefix pc = body
                   src_ci1 <- pSymbol "," >> pSrcUP
                   src_ci2 <- pSymbol "," >> pSrcUP
                   return [src_ci1,src_ci2]
-              pComplete (dst:dst_cos) (resolved src0:src1:resolved src2:resolveds src_cis)
+              pComplete (dst:dst_cos) (src0:src1:src2:src_cis)
 
             --                  DST  CO1    SRC0  SRC1          SRC2   CI1
             -- UIMAD            UR6,        UR6,  0xc0,         URZ          {!2};
@@ -1151,7 +1237,7 @@ pInstNoPrefix pc = body
               --
               pComplete
                 [dst,dst_co]
-                [resolved src0,src1,resolved src2,resolved src_ci]
+                [src0,src1,src2,src_ci]
 
             -- UISETP.GE.AND     UP0, UPT, UR6,  UR8,   UPT      {!2}; // examples/sm_80/samples/bilateral_kernel.sass:1602
             -- UISETP.NE.AND.EX  UP1, UPT, UR30, 0x1,   UPT, UP0 {!2}; // examples/sm_80/libs/cusolver64_10/Program.2624.sm_80.sass:266602
@@ -1163,19 +1249,19 @@ pInstNoPrefix pc = body
             OpUISETP -> do
               dst0 <- pDstUP
               dst1 <- pSymbol "," >> pDstUP
-              src0 <- pSymbol "," >> resolved <$> pSrcUR
+              src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
-              src2 <- pSymbol "," >> resolved <$> pSrcUP
+              src2 <- pSymbol "," >> pSrcUP
               -- .EX has an extra predicate
               src3 <- P.option sRC_UPT $ pSymbol "," >> pSrcUP -- 0b0111 (PT) if not set
-              pComplete [dst0,dst1] [src0,src1,src2,resolved src3]
+              pComplete [dst0,dst1] [src0,src1,src2,src3]
 
             -- ULDC       UR5, c[0x0][0x160] {!1}; // examples/sm_80/libs/cublas64_11/Program.224.sm_80.sass:54823
             -- ULDC.64    UR4, c[0x0][0x118] {!2}; // examples/sm_80/libs/cublas64_11/Program.224.sm_80.sass:56237
             OpULDC -> do
               dst <- pDstUR
               srcs <- pSymbol "," >> pXLdcSrcs pSrcUR SrcURZ
-              pComplete [dst] (resolveds srcs)
+              pComplete [dst] srcs
 
             --                  DST  CO   SRC0  SRC1       SRC2  shift CI
             -- ULEA             UR15,     UR16, UR10,            0x3       {!4,Y,^1};
@@ -1196,9 +1282,7 @@ pInstNoPrefix pc = body
               src3_sh <- pSymbol "," >> pSrcI8
               src4_ci <- P.option sRC_UPF $ pSymbol "," >> pSrcUP
               --
-              pComplete
-                [dst,dst_p]
-                (resolved src0:src1:resolveds [src2,src3_sh,src4_ci])
+              pComplete [dst,dst_p] [src0,src1,src2,src3_sh,src4_ci]
 
             --                  DST   SRC0
             -- UMOV             UR5,  URZ    {!10,Y};
@@ -1215,17 +1299,16 @@ pInstNoPrefix pc = body
             -- ULOP3.(s0&s1)         UR7,  UR9, 0xffffffe0, URZ, 0xc0, !UPT {!2};
             -- ULOP3.LUT.PAND  UP2,  UR4,  UR4, UR5,        URZ, 0xc0, !UPT ...
             OpULOP3 -> do
-              dst_p <- P.option [dST_UPT] $ do
-                box <$> pDstUP <* pSymbol ","
+              dst_p <- P.option dST_UPT $ pDstUP <* pSymbol ","
               dst <- pDstUR
               --
               src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
               src2 <- pSymbol "," >> pSrcUR
-              src3_lut <- pSymbol "," >> pLop3LutOptSrc m_lop3_opt
+              src3_lut <- pSymbol "," >> pLop3LutOptSrc
               src4_pr <- pSymbol "," >> pSrcUP
               --
-              pComplete (dst_p++[dst]) (resolved src0:src1:resolveds [src2,src3_lut,src4_pr])
+              pComplete [dst_p,dst] [src0,src1,src2,src3_lut,src4_pr]
 
             -- UPLOP3.LUT       UP0, UPT, UPT, UPT, UPT, 0x80, 0x0 {!3,Y};
             --
@@ -1238,10 +1321,10 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcUP
               src1 <- pSymbol "," >> pSrcUP
               src2 <- pSymbol "," >> pSrcUP
-              src3_lut <- pSymbol "," >> pLop3LutOptSrc m_lop3_opt -- [??]
+              src3_lut <- pSymbol "," >> pLop3LutOptSrc -- [??]
               src4_unk <- pSymbol "," >> pSrcI8 -- bits [23:16]
               --
-              pComplete [dst0,dst1] (resolveds [src0,src1,src2,src3_lut,src4_unk])
+              pComplete [dst0,dst1] [src0,src1,src2,src3_lut,src4_unk]
 
             -- UPOPC   UR10, UR7 {!4,Y};     // examples/sm_80/libs/cublas64_11/Program.217.sm_80.sass:40870
             -- UPOPC   UR4,  0x4 {!4,Y};
@@ -1254,7 +1337,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
               src2 <- pSymbol "," >> pSrcUR
-              pComplete [dst] [resolved src0,src1,resolved src2]
+              pComplete [dst] [src0,src1,src2]
 
             -- USEL   UR4,  UR4,  UR6, !UP0 {!2}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4908
             -- USEL   UR4,  UR4,  0x6, !UP0 {!2};
@@ -1263,7 +1346,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
               src2_p <- pSymbol "," >> pSrcUP
-              pComplete [dst] [resolved src0,src1,resolved src2_p]
+              pComplete [dst] [src0,src1,src2_p]
 
             -- USGXT       UR4, UR4, 0x18 {!6,Y,^1}; // examples/sm_80/samples/convolutionTexture.sass:984
             -- USGXT       UR4, UR5, UR24 {!3,Y,^2};
@@ -1272,7 +1355,7 @@ pInstNoPrefix pc = body
               dst <- pDstUR
               src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
-              pComplete [dst] [resolved src0,src1]
+              pComplete [dst] [src0,src1]
 
             -- USHF.L.U32     UR6, UR5,  0x3, URZ {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7765
             -- USHF.R.S32.HI  UR8, URZ, 0x1f, UR7 {!2,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:8324
@@ -1281,7 +1364,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
               src2 <- pSymbol "," >> pSrcUR
-              pComplete [dst] [resolved src0,src1,resolved src2]
+              pComplete [dst] [src0,src1,src2]
 
             --                DST   DST?
             --    VOTE.ANY    R5,   PT,  P1 {!4,Y};
@@ -1290,7 +1373,7 @@ pInstNoPrefix pc = body
               dst <- pDstR
               dst_p <- pSymbol "," >> pDstP -- dst I think [83:81]
               src0 <- pSymbol "," >> pSrcP -- [90:87]
-              pComplete [dst,dst_p] [resolved src0]
+              pComplete [dst,dst_p] [src0]
 
             --    VOTEU.ANY   UR36, UPT,  PT {!1};   // examples/sm_80/samples/cdpAdvancedQuicksort.sass:3566
             --    VOTEU.ALL   UR4,  UPT,  PT {!1};    // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4529
@@ -1299,7 +1382,7 @@ pInstNoPrefix pc = body
               dst <- pDstUR
               dst_p <- pSymbol "," >> pDstUP -- dst I think [83:81]
               src0 <- pSymbol "," >> pSrcP -- [90:87]
-              pComplete [dst,dst_p] [resolved src0]
+              pComplete [dst,dst_p] [src0]
 
             --       WARPSYNC                0xffffffff {!4};
             -- @!P2  WARPSYNC                0xffffffff {!4};
@@ -1313,7 +1396,7 @@ pInstNoPrefix pc = body
             OpWARPSYNC -> do
               src0 <- P.option sRC_PT $ pSrcP <* pSymbol ","
               src1 <- pSrcX
-              pComplete [] [resolved src0,src1]
+              pComplete [] [src0,src1]
 
             --          YIELD       {!1};
             --          YIELD   !P5 {!1};
@@ -1330,124 +1413,10 @@ pInstNoPrefix pc = body
                     pWhiteSpace
                     return sRC_PT
               src0 <- P.option sRC_PT $ P.try (pRelocator <|> pSrcP) -- [90:87]
-              pComplete [] [resolved src0]
+              pComplete [] [src0]
 
             -- TODO: disable and force everything through a pre-chosen path
-            _ -> do
-              pSemanticError loc $ "unsupported op"
-              -- dsts <- pDsts op
-              -- unless (null dsts) $ do
-              --   pSymbol_ ","
-              -- unresolved_srcs <- pSrcs pc op
-              -- pComplete dsts unresolved_srcs
-
-        pLdOp :: Loc -> Pred -> Op -> InstOptSet -> PI (Unresolved Inst)
-        pLdOp loc prd op ios = do
-          let pDstPred = do
-                p <- pDstP
-                pSymbol_ ","
-                return [p]
-          dst_p <- if InstOptZD`iosElem`ios then pDstPred else return []
-          dst_r <- pDstR
-          pSymbol_ ","
-          (r_addr,ur_off,i_off) <- pLDST_Addrs op
-
-          pCompleteInst
-            loc prd op ios (dst_p++[dst_r]) (resolveds [r_addr,ur_off,i_off]) []
-
-        pAtOp :: Loc -> Pred -> Op -> InstOptSet -> PI (Unresolved Inst)
-        pAtOp loc prd op ios = do
-          dsts <- pDstsP_R
-          (r_addr,ur_off,i_off) <- pSymbol "," >> pLDST_Addrs op
-          -- sometimes src1, src2 are absent
-          src1 <- P.option sRC_RZ $ pSymbol "," >> pBareSrcR
-          src2 <- P.option sRC_RZ $ pSymbol "," >> pBareSrcR -- CAS has extra param
-          pCompleteInst loc prd op ios dsts (resolveds [r_addr,ur_off,i_off,src1,src2]) []
-
-        pStOp :: Loc -> Pred -> Op -> InstOptSet -> PI (Unresolved Inst)
-        pStOp loc prd op ios = do
-          (r_addr,ur_off,i_off) <- pLDST_Addrs op
-          r_data <- pSymbol "," >> pBareSrcR
-          pCompleteInst loc prd op ios [] (resolveds [r_addr,ur_off,i_off,r_data]) []
-
-        --  R (+ UR) (+ IMM)
-        --       UR  (+ IMM)
-        --       IMM (+ UR)
-        --
-        -- TODO: support for LDS offsets and the other [91:90] stuff
-        pLDST_Addrs :: Op -> PI (Src,Src,Src)
-        pLDST_Addrs op = do
-          let pBareSrcUR :: PI Src
-              pBareSrcUR = pLabel "ureg" $ Src_UR msEmpty <$> pSyntax
-          let pR_UR_IMM = do
-                -- technically LDS/STS don't permit .U32 or .64
-                src_addr <-
-                  if oIsSLM op
-                    then pSrcR_WithModSuffixes [ModX4,ModX8,ModX16]
-                    else pSrcR_WithModSuffixes [ModU32,Mod64]
-                (_,src_ur,src_imm) <-
-                  P.option (sRC_RZ,sRC_URZ,sRC_I32_0) $ do
-                    pSymbol "+"
-                    P.try pUR_IMM <|> pIMM_UR
-                return (src_addr,src_ur,src_imm)
-              pUR_IMM :: PI (Src,Src,Src)
-              pUR_IMM = do
-                ur <- pBareSrcUR
-                imm <- P.option sRC_I32_0 $ pSymbol "+" >> pSrcI32 op
-                return (sRC_RZ,ur,imm)
-              pIMM_UR :: PI (Src,Src,Src)
-              pIMM_UR = do
-                imm <- pSrcI32 op
-                ur <- P.option sRC_URZ $ pSymbol "+" >> pBareSrcUR
-                return (sRC_RZ,ur,imm)
-          pSymbol "["
-          r <- P.try pUR_IMM <|> P.try pIMM_UR <|> pR_UR_IMM
-          pSymbol "]"
-          return r
-
-        -- for LOP3 and PLOP3 we may or may not have the LUT code as a source,
-        -- but we want it to match
-        --
-        -- PLOP3.((s0|s1)&s2) P0, PT, P0, P1, PT, 0xa8, 0x0 {!13,Y};
-        --                                        ^^^^
-        --  LOP3.(s0&s1)    P2,  RZ,  R35, 0x7fffffff,  RZ, 0xc0, !PT {!4,Y}; // examples/sm_75/samples\bilateral_kernel.sass:1557
-        --                                                  ^^^^
-        pLop3LutOptSrc :: Maybe Word8 -> PI Src
-        pLop3LutOptSrc m_lop3_opt =
-          case m_lop3_opt of
-            -- if they didn't give us an explicit code, it better be here
-            Nothing -> pSrcI8
-            Just lop3_opt -> do
-              -- if they gave us a code earlier, it better match
-              -- anything parsed here
-              loc_hex_lut <- pGetLoc
-              m_hex_lut <- P.optionMaybe (pImmA :: PI Word8)
-              case m_hex_lut of
-                Just hex_lut
-                  | hex_lut /= lop3_opt ->
-                    pSemanticError
-                      loc_hex_lut
-                      ("mismatch between inst opt logical option expression and classic-form LUT operand; inst. opt expression evaluates to " ++ printf "0x02X" lop3_opt)
-                _ -> return () -- better that they omit it
-              return (SrcImm (Imm32 (fromIntegral lop3_opt)))
-
-        pModSetSuffixesOptOneOf :: [Mod] -> PI ModSet
-        pModSetSuffixesOptOneOf ms = do
-          let msSingleton s = msFromList [s]
-              opts = map (\m -> ("." ++ drop 3 (show m),m))
-          P.option msEmpty $ msSingleton <$> pOneOf (opts ms)
-
-        -- [Pred, ] Reg
-        pDstsP_R :: PI [Dst]
-        pDstsP_R = do
-          dst_pred <- P.option [] $ P.try $ do
-            p <- pDstP <* pSymbol ","
-            return [p]
-          dst_reg <- pDstR
-          return $ dst_pred ++ [dst_reg]
-
-        pBareSrcR :: PI Src
-        pBareSrcR = pLabel "reg" $ Src_R msEmpty <$> pSyntax
+            _ -> pSemanticError loc $ "unsupported op"
 
         -- up to two predicate sources
         -- pOptPreds = do
@@ -1463,26 +1432,24 @@ pInstNoPrefix pc = body
           Op ->
           InstOptSet ->
           [Dst] ->
-          [Unresolved Src] ->
+          [Src] ->
           [Pred] ->
-          PI (Unresolved Inst)
-        pCompleteInst loc prd op opts dsts unresolved_srcs src_preds = do
+          PI Inst
+        pCompleteInst loc prd op opts dsts srcs src_preds = do
           dep_info <- pDepInfo
           P.try $ pSymbol ";"
-          return $ \lbls -> do
-            srcs <- sequence (map ($lbls) unresolved_srcs)
-            return $
-              Inst {
-                iLoc = loc
-              , iPc = pc
-              , iPredication = prd
-              , iOp = op
-              , iOptions = opts
-              , iDsts = dsts
-              , iSrcs = srcs
-              , iSrcPreds = src_preds
-              , iDepInfo = dep_info
-              }
+          return $
+            Inst {
+              iLoc = loc
+            , iPc = pc
+            , iPredication = prd
+            , iOp = op
+            , iOptions = opts
+            , iDsts = dsts
+            , iSrcs = srcs
+            , iSrcPreds = src_preds
+            , iDepInfo = dep_info
+            }
 
 
 pPred :: PI Pred

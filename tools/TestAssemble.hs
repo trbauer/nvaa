@@ -163,7 +163,7 @@ testParseInst syntax = do
       unless (null ws) $ do
         putStrLn "WARNING:"
         mapM_ (putStrLn . fmtDiag) ws
-      case ui (pisLabelReferences pis) of
+      case evalInst (pisLabelDefinitions pis) ui of
         Left err -> putStrLn $ fmtDiag err
         Right i -> putStrLn $ fmtInstIr i
 
@@ -254,7 +254,7 @@ parseAllOpsInFileK vrb k fp = do
                 when (not (null lrefs) && vrb) $
                   putStrLn $ "induces labels: " ++ show lrefs
                 -- create some fake label references so branches print
-                case ui lrefs of
+                case evalInst lrefs ui of
                   Left d -> do
                     putStrLn "ERROR HERE"
                     putStrLn $ dFormatWithCurrentLine (lno,syntax) d
@@ -383,7 +383,7 @@ parseTestInst pc fp lno inp =
   case parseUnresolvedInst pc fp lno inp of
     Left err -> Left err
     Right (ui,pis,ws) ->
-        case ui (pisLabelReferences pis) of
+        case evalInst (pisLabelReferences pis) ui of
           Left err -> Left err
           Right i -> Right (i,ws)
 

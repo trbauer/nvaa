@@ -1,5 +1,6 @@
 module NVT.IR(
   module NVT.IR.Cubin
+, module NVT.IR.Eval
 , module NVT.IR.Format
 , module NVT.IR.LExpr
 , module NVT.IR.Op
@@ -10,6 +11,7 @@ module NVT.IR(
 
 
 import NVT.IR.Cubin
+import NVT.IR.Eval
 import NVT.IR.Format
 import NVT.IR.LExpr
 import NVT.IR.Op

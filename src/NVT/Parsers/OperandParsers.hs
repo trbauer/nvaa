@@ -30,12 +30,6 @@ pDstUR :: PI Dst
 pDstUR = pLabel "dst unif reg" $ DstUR <$> pSyntax
 
 
-resolved :: a -> Unresolved a
-resolved = const . Right
-resolveds :: [a] -> [Unresolved a]
-resolveds = map resolved
-
-
 -- floating point (fp32 or fp64)
 pSrcRCUF :: PI Src
 pSrcRCUF = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcFlt32
@@ -48,52 +42,16 @@ pSrcRCUF = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcFlt32
 pSrcRCUI :: PI Src
 pSrcRCUI = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcInt32
 
-
--- TODO: remove
-pSrc :: PC -> Op -> PI (Unresolved Src)
-pSrc pc = pWithLoc . pSrcAt pc
-pSrcAt :: PC -> Op -> Loc -> PI (Unresolved Src)
-pSrcAt pc op loc = P.try pNonLabel <|> pSrcLblAt pc op loc
-  where pNonLabel :: PI (Unresolved Src)
-        pNonLabel = alwaysSucceeds <$> pCases
-          where pCases =
-                  P.try pImmNonLabel <|>
-                  pSrcCCX <|>
-                  pSrcR <|>
-                  pSrcSR <|>
-                  pSrcUR <|>
-                  pSrcUP <|>
-                  pSrcP <|>
-                  pSrcB
-
-        pImmNonLabel
-          | oIsBranch op = pSrcI49 op
-          | otherwise = pSrcI32 op
-
-        alwaysSucceeds :: Src -> Unresolved Src
-        alwaysSucceeds src _ = Right (srcIntern src)
-
-pSrcLbl :: PC -> Op -> PI (Unresolved Src)
+pSrcLbl :: PC -> Op -> PI Src
 pSrcLbl pc = pWithLoc . pSrcLblAt pc
-pSrcLblAt :: PC -> Op -> Loc -> PI (Unresolved Src)
-pSrcLblAt pc op loc = pLabel "label expression" $ do
-  e <- pLExpr pc
-  let eval :: Unresolved Src
-      eval lix
-        | oIsBranch op = SrcImm . Imm49 . fromIntegral <$> evalLExpr lix e
-        | otherwise = do
-          val <- evalLExpr lix e
-          if val < -2^31 || val > 2^31-1
-            then Left (dCons loc $ show val ++ ": value overflows 32b imm")
-            else return (SrcI32 (fromIntegral val))
-  -- FIXME: for BR we need to use big op
-  return eval
+pSrcLblAt :: PC -> Op -> Loc -> PI Src
+pSrcLblAt pc op loc = pLabel "label expression" $ SrcImmExpr loc <$> pLExpr pc
 
 
 -- imm32, but can be a symbol too
-pSrcI32OrL32 :: PC -> Op -> PI (Unresolved Src)
+pSrcI32OrL32 :: PC -> Op -> PI Src
 pSrcI32OrL32 pc op = pLabel "imm operand" $
-  P.try (resolved <$> pSrcI32 op) <|> pSrcLbl pc op
+  P.try (pSrcI32 op) <|> pSrcLbl pc op
 
 
 -- LDC wedges src0 into the src1 expression
@@ -421,55 +379,6 @@ pLabelChars = pDotLabel <|> pNonDotLabel
           sfx <- P.many $ P.alphaNum <|> pOtherIdentChar
           return (c0:sfx)
 
-evalLExpr :: LabelIndex -> LExpr -> Either Diagnostic Int64
-evalLExpr lix = eval
-  where eval :: LExpr -> Either Diagnostic Int64
-        eval le =
-          case le of
-            LExprAdd loc ll l2 -> applyBin loc ll l2 (+)
-            LExprSub loc ll l2 -> applyBin loc ll l2 (-)
-            LExprMul loc ll l2 -> applyBin loc ll l2 (*)
-            LExprDiv loc ll l2 -> applyBinDiv loc ll l2 div
-            LExprMod loc ll l2 -> applyBinDiv loc ll l2 mod
-            LExprNeg _ l -> applyUnr l negate
-            LExprCompl _ l -> applyUnr l complement
-            LExprImm _ val -> return val
-            --
-            LExprLo32 _ le -> applyUnr le (.&.0xFFFFFFFF)
-            LExprHi32 _ le -> applyUnr le ((.&.0xFFFFFFFF) . (`shiftR`32))
-            LExprSRel loc soff le ->
-              case eval le of
-                Left d -> Left d
-                Right val -> return (val - soff)
-            LExprFunFDesc _ le ->
-              -- FIXME: implement this at some point
-              -- I don't know what a "function descriptor"
-              eval le
-            --
-            LExprLabel loc sym ->
-              case sym `lookup` lix of
-                Nothing -> err loc $ sym ++ ": unbound symbol"
-                Just val -> return (fromIntegral val)
-
-        applyBin = applyBinG False
-        applyBinDiv = applyBinG True
-
-        applyBinG ::
-          Bool ->
-          Loc ->
-          LExpr -> LExpr -> (Int64 -> Int64 -> Int64) ->
-          Either Diagnostic Int64
-        applyBinG div loc e1 e2 f = do
-          v1 <- eval e1
-          v2 <- eval e2
-          if div && v2 == 0 then err loc "division by 0"
-            else return (f v1 v2)
-
-        applyUnr :: LExpr -> (Int64 -> Int64) -> Either Diagnostic Int64
-        applyUnr le f = f <$> eval le
-
-        err :: Loc -> String -> Either Diagnostic a
-        err loc = Left . dCons loc
 
 
 pIntImm32 :: PI Word32

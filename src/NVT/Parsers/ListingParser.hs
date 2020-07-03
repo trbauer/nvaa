@@ -47,12 +47,7 @@ parseListingG fp inp = do
 pListing :: PI [TextSection]
 pListing = do
   sm_ver <- pListingHeader
-  tss <- sequenceUnresolved . concat <$> P.many pListingElem
-  --
-  ds <- pisLabelDefinitions <$> pGet
-  case tss ds of
-    Left err -> pSemanticErrorRethrow err
-    Right tss -> return tss
+  concat <$> P.many pListingElem
 
 --	.headerflags	@"EF_CUDA_TEXMODE_UNIFIED EF_CUDA_64BIT_ADDRESS EF_CUDA_SM80 EF_CUDA_VIRTUAL_SM(EF_CUDA_SM80)"
 pListingHeader :: PI String
@@ -71,14 +66,14 @@ pListingHeader = pLabel "listing header (.headerflags ...)" $ do
             where supported_sms = ["80", "75", "72", "70"]
           _ -> pSemanticError loc (sm ++ ": unsupported sm version")
 
-pListingElem :: PI [Unresolved TextSection]
+pListingElem :: PI [TextSection]
 pListingElem = pTextSec <|> pOtherChar
   where -- pOtherLine = pAnyLine >> return [] <* pWhiteSpace
         pTextSec = do
           ts <- pTextSection
           return [ts]
 
-pOtherChar :: PI [Unresolved TextSection]
+pOtherChar :: PI [TextSection]
 pOtherChar = P.anyChar >> pWhiteSpace >> return []
 
 pAnyLine :: PI String
@@ -91,26 +86,19 @@ pAnyLine = pLabel "any line" $ do
         pEndLineOrEOF = pEndLine <|> P.eof
 
 
-pTextSection :: PI (Unresolved TextSection)
+pTextSection :: PI TextSection
 pTextSection = pLabel "text section" $ do
   kernel_name <- P.try pTextSectionStart
-  --
-  uinsts <- pInsts 0
-  --
-  let u_insts :: Unresolved [Inst]
-      u_insts = sequenceUnresolved uinsts
-  --
-  return $ \ldefs -> do
-      is <- u_insts ldefs
-      return (kernel_name, is)
+  is <- pInsts 0
+  return (kernel_name, is)
 
 pTextSectionStart :: PI String
 pTextSectionStart = pSymbol ".text." >> pIdentifier <* pSymbol ":"
 
 
-pInsts :: PC -> PI [Unresolved Inst]
+pInsts :: PC -> PI [Inst]
 pInsts pc = pEndOfKernel <|> pLabelDef <|> pInstI
-  where pLabelDef :: PI [Unresolved Inst]
+  where pLabelDef :: PI [Inst]
         pLabelDef = pWithLoc $ \loc -> do
           id <- ('.':) <$> (P.char '.' >> pIdentifier <* pSymbol ":")
           ldefs <- pisLabelDefinitions <$> pGet
@@ -123,11 +111,11 @@ pInsts pc = pEndOfKernel <|> pLabelDef <|> pInstI
               pInsts pc
             Just _ -> pSemanticError loc "label redefinition"
 
-        pEndOfKernel :: PI [Unresolved Inst]
+        pEndOfKernel :: PI [Inst]
         pEndOfKernel = (pLookingAtNewSection <|> P.eof) >> return []
           where pLookingAtNewSection = P.lookAhead (P.try (pKeyword ".section"))
 
-        pInstI :: PI [Unresolved Inst]
+        pInstI :: PI [Inst]
         pInstI = do
           ui <- pInst pc
           (ui:) <$> pInsts (pc+16)

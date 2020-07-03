@@ -1,5 +1,9 @@
 *.sass
+*.cubin
+*.exp
+*.lib
 *.exe
+*.cu
 _scrap
 examples
 dist
