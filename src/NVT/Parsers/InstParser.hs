@@ -38,13 +38,29 @@ pInst pc = pWhiteSpace >> pInstNoPrefix pc
 pInstNoPrefix :: PC -> PI Inst
 pInstNoPrefix pc = body
   where body = pWithLoc $ \loc -> do
-          prd <- P.option PredNONE pPred
-          op <- pOp
+          op <- P.lookAhead $ P.option () (pPred >> return ()) >> pOp
+          let pred_true
+                | oIsU op = pred_upt
+                | otherwise = pred_pt
+          prd <- P.option pred_true pPred
+          _ <- pOp
           (ios,m_lop3_opt) <- pInstOpts op
           --
           let pComplete :: [Dst] -> [Src] -> PI Inst
-              pComplete dsts srcs =
-                pCompleteInst loc prd op ios dsts srcs []
+              pComplete dsts srcs = do
+                dep_info <- pDepInfo
+                P.try $ pSymbol ";"
+                return $
+                  Inst {
+                    iLoc = loc
+                  , iPc = pc
+                  , iPredication = prd
+                  , iOp = op
+                  , iOptions = ios
+                  , iDsts = dsts
+                  , iSrcs = srcs
+                  , iDepInfo = dep_info
+                  }
 
           let -- general variable operand (e.g. src1 in unary/binary ops)
               -- (note unary usually uses src1 instead of src0)
@@ -1426,45 +1442,14 @@ pInstNoPrefix pc = body
         --       p_src1 <- pSymbol "," >> pPredSrcP
         --       return [p_src0,p_src1]
 
-        pCompleteInst ::
-          Loc ->
-          Pred ->
-          Op ->
-          InstOptSet ->
-          [Dst] ->
-          [Src] ->
-          [Pred] ->
-          PI Inst
-        pCompleteInst loc prd op opts dsts srcs src_preds = do
-          dep_info <- pDepInfo
-          P.try $ pSymbol ";"
-          return $
-            Inst {
-              iLoc = loc
-            , iPc = pc
-            , iPredication = prd
-            , iOp = op
-            , iOptions = opts
-            , iDsts = dsts
-            , iSrcs = srcs
-            , iSrcPreds = src_preds
-            , iDepInfo = dep_info
-            }
-
 
 pPred :: PI Pred
-pPred = do
+pPred = pLabel "predication" $ do
     pSymbol "@"
-    sign <- P.option False $ pSymbol "!" >> return True
+    sign <- P.option PredNEG $ pSymbol "!" >> return PredPOS
     tryP sign <|> tryUP sign
   where tryP sign = PredP sign <$> pSyntax
         tryUP sign = PredUP sign <$> pSyntax
-
-pPredSrcP :: PI Pred
-pPredSrcP = do
-    sign <- P.option False $ pSymbol "!" >> return True
-    tryP sign
-  where tryP sign = PredP sign <$> pSyntax
 
 
 pOp :: PI Op

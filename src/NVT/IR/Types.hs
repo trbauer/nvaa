@@ -55,7 +55,6 @@ data Inst =
   , iDsts :: ![Dst]
   -- iDstPred :: !(Maybe PR) (or use PT?)
   , iSrcs :: ![Src]
-  , iSrcPreds :: ![Pred] -- e.g. IADD3.X has two extra predicate expressions
   , iDepInfo :: !DepInfo
   } deriving (Show,Eq)
 -- iLogicallyEqual :: Inst -> Inst -> Bool
@@ -77,7 +76,6 @@ fmtInstIr i =
     fS "iOptions" iOptions ++
     fS "iDsts" iDsts ++
     fS "iSrcs" iSrcs ++
-    fS "iSrcPreds" iSrcPreds ++
     fS "iDepInfo" iDepInfo ++
     "}"
   where fS :: Show a => String -> (Inst -> a) -> String
@@ -90,23 +88,29 @@ fmtInstIr i =
         r (',':sfx) = ' ':sfx
 
 data Pred =
-    PredNONE
-    --     neg.  rgr.
-  | PredP  !Bool !PR -- regular predicate
-  | PredUP !Bool !UP -- uniform predicate (True,UP7) is "UPZ"
-                     -- this should act the same as PredNONE
+    --     neg.      rgr.
+    PredP  !PredSign !PR -- regular predicate
+  | PredUP !PredSign !UP -- uniform predicate (True,UP7) is "UPZ"
+                         -- this should act the same as PredNONE
   deriving (Show,Eq)
+-- SPECIFY: Pred PredSign PReg
+-- SPECIFY: data PReg = PRegPR !PR | PRegUP !UP
 instance Syntax Pred where
   format pp =
       case pp of
-        PredNONE -> ""
-        PredP z p -> "@" ++ sign z ++ format p
-        PredUP z p -> "@" ++ sign z ++ format p
-    where sign z = if z then "!" else ""
--- data PredSign
---   | PredPOS
---   | PredNEG
---   deriving (Show,Eq)
+        PredP z p -> "@" ++ format z ++ format p
+        PredUP z p -> "@" ++ format z ++ format p
+    where sign z = if z == PredNEG then "!" else ""
+data PredSign = PredPOS | PredNEG
+   deriving (Show,Eq)
+instance Syntax PredSign where
+  format PredPOS = ""
+  format PredNEG = "!"
+
+pred_pt :: Pred
+pred_pt = PredP PredPOS PT
+pred_upt :: Pred
+pred_upt = PredUP PredPOS UPT
 
 data Reg =
     RegR !R -- general register

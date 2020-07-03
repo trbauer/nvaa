@@ -163,6 +163,25 @@ oIsBitwise = (`elem` [OpLOP3,OpPLOP3,OpSHL,OpSHR,OpSHF,OpSHFL])
 oIsBranch :: Op -> Bool
 oIsBranch = (`elem`[OpBPT,OpBRA,OpBRX,OpCALL,OpKILL,OpNANOTRAP,OpRET,OpRTT])
 
+oIsU :: Op -> Bool
+oIsU op =
+  case op of
+    OpUFLO -> True
+    OpUIADD3 -> True
+    OpUIMAD -> True
+    OpUISETP -> True
+    OpULDC -> True
+    OpULEA -> True
+    OpULOP3 -> True
+    OpUMOV -> True
+    OpUPLOP3 -> True
+    OpUPOPC -> True
+    OpUPRMT -> True
+    OpUSEL -> True
+    OpUSGXT -> True
+    OpUSHF -> True
+    _ -> False
+
 oIsFP :: Op -> Bool
 oIsFP op =
   op `elem` [OpF2F,OpF2FP,OpF2I,OpFADD,OpFFMA,OpFCHK,OpFMNMX,

@@ -952,10 +952,10 @@
 000FE200080F0E3F`0000000C04047291:        ULEA.HI.X.SX32   UR4, UR4, UR12,       0x1, UP0 {!1}; // examples/sm_80/samples/nv12_to_bgr_planar.sass:1194
 
 
-000FC6000F8E333F`000000043F047292:        ULOP3.(~s1)      UR4, URZ, UR4,       URZ, 0x33, !UPT {!3,Y}; // examples/sm_80/samples/boxFilter_kernel.sass:12280
-000FCC000F8EC03F`FFFFFFF004047892:        ULOP3.(s0&s1)    UR4, UR4, 0xfffffff0, URZ, 0xc0, !UPT {!6,Y}; // examples/sm_80/libs/cublas64_11/Program.679.sm_80.sass:93431
-000FE2000F82C03F`000000FF053F7892:        ULOP3.LUT        UP1, URZ, UR5, 0xff, URZ, 0xc0, !UPT {!1}; // examples/sm_80/libs/cublas64_11/Program.735.sm_80.sass:4610
-000FE6000F8E3C3F`0000000111117892:        ULOP3.(s0^s1)    UR17, UR17, 0x1, URZ, 0x3c, !UPT {!3}; // examples/sm_80/libs/cusolver64_10/Program.2649.sm_80.sass:13427
+000FC6000F8E333F`000000043F047292:        ULOP3.(~s1)      UR4,  URZ,  UR4,        URZ,       0x33, !UPT {!3,Y}; // examples/sm_80/samples/boxFilter_kernel.sass:12280
+000FCC000F8EC03F`FFFFFFF004047892:        ULOP3.(s0&s1)    UR4,  UR4,  0xfffffff0, URZ,       0xc0, !UPT {!6,Y}; // examples/sm_80/libs/cublas64_11/Program.679.sm_80.sass:93431
+000FE2000F82C03F`000000FF053F7892:        ULOP3.LUT        UP1,  URZ,  UR5,        0xff, URZ, 0xc0, !UPT {!1}; // examples/sm_80/libs/cublas64_11/Program.735.sm_80.sass:4610
+000FE6000F8E3C3F`0000000111117892:        ULOP3.(s0^s1)    UR17, UR17, 0x1,        URZ,       0x3c, !UPT {!3}; // examples/sm_80/libs/cusolver64_10/Program.2649.sm_80.sass:13427
 
 
 000FE20000000000`0000000100047882:        UMOV             UR4, 0x1 {!1}; // examples/sm_80/samples/bisect_small.sass:2434
@@ -975,7 +975,7 @@
 000FE2000800003E`0000771007077296:        UPRMT  UR7,  UR7,  UR16,   UR62 {!1};
 000FE2000800003E`0000001107077296:        UPRMT  UR7,  UR7,  UR17,   UR62 {!1};
 000FE2000800003F`0000FFFF0B0B7896:        UPRMT  UR11, UR11, 0xffff, URZ {!1};
-
+000FE2000800003F`0000FFFF0B0BE896:  @!UP6 UPRMT  UR11, UR11, 0xffff, URZ {!1};
 
 000FE4000C000000`0000000604047287:        USEL   UR4,  UR4,  UR6, !UP0 {!2}; // examples/sm_80/samples/cdpAdvancedQuicksort.sass:4908
 000FE20008000000`0000000E0C0C7287:        USEL   UR12, UR12, UR14, UP0 {!1}; // examples/sm_80/libs/cublas64_11/Program.1008.sm_80.sass:80865
@@ -1005,6 +1005,7 @@
 000FD800048E0100`0000000000047886:        VOTEU.ANY        UR4, UPT, !P1 {!12,Y}; // examples/sm_80/samples/reduction_kernel.sass:107605
 000FE200038E0000`0000000000047886:        VOTEU.ALL        UR4, UPT,  PT {!1};    // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4529
 000FD800048E0100`0000000000047886:        VOTEU.ANY        UR4, UPT, !P1 {!12,Y}; // examples/sm_80/samples/reduction_kernel.sass:118610
+000FD800048E0100`000000000005B886:  @!P3  VOTEU.ANY UR5, UPT, !P1 {!12,Y};
 
 
 000FE80003C00000`0000000200007348:        WARPSYNC.EXCLUSIVE       R2 {!4};            // examples/sm_80/samples/binaryPartitionCG.sass:745

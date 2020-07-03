@@ -187,19 +187,23 @@ eInst i = enc
           eField fREGFILE val
 
         ePredication :: E ()
-        ePredication = ePredicationSrc fPREDICATION (iPredication i)
-        ePredicationSrc :: Field -> Pred -> E ()
-        ePredicationSrc fPSRC pred =
-          case pred of
-            PredNONE -> ePredicationAt fPSRC False PT
-            PredP sign pr -> ePredicationAt fPSRC sign pr
-            PredUP sign pr -> ePredicationAt fPSRC sign pr
-        ePredicationAt :: Codeable p => Field -> Bool -> p -> E ()
+        ePredication =
+          case iPredication i of
+            PredP sign pr -> ePredicationAt fPREDICATION sign pr
+            PredUP sign pr -> ePredicationAt fPREDICATION sign pr
+        ePredicationSrc :: Field -> Src -> E ()
+        ePredicationSrc fPSRC src =
+            case src of
+              Src_P ms preg -> ePredicationAt fPSRC (psign ms) preg
+              Src_UP ms preg -> ePredicationAt fPSRC (psign ms) preg
+              _ -> eFatalF fPSRC "expected predicate src"
+          where psign ms = if ModLNEG`msElem`ms then PredNEG else PredPOS
+        ePredicationAt :: Codeable p => Field -> PredSign -> p -> E ()
         ePredicationAt f sign pr =
           case encode pr of
             Left e -> eFatalF f "INTERNAL ERROR: invalid predicate register"
             Right reg_bits -> eField f (sign_bit .|. reg_bits)
-              where sign_bit = if sign then 0x8 else 0x0
+              where sign_bit = if sign == PredNEG then 0x8 else 0x0
 
         eDepInfo :: DepInfo -> E ()
         eDepInfo di = do
@@ -401,7 +405,7 @@ eInst i = enc
                   (Src_P p0_ms p0:sfx) -> (p0,sfx)
                   srcs -> (PT,srcs)
           eEncode fINT_SRCPRED0 p0
-          case srcs of
+          case take 3 srcs of
             [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_R _ _)] -> do
               -- imad__RRR_RRR
               eRegFile False 0x1
@@ -457,11 +461,9 @@ eInst i = enc
               eSrc2UR_NN s2
             [_,_,_] -> eFatal "wrong type of arguments to instruction"
             _ -> eFatal "wrong number of arguments to instruction"
-          case iSrcPreds i of
-            [] -> ePredicationSrc fIMAD_X_SRCPRED1 (PredP True PT)
-            [pt]
-              | iHasInstOpt InstOptX i -> ePredicationSrc fIMAD_X_SRCPRED1 pt
-            _ -> eFatal "wrong number of predicate arguments"
+          case drop 3 (iSrcs i) of
+            [pt] -> ePredicationSrc fIMAD_X_SRCPRED1 pt
+            _ -> eFatal "expects src3 (carry-in predicate)"
 
         -----------------------------------------------------------------------
         eIADD3 :: E ()
@@ -487,7 +489,7 @@ eInst i = enc
 
           eInstOpt fINT_INSTOPT_X InstOptX
 
-          case iSrcs i of
+          case take 3 (iSrcs i) of
             [s0@(Src_R _ _),s1@(Src_R _ _),s2@(Src_R _ _)] -> do
               -- iadd3_noimm__RRR_RRR
               eRegFile False 0x1
@@ -522,22 +524,11 @@ eInst i = enc
             _ -> eFatal "wrong number of operands to IADD3"
           -- these are the extra source predicate expressions
           -- for the .X case
-          (carry_in0,carry_in1) <- do
-            if iHasOpt InstOptX then
-              case iSrcPreds i of
-                [sp0,sp1] -> return (sp0,sp1)
-                [] -> return (PredNONE,PredNONE)
-                _ -> eFatal "IADD3.X expects two extra predicate expression parameters"
-            else
-              -- explicit IR version (uses defaults)
-              case iSrcPreds i of
-                [sp0,sp1] -> return (sp0,sp1)
-                -- _ -> eFatal "IADD3 takes exactly two extra predicates"
-                [] -> return (PredP True PT,PredP True PT)
-                -- _ -> eFatal "IADD3 without .X forbids extra predicates"
-          ePredicationSrc fIADD3_X_CARRYIN0 carry_in0
-          ePredicationSrc fIADD3_X_CARRYIN1 carry_in1
-          return ()
+          case drop 3 (iSrcs i) of
+            [carry_in0, carry_in1] -> do
+              ePredicationSrc fIADD3_X_CARRYIN0 carry_in0
+              ePredicationSrc fIADD3_X_CARRYIN1 carry_in1
+            _ -> eFatal "IADD3 expects two carry-in predicates"
 
 
         eLOP3 :: E ()
@@ -557,10 +548,7 @@ eInst i = enc
             [DstP pr,DstR r] -> do
               eEncode fLOP3_DST_PRED pr
               eEncode fDST_REG r
-            [DstR r] -> do
-              eEncode fLOP3_DST_PRED PT
-              eEncode fDST_REG r
-            _ -> eFatal "malformed IR: expected rdst or (pdst, rdst)"
+            _ -> eFatal "malformed IR: expecting (pdst, rdst)"
           --
           when (length (iSrcs i) /= 4) $
             eFatal "malformed IR: expected 4 srcs"
@@ -598,10 +586,9 @@ eInst i = enc
           --
           let fLOP3_SRC4_PRED :: Field
               fLOP3_SRC4_PRED = fPREDSRC "Src4.Pred" 87
-          case iSrcPreds i of
-            [] -> ePredicationSrc fLOP3_SRC4_PRED (PredP True PT)
+          case drop 4 (iSrcs i) of
             [pr] -> ePredicationSrc fLOP3_SRC4_PRED pr
-            _ -> eFatal "malformed IR: wrong number of predicate sources"
+            _ -> eFatal "malformed IR: expects predicate sources"
 
 
 
@@ -635,13 +622,14 @@ eInst i = enc
             _ -> eFatal "exactly one comparison function required"
           case iDsts i of
             [DstP p] -> eEncode fISETP_DST_PRED p
-            _ ->  eFatal "malformed destination"
-          case iSrcs i of
+            [_] -> eFatal "wrong destination type"
+            _ ->  eFatal "wrong number of destinations"
+          case take 2 (iSrcs i) of
             [Src_P c_ms c_pr, src0@(Src_R _ _), src1] -> do
-              let c_neg = ModLNEG`msElem`c_ms
-              when c_neg $
-                eFatalF fISETP_SRC0_PRED "src0 predicate cannot be negated"
-              ePredicationSrc fISETP_SRC0_PRED (PredP False c_pr)
+              -- let c_neg = ModLNEG`msElem`c_ms
+              -- when c_neg $
+              --  eFatalF fISETP_SRC0_PRED "src0 predicate cannot be negated"
+              -- ePredicationSrc fISETP_SRC0_PRED (PredP False c_pr)
               eSrc0R_NNA src0
               case src1 of
                 Src_R _ _ -> eRegFile False 0x1 >> eSrc1R src1
@@ -651,16 +639,13 @@ eInst i = enc
                 Src_UR _ _ -> eRegFile True 0x6 >> eSrc1UR_NN src1
                 _ -> eFatal "source 1 must be R, I, or C"
             _ -> eFatal "wrong number of sources (expects P, R, R|I|C, P(, P?))"
-          case iSrcPreds i of
-            [] -> eFatal "extra source predicate expected (src3)"
+          case drop 2 (iSrcs i) of
             -- not sure how to get ISETP to use a different symbol for src3
             -- or where the bits actually go?
-            (src3:sfx) -> do
+            [src3,src4] -> do
               ePredicationSrc fISETP_SRC3_PRED src3
-              case sfx of
-                [] -> ePredicationSrc fISETP_SRC4_PRED (PredP False PT)
-                [psrc] -> ePredicationSrc fISETP_SRC4_PRED psrc
-                _ -> eFatal "wrong number of extra source predicates (src4)"
+              ePredicationSrc fISETP_SRC4_PRED src4
+            _ -> eFatal "wrong number of source predicates expecting (psrc2, psrc3)"
 
         -----------------------------------------------------------------------
         -- LD/ST helpers

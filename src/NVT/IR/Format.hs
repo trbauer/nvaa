@@ -36,7 +36,12 @@ defaultImmFormatter op imm =
 fmtInstWithImmFormatter :: ImmFormatter -> Inst -> String
 fmtInstWithImmFormatter fmt_imm i =
     pred ++ op_str ++ " " ++ opnds_str ++ depinfo_str ++ ";"
-  where pred = padR 5 (format (iPredication i))
+  where pred :: String
+        pred = padR 5 pred_str
+          where pred_str
+                  | iPredication i`elem`[pred_pt,pred_upt] = ""
+                  | otherwise = format (iPredication i)
+        op_str :: String
         op_str = padR 12 (format (iOp i) ++ inst_opts)
           where inst_opts =
                   synthetic_tokens ++
@@ -81,7 +86,7 @@ fmtInstWithImmFormatter fmt_imm i =
         opnds_str
           | oIsLD (iOp i) = intercalate "," dsts ++ ", " ++ fmtAddrs (iSrcs i)
           | oIsST (iOp i) = st_src_addr ++ ", " ++ st_src_data
-          | otherwise = intercalate ", " (dsts ++ srcs ++ ext_pred_srcs)
+          | otherwise = intercalate ", " (dsts ++ srcs)
           where (st_src_addr,st_src_data) =
                   case splitAt 3 (iSrcs i) of
                     (src_addrs,[src_dat]) ->
@@ -120,7 +125,6 @@ fmtInstWithImmFormatter fmt_imm i =
                       sfx -> sfx
                   | iOp i == OpLOP3 = take 3 (iSrcs i)
                   | otherwise = iSrcs i
-                ext_pred_srcs = map (drop 1 . format) (iSrcPreds i) -- drop 1 for the @ format produces
 
         depinfo_str = if null d then "" else (" " ++ d)
           where d = format (iDepInfo i)
