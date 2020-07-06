@@ -784,6 +784,21 @@ iosNull = ES.null
 iosIntern :: InstOptSet -> InstOptSet
 iosIntern ios = if iosNull ios then iosEmpty else ios
 
+
+----------------
+-- TODO: refactor
+-- data InstOpts =
+--   | InstOptsNONE
+--   | InstOptsSETP !InstOptsSETP
+--   | InstOptsIO !InstOptsIO
+--
+--   InstOptsOLD
+--  deriving ...
+--
+-- data InstOptsIO =
+--   InstOptsIO !DataSize !AddrSize ![IOOpts]
+
+
 data InstOpt =
     -- ISETP/UISETP
     InstOptF
@@ -1005,6 +1020,14 @@ data InstOpt =
   | InstOptS16_S32   -- I2I.S16.S32
   | InstOptU8S_32    -- I2I.U8.S32
   | InstOptU16_S32   -- I2I.U16.S32
+  --
+  -- I2F
+  | InstOptF64_S16
+  | InstOptF64_U16
+  --
+  -- F2I
+  | InstOptS64_F64
+  | InstOptU64_F64
   --
   | InstOptU32       -- IMAD
   | InstOptF32       -- HADD.F32

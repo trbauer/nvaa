@@ -25,7 +25,7 @@ defaultImmFormatter op imm =
       -- e.g. FADD
       | oIsFP op -> printf "%f" (bitsToFloat u32)
       -- e.g. IMAD
-      | oIsInt op && s32 < 0 -> printf "-0x%08X" (negate s32)
+      | oIsI op && s32 < 0 -> printf "-0x%08X" (negate s32)
       -- everything else
       | otherwise -> printf "0x%08X" u32
       where s32 = fromIntegral u32 :: Int32

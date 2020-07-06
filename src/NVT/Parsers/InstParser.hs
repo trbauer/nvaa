@@ -23,13 +23,13 @@ import qualified Text.Parsec           as P
 
 
 
-parseUnresolvedInst ::
+parseInst ::
   PC ->
   FilePath ->
   Int ->
   String ->
   PIResult Inst
-parseUnresolvedInst pc = runPI_WLNO (pInst pc)
+parseInst pc = runPI_WLNO (pInst pc)
 
 
 pInst :: PC -> PI Inst
@@ -456,10 +456,10 @@ pInstNoPrefix pc = body
 
             -- BSSY             B0, `(.L_31) {!12,Y};
             OpBSSY -> do
-              src0 <- pSrcB
+              dst <- pDstB
               pSymbol ","
-              src1 <- pSrcLbl pc op
-              pComplete [] [src0,src1]
+              src0 <- pSrcLbl pc op
+              pComplete [dst] [src0]
 
             -- BSYNC      B1 {!5}; // PT implied
             -- BSYNC !P5, B2 {!5};
@@ -589,6 +589,8 @@ pInstNoPrefix pc = body
             --  [79:78]  {[default], .FLOOR, .CEIL, .TRUNC}
             --  [80]     {[default], .FTZ}
             --  [77]     {[default], .NTZ}
+            --
+            -- F2I.U64 is opcode 0x111 the rest are 0x105
             OpF2I -> pUnaryOp
 
             -- @P0   FADD.FTZ         R4,  R0,       1 {!1};
@@ -1053,7 +1055,7 @@ pInstNoPrefix pc = body
               dst_p <- P.option dST_PT $ pDstP <* pSymbol ","
               dst <- pDstUR
               src <- pSymbol "," >> pSrcR
-              pComplete [dst] [src]
+              pComplete [dst_p,dst] [src]
 
             -- RED.E.ADD.STRONG.GPU            [R4.64],      R11 {!4,+1.R};
             -- RED.E.ADD.F32.FTZ.RN.STRONG.GPU [R20.64+0x4], R2 {!5,+2.R};

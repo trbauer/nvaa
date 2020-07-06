@@ -4,6 +4,7 @@ import NVT.RawInst
 
 import Analysis
 
+import NVT.Analysis.Deps
 import NVT.Bits
 import NVT.IR
 import NVT.Loc
@@ -106,7 +107,11 @@ help :: IO ()
 help = putStrLn $
   "testAllFF      - runs all tests failing fast\n"++
   "testInst       - once a test fails cut and paste the sample into testInst to isolate\n"++
+  "\n" ++
+  "pslog ==> test parsing all instructions\n" ++
+  "dslog ==> test deps of all instructions\n" ++
   ""
+
 
 testAll, testAllFF :: IO Bool
 testAll = testAllFF
@@ -137,6 +142,15 @@ testInst syntax =
       testSampleInst id True si ("<interactive>",1) syntax_x
       return ()
 
+splitPrefixBits1 :: String -> (Maybe Word128,String)
+splitPrefixBits1 ln =
+  case splitPrefixBits ln of
+    ("",syn) -> (Nothing,syn)
+    (bits,syn) ->
+      case reads ("0x"++bits) of
+        [(w128,":")] -> (Just w128,syn)
+        _ -> error $ "splitPrefixBits1: " ++ ln
+
 splitPrefixBits :: String -> (String,String)
 splitPrefixBits ln =
   case span (/=':') ln of
@@ -155,7 +169,7 @@ dropPrefixBits = snd . splitPrefixBits
 testParseInst :: String -> IO ()
 testParseInst syntax = do
   let fmtDiag = dFormatWithLines (lines syntax)
-  case parseUnresolvedInst 0 "<interactive>" 1 syntax of
+  case parseInst 0 "<interactive>" 1 syntax of
     Left err -> do
       putStrLn "ERROR: parsed SampleInst, but InstParser failed"
       putStrLn $ fmtDiag err
@@ -206,15 +220,13 @@ parseLines (ln0:ln1:lns) =
     Right si ->
       fmtSampleInst si ++ "\n" ++ parseLines lns
 
--- slog :: String -> Int -> IO ()
--- slog f k = parseAllOpsInDir f k "examples\\sm_80.1\\ops"
-slog :: Bool -> IO ()
-slog vrb = parseAllOpsInFile vrb "tests\\sm_80\\instructions.sass"
+-- pslog :: String -> Int -> IO ()
+-- pslog f k = parseAllOpsInDir f k "examples/sm_80.1/ops"
+pslog :: Bool -> IO ()
+pslog vrb = parseAllOpsInFile vrb "tests/sm_80/instructions.sass"
 
 validate_formatter :: Bool
 validate_formatter = False -- True
-
-
 
 parseAllOpsInDir :: Bool -> String -> Int -> FilePath -> IO ()
 parseAllOpsInDir vrb filt k dir = do
@@ -240,7 +252,7 @@ parseAllOpsInFileK vrb k fp = do
                   where go [] = ""
                         go ('/':'/':sfx) = ""
                         go (c:cs) = c:go cs
-            case parseUnresolvedInst ((lno-1)*16) fp lno syntax of
+            case parseInst ((lno-1)*16) fp lno syntax of
               Left d ->
                 die $
                   ln ++ "\n" ++
@@ -272,8 +284,91 @@ parseAllOpsInFileK vrb k fp = do
                           ""
                       else parse lns
 
+-- readFile' :: FilePath -> IO String
+-- readFile' fp = do
+--   fstr <- readFile fp
+--   length fstr `seq` fstr
+--   return fstr
 
+type TestInstFunction a =
+  -- raw line
+  (Int,String) ->
+  -- bits and syntax
+  (Maybe Word128,String) ->
+  -- parsed inst
+  Inst -> LabelIndex -> IO a
 
+forAllTestInstructions ::
+  Bool ->
+  FilePath ->
+  (Op -> Bool) ->
+  (TestInstFunction ()) -> IO ()
+forAllTestInstructions vrb fp filt func = do
+    flns <- zip [1..] . lines <$> readFile fp
+    --
+    -- force the first 2k lines
+    -- If this is a "small file"; force it so ghci doesn't hold the handle,
+    -- but if it's a large file, then so be it.
+    length (take 2000 flns) `seq` return ()
+    handleLn flns
+  where handleLn [] = return ()
+        handleLn ((lno,ln):lns)
+          -- drop empty lines, all-whitespace lines, and just // comments
+          | let ln_pfx = dropWhile isSpace ln in null ln_pfx || "//" `isPrefixOf` ln_pfx = handleLn lns
+          | otherwise = do
+            let (mbits,syntax) = splitPrefixBits1 ln
+                stripTrailingComment = go
+                  where go [] = ""
+                        go ('/':'/':sfx) = ""
+                        go (c:cs) = c:go cs
+            case parseInst ((lno-1)*16) fp lno syntax of
+              Left d ->
+                die $
+                  ln ++ "\n" ++
+                  dFormatWithCurrentLine (lno,syntax) d ++ "\n\n" ++
+                  "%  testParseInst " ++ show (dropWhile isSpace (stripTrailingComment syntax)) ++ "\n"
+              Right (ui,pis,ws)
+                | not (filt (iOp ui)) -> handleLn lns
+                | otherwise -> do
+                  when (not (null ws)) $ do
+                    putStrLn "WARNINGS:"
+                    mapM_ print ws
+                  func (lno,ln) (mbits,syntax) ui (pisLabelReferences pis)
+                  handleLn lns
+
+dslog :: IO ()
+dslog = dslog1 (const True) False
+dslog1 :: (Op -> Bool) -> Bool -> IO ()
+dslog1 filt vrb = testDeps filt vrb "tests/sm_80/instructions.sass"
+
+testDeps :: (Op -> Bool) -> Bool -> FilePath -> IO ()
+testDeps filt vrb fp = forAllTestInstructions vrb fp filt testInst
+  where testInst :: TestInstFunction ()
+        testInst (lno,_) (_,syn) i _ = do
+          putStrLn "------------------------------------"
+          putStrLn syn
+          when vrb $
+            putStrLn $ fmtInstIr i
+          putStrLn $ "SRCS->: " ++ dShow (dSrcs i)
+          putStrLn $ "DSTS<-: " ++ dShow (dDsts i)
+          when (lno `mod` 4 == 3) $ do
+            -- FIXME: this mods on line numbers, but spacing and comments
+            -- screw things up; thus doing 4 at a time is statistically
+            -- going to give more except in tight blocks
+            putStrLn $ replicate 120 '='
+            putStrLn $ replicate 120 '='
+            putStrLn "========> enter to continue"
+            getLine >> return ()
+testDeps1 :: String -> IO ()
+testDeps1 syn =
+  case parseInst 0 "<interactive>" 1 syn of
+    Left err -> putStrLn $ dFormatWithLines (lines syn) err
+    Right (i,_,_) -> do
+      putStrLn $ fmtInstIr i
+      putStrLn $ "SRCS->: " ++ dShow (dSrcs i)
+      putStrLn $ "DSTS<-: " ++ dShow (dDsts i)
+
+------------------------------------------------------------------------
 testAllG :: Bool -> IO Bool
 testAllG fail_fast = do
   putStrLn $ replicate 70 '*'
@@ -320,7 +415,7 @@ testFileGK emit_io k fp = do
         | instHasLabels ln = do
           -- should be able to parse it
           let syntax = dropPrefixBits ln
-          case parseUnresolvedInst 0 fp 1 syntax of
+          case parseInst 0 fp 1 syntax of
             Left err -> do
               -- putStrLn $ "==> " ++ show ln
               let fmtDiag = dFormatWithLines flns
@@ -380,12 +475,12 @@ parseTestInst ::
   String ->
   Either Diagnostic (Inst,[Diagnostic])
 parseTestInst pc fp lno inp =
-  case parseUnresolvedInst pc fp lno inp of
+  case parseInst pc fp lno inp of
     Left err -> Left err
     Right (ui,pis,ws) ->
-        case evalInst (pisLabelReferences pis) ui of
-          Left err -> Left err
-          Right i -> Right (i,ws)
+      case evalInst (pisLabelReferences pis) ui of
+        Left err -> Left err
+        Right i -> Right (i,ws)
 
 
 testSampleInst :: (IO () -> IO ()) -> Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool -- (Int,Int)
