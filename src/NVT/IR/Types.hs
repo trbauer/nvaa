@@ -171,7 +171,7 @@ pattern Src_SB ms r = SrcReg ms (RegSB r)
 pattern Src_SR ms r = SrcReg ms (RegSR r)
 pattern Src_UP ms up = SrcReg ms (RegUP up)
 pattern Src_UR ms ur = SrcReg ms (RegUR ur)
-pattern SrcI32 i = SrcImm (Imm32 i)
+pattern Src_I32 i = SrcImm (Imm32 i)
 ----------------------------------------------------
 -- common values
 dST_PT :: Dst
@@ -234,11 +234,11 @@ sRC_SR_TID_X :: Src
 sRC_SR_TID_X = SrcReg msEmpty (RegSR SR_TID_X)
 --
 sRC_I32_0 :: Src
-sRC_I32_0 = SrcI32 0
+sRC_I32_0 = Src_I32 0
 sRC_I32_1 :: Src
-sRC_I32_1 = SrcI32 1
+sRC_I32_1 = Src_I32 1
 sRC_I32_15 :: Src
-sRC_I32_15 = SrcI32 0xF
+sRC_I32_15 = Src_I32 0xF
 sRC_C00 :: Src
 sRC_C00 = SrcCon msEmpty (SurfImm 0) 0
 
@@ -282,27 +282,27 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   , SrcReg msEmpty (RegUR UR2)
   , SrcReg msEmpty (RegUR UR3)
   --
-  , SrcI32 0xFFFFFFFF
+  , Src_I32 0xFFFFFFFF
   , sRC_I32_0
   , sRC_I32_1
-  , SrcI32 0x02
-  , SrcI32 0x04
-  , SrcI32 0x08
-  , SrcI32 0x10
+  , Src_I32 0x02
+  , Src_I32 0x04
+  , Src_I32 0x08
+  , Src_I32 0x10
   -- FP32
-  , SrcI32 0xFF800000 -- -INF
-  , SrcI32 0xFFC00000 -- -QNAN
-  , SrcI32 0xC0000000 -- -2
-  , SrcI32 0xBF800000 -- -1
-  , SrcI32 0xBF000000 -- -0.5
-  , SrcI32 0xBE800000 -- -0.25
+  , Src_I32 0xFF800000 -- -INF
+  , Src_I32 0xFFC00000 -- -QNAN
+  , Src_I32 0xC0000000 -- -2
+  , Src_I32 0xBF800000 -- -1
+  , Src_I32 0xBF000000 -- -0.5
+  , Src_I32 0xBE800000 -- -0.25
   -- 0.0 is above
-  , SrcI32 0x3E800000 -- 0.25
-  , SrcI32 0x3F000000 -- 0.5
-  , SrcI32 0x3F800000 -- 1
-  , SrcI32 0x40000000 -- 2
-  , SrcI32 0x7F800000 -- +INF
-  , SrcI32 0x7FC00000 -- +QNAN
+  , Src_I32 0x3E800000 -- 0.25
+  , Src_I32 0x3F000000 -- 0.5
+  , Src_I32 0x3F800000 -- 1
+  , Src_I32 0x40000000 -- 2
+  , Src_I32 0x7F800000 -- +INF
+  , Src_I32 0x7FC00000 -- +QNAN
   --
   , sRC_SR_TID_X
   , sRC_SR_CTAID_X

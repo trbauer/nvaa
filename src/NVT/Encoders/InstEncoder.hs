@@ -269,7 +269,7 @@ eInst i = enc
                   eEncode fSRC1_REG ur
               eConstOffDiv4 fSRCCOFF soff
               ensureNoNegAbs ms
-            [SrcI32 i] -> do
+            [Src_I32 i] -> do
               eRegFile False 0x4
               eFieldU32 fSRCIMM i
             [SrcReg ms (RegUR ur)] -> do
@@ -365,7 +365,7 @@ eInst i = enc
           ePredication
           eDstRegR
           case iSrcs i of
-            [src,SrcI32 imm] -> do
+            [src,Src_I32 imm] -> do
               eUnrSrcs [src]
               eField fMOV_SRC_CHEN4 (fromIntegral imm)
             srcs -> do
@@ -413,7 +413,7 @@ eInst i = enc
               eSrc0R_NN s0
               eSrc1R    s1
               eSrc2R_NA s2
-            [s0@(Src_R _ _),s1@(Src_R _ _),SrcI32 imm] -> do
+            [s0@(Src_R _ _),s1@(Src_R _ _),Src_I32 imm] -> do
               -- imad__RRsI_RRI
               eRegFile False 0x2
               --
@@ -429,7 +429,7 @@ eInst i = enc
               eSrc0R_NN s0
               eSrc1C s2
               eSrc1InSrc2_NA s1
-            [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
+            [s0@(Src_R _ _),Src_I32 imm,s2@(Src_R _ _)] -> do
               -- imad__RsIR_RIR
               eRegFile False 0x4
               --
@@ -506,7 +506,7 @@ eInst i = enc
               eIADD3_Src0R s0
               eSrc1C s1
               eSrc2R_NA s2
-            [s0@(Src_R _ _),SrcI32 imm,s2@(Src_R _ _)] -> do
+            [s0@(Src_R _ _),Src_I32 imm,s2@(Src_R _ _)] -> do
               -- iadd3_imm__RsIR_RIR
               eRegFile False 0x4
               --
@@ -559,7 +559,7 @@ eInst i = enc
             _ -> eFatal "malformed IR: src0 should be Reg"
           --
           case drop 3 (iSrcs i) of
-            [SrcI32 lut] | lut <= 255 -> do
+            [Src_I32 lut] | lut <= 255 -> do
               let fLOP3_LUT = f "Lop3.Function" 72 8 fmt
                     where fmt _ = fmtLop3 . fromIntegral
               eField fLOP3_LUT (fromIntegral lut)
@@ -569,7 +569,7 @@ eInst i = enc
               eRegFile False 0x1
               eSrc1R_NNA s1
               eSrc2R_NNA s2
-            [s1@(SrcI32 imm),s2@(Src_R _ _)] -> do
+            [s1@(Src_I32 imm),s2@(Src_R _ _)] -> do
               eRegFile False 0x4
               eField     fSRC1_IMM (fromIntegral imm)
               eSrc2R_NNA  s2
@@ -635,7 +635,7 @@ eInst i = enc
                 Src_R _ _ -> eRegFile False 0x1 >> eSrc1R src1
                 SrcCon _ six _ -> eRegFile is_ind 0x5 >> eSrc1C src1
                   where is_ind = case six of {SurfReg _ -> True; _ -> False}
-                SrcI32 imm -> eRegFile False 0x4 >> eField fSRC1_IMM (fromIntegral imm)
+                Src_I32 imm -> eRegFile False 0x4 >> eField fSRC1_IMM (fromIntegral imm)
                 Src_UR _ _ -> eRegFile True 0x6 >> eSrc1UR_NN src1
                 _ -> eFatal "source 1 must be R, I, or C"
             _ -> eFatal "wrong number of sources (expects P, R, R|I|C, P(, P?))"
@@ -818,7 +818,7 @@ eInst i = enc
         eAddrsLDST :: Field -> [Src] -> E ()
         eAddrsLDST fADDR_UROFF srcs =
           case srcs of
-            [Src_R r_ms r_addr, Src_UR ur_ms ur, SrcI32 imm] -> do
+            [Src_R r_ms r_addr, Src_UR ur_ms ur, Src_I32 imm] -> do
               --
               -- The vector address always goes in the same register
               eEncode fLDST_ADDR_REG r_addr

@@ -2,10 +2,11 @@ module TestAssemble where
 
 import NVT.RawInst
 
-import Analysis
+import Analysis hiding (help)
 
 import NVT.Analysis.Deps
 import NVT.Bits
+import NVT.Floats
 import NVT.IR
 import NVT.Loc
 import NVT.CUDASDK

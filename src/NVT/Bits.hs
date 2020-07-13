@@ -4,7 +4,7 @@ import Data.Bits
 import Data.Char
 import Data.List
 import Data.Word
--- import Debug.Trace
+import Debug.Trace
 import Text.Printf
 import qualified Data.ByteString as BS
 
@@ -160,7 +160,7 @@ instance Bits Word128 where
   zeroBits = w128_zero
 
   shiftL (Word128 hi lo) off
-    | off >= 64 = Word128 (lo `shiftL` (off - finiteBitSize hi)) 0
+    | off >= finiteBitSize hi = Word128 (lo `shiftL` (off - finiteBitSize hi)) 0
     | otherwise = Word128 new_hi new_lo
     where new_hi = (hi `shiftL` off) .|. (lo `shiftR` (finiteBitSize hi - off))
           new_lo = (lo `shiftL` off)
@@ -205,9 +205,9 @@ instance Bits Word128 where
     -- think of this as iteratively rotating by less than 64
     | otherwise = rotate (Word128 lo hi) (off - finiteBitSize hi)
     where off = off0 `mod` finiteBitSize w
-          lt64_new_hi = (hi `shiftL` off) .|. (lo `shiftR` (elem_size - off))
-          lt64_new_lo = (lo `shiftL` off) .|. (hi `shiftR` (elem_size - off))
-          elem_size = finiteBitSize hi
+          lt64_new_hi = (hi `shiftL` off) .|. (lo `shiftR` (finiteBitSize hi - off))
+          lt64_new_lo = (lo `shiftL` off) .|. (hi `shiftR` (finiteBitSize hi - off))
+
     --  (Word128 0xF000000000000000 0xC000000000000001)`rotate`(1) == 0xE000000000000001`8000000000000003
     --  (Word128 0xF000000000000000 0xC000000000000001)`rotate`(-1) == 0xF800000000000000`6000000000000000
   bitSize = finiteBitSize
@@ -326,50 +326,49 @@ instance Bits Word256 where
 
   -- DOESN'T WORK for shift sizes like 128
   shiftL (Word256 hi lo) off
-    | off >= 128 = Word256 (lo`shiftL`(off - 128)) 0
+    | off >= finiteBitSize hi = Word256 (lo`shiftL`(off - finiteBitSize hi)) 0
     | otherwise = Word256 new_hi new_lo
-    where new_hi = hi `shiftL` off .|. lo `shiftR` (128 - off)
+    where new_hi = hi `shiftL` off .|. lo `shiftR` (finiteBitSize hi - off)
           new_lo = lo `shiftL` off
   shiftR (Word256 hi lo) off
-    | off >= 128  = Word256 0 (hi`shiftR`(off - 128))
+    | off >= finiteBitSize hi  = Word256 0 (hi`shiftR`(off - finiteBitSize hi))
     | otherwise = Word256 new_hi new_lo
-    where new_hi = hi `shiftR` off .|. lo `shiftR` (128 - off)
-          new_lo = hi `shiftL` (128 - off) .|. lo `shiftR` off
+    where new_hi = (hi `shiftR` off) .|. (lo `shiftR` (finiteBitSize hi - off))
+          new_lo = (hi `shiftL` (finiteBitSize hi - off)) .|. (lo `shiftR` off)
   -- positive is left
   -- negative is right
   rotate w@(Word256 hi lo) off0
-    -- rotate right
-    | off < 0 = rotate w (128 - off)
-    -- normal bit align
-    --   hhhhhhhhhhhhhhhh llllllllllllllll (each char is 4 bits)
-    --     rol 4
-    --   hhhhhhhhhhhhhhhl lllllllllllllllh
-    | off < 128 = Word256 new_hi new_lo
-    --     rol 124 = ror -4
-    --   lhhhhhhhhhhhhhhh hlllllllllllllll
-    | otherwise = rotate w (off - 128)
-    where off = off0 `mod` 128
-          new_hi = hi `shiftL` off .|. lo `shiftR` (128 - off)
-          new_lo = lo `shiftL` off .|. hi `shiftR` (128 - off)
+    | off == 0 = w
+    | off < 0 = error "Word256.rotate: unreachable" -- mod should prevent this
+    | off < 0 = rotate w (finiteBitSize hi - off)
+    | off < finiteBitSize hi = Word256 lt128_new_hi lt128_new_lo
+    | otherwise = rotate (Word256 lo hi) (off - finiteBitSize hi)
+    where off = off0 `mod` finiteBitSize hi
+
+          lt128_new_hi = (hi `shiftL` off) .|. (lo `shiftR` (finiteBitSize hi - off))
+          lt128_new_lo = (lo `shiftL` off) .|. (hi `shiftR` (finiteBitSize hi - off))
+
   bitSize _ = 256
   bitSizeMaybe _ = Just 256
   isSigned _ = False
   testBit (Word256 hi lo) off
-    | off < 128 = testBit lo off
-    | otherwise = testBit hi (off - 128)
+    | off < finiteBitSize hi = testBit lo off
+    | otherwise = testBit hi (off - finiteBitSize hi)
   bit off
-    | off < 128 = Word256 0 (1 `shiftL` off)
-    | otherwise = Word256 (1 `shiftL` (off - 128)) 0
+    | off < finiteBitSize lo128 = Word256 0 lo128
+    | otherwise = Word256 hi128 0
+    where lo128 = 1 `shiftL` off
+          hi128 = 1 `shiftL` (off - finiteBitSize lo128)
   popCount (Word256 hi lo) = popCount hi + popCount lo
 instance FiniteBits Word256 where
   finiteBitSize _ = 256
   countLeadingZeros (Word256 hi lo)
-    | clz_hi < 128 = clz_hi
-    | otherwise = 128 + countLeadingZeros lo
+    | clz_hi < finiteBitSize hi = clz_hi
+    | otherwise = finiteBitSize hi + countLeadingZeros lo
     where clz_hi = countLeadingZeros hi
   countTrailingZeros (Word256 hi lo)
-    | ctz_lo < 128 = ctz_lo
-    | otherwise = 128 + countTrailingZeros hi
+    | ctz_lo < finiteBitSize hi = ctz_lo
+    | otherwise = finiteBitSize hi + countTrailingZeros hi
     where ctz_lo = countTrailingZeros lo
 
 w256binOp ::
@@ -415,6 +414,19 @@ fromByteStringG reoder_bytes =
         go _   _    [] = error "fromByteStringG: insufficient bytes"
         go n   i    (b:bs) = go (n-1) ((i`shiftL`8) .|. fromIntegral b) bs
 
+toWords :: FiniteBits a => (BS.ByteString -> a) -> BS.ByteString -> [a]
+toWords func bs0
+  | BS.length bs0 `mod` bytes_per_elem /= 0 = error $ "Bits.toWords: binary size doesn't divide bit size"
+  | otherwise = go bs0
+  where bytes_per_elem = finiteBitSize (func undefined)`div`8
+
+        go bs
+          | BS.null bs = []
+          | otherwise =
+            case BS.splitAt bytes_per_elem bs of
+              (pfx,sfx) -> func pfx:go sfx
+
+
 
 toByteStringU8 :: Word8 -> BS.ByteString
 toByteStringU8 w8 = BS.singleton w8
@@ -447,3 +459,18 @@ toByteStringG reoder_bytes i = BS.pack . reoder_bytes $ packBytes bytes i
         packBytes 0 _ = []
         packBytes n i =
           fromIntegral (i.&.0xFF) : packBytes (n-1) (i`shiftR`8)
+
+-- fmtBinary :: FiniteBits b => b -> String
+fmtBinary b = fmtBinaryW (finiteBitSize b) b
+
+-- fmtBinaryW :: (Show b,Bits b) => Int -> b -> String
+fmtBinaryW w = toS 0 ""
+  where zero = bit 0`shiftR`1
+        toS n str b
+          | b == zero = if null padded_str then "0" else padded_str
+          | otherwise = toS (n + 1) (c:str) (b`shiftR`1)
+          where padded_str = replicate (w - n) '0' ++ str
+                c
+                  | testBit b 0 = '1'
+                  | otherwise = '0'
+

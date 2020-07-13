@@ -21,6 +21,10 @@ collect_opcodes.exe: Makefile tools/CollectOpcodes.hs
 	ghc  -hidir build/libs -odir build/libs --make tools/CollectOpcodes.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
 	strip $@
 
+testfp.exe: Makefile tools/FPTest.hs
+	mkdir -p build/libs
+	ghc  -hidir build/libs -odir build/libs --make tools/FPTest.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
+
 
 clean:
 	rm -rf build *.exe

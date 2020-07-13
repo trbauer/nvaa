@@ -188,7 +188,9 @@ oIsF :: Op -> Bool
 oIsF = (`elem`[OpF2F,OpF2FP,OpF2I,OpFADD,OpFFMA,OpFCHK,OpFMNMX,
              OpFMUL,OpFSEL,OpFSET,OpFSETP])
 oIsH :: Op -> Bool
-oIsH = (`elem`[OpHADD2,OpHFMA2,OpHMMA,OpHMUL2,OpHSET2,OpHSETP2])
+oIsH op = op == OpHMMA || oIsH op
+oIsH2:: Op -> Bool
+oIsH2 = (`elem`[OpHADD2,OpHFMA2,OpHMUL2,OpHSET2,OpHSETP2])
 oIsI :: Op -> Bool
 oIsI = (`elem`[OpI2I,OpI2F,OpIABS,OpIADD3,OpIDP,OpIMAD,OpIMMA,OpIMNMX,OpISETP])
 

@@ -21,8 +21,6 @@ import Text.Printf
 import qualified Text.Parsec           as P
 
 
-
-
 parseInst ::
   PC ->
   FilePath ->
@@ -62,11 +60,13 @@ pInstNoPrefix pc = body
                   , iDepInfo = dep_info
                   }
 
+          let box x = [x]
+
           let -- general variable operand (e.g. src1 in unary/binary ops)
               -- (note unary usually uses src1 instead of src0)
               pSrcX :: PI Src
               pSrcX
-                | oIsFP op = pSrcRCUF
+                | oIsFP op = pSrcRCUF op
                 | otherwise = pSrcRCUI
 
               -- used to parse SRC1, SRC2 in ternary
@@ -79,7 +79,7 @@ pInstNoPrefix pc = body
 
               -- UR, R, IMM
               pSrcURI :: PI Src
-              pSrcURI = P.try pSrcUR <|> pSrcI32OrL32 pc op
+              pSrcURI = P.try pSrcUR <|> pSrc_I32OrL32 pc op
 
               -- [Pred, ] Reg
               pDstsP_R :: PI [Dst]
@@ -148,11 +148,11 @@ pInstNoPrefix pc = body
                     pUR_IMM :: PI (Src,Src,Src)
                     pUR_IMM = do
                       ur <- pBareSrcUR
-                      imm <- P.option sRC_I32_0 $ pSymbol "+" >> pSrcI32 op
+                      imm <- P.option sRC_I32_0 $ pSymbol "+" >> pSrc_I32 op
                       return (sRC_RZ,ur,imm)
                     pIMM_UR :: PI (Src,Src,Src)
                     pIMM_UR = do
-                      imm <- pSrcI32 op
+                      imm <- pSrc_I32 op
                       ur <- P.option sRC_URZ $ pSymbol "+" >> pBareSrcUR
                       return (sRC_RZ,ur,imm)
                 pSymbol "["
@@ -234,8 +234,10 @@ pInstNoPrefix pc = body
               pBinaryOpH2 = do
                 dst <- pDstR
                 src0 <- pSymbol "," >> pSrcRH2
-                src1s <- pSymbol "," >> pSrcXH2s
-                pComplete [dst] (src0:src1s)
+                -- technically this will parse two operands if immediate
+                -- since each half value is split up
+                src1 <- pSymbol "," >> pSrcXH2 op
+                pComplete [dst] [src0,src1]
 
               -- simple ternary ops (no predicates/carry out/carry)
               pTernaryOp :: PI Inst
@@ -251,14 +253,14 @@ pInstNoPrefix pc = body
                 src0 <- pSymbol "," >> pSrcRH2
                 let pXR :: PI [Src]
                     pXR = do
-                      src1s <- pSymbol "," >> pSrcXH2s
+                      src1 <- pSymbol "," >> pSrcXH2 op
                       src2 <- pSymbol "," >> pSrcRH2
-                      return (src1s ++ [src2])
+                      return [src1,src2]
                     pRX :: PI [Src]
                     pRX = do
                       src1 <- pSymbol "," >> pSrcRH2
-                      src2s <- pSymbol "," >> pSrcXH2s
-                      return (src1:src2s)
+                      src2 <- pSymbol "," >> pSrcXH2 op
+                      return [src1,src2]
                 src12s <- P.try pXR <|> pRX
                 pComplete [dst] (src0:src12s)
 
@@ -327,12 +329,12 @@ pInstNoPrefix pc = body
                       src4 <- SrcTex <$> pSyntax
                       return ([sRC_I32_0, sRC_I32_0],src4)
                     pImmsFirst = do
-                      src3a <- pSrcI32 op
-                      src3b <- pSymbol "," >> pSrcI32 op
+                      src3a <- pSrc_I32 op
+                      src3b <- pSymbol "," >> pSrc_I32 op
                       src4 <- pSymbol "," >> SrcTex <$> pSyntax
                       return ([src3a,src3b],src4)
                 (src3s,src4) <- P.try pNoImms <|> pImmsFirst
-                src5_opt <- P.option [] $ pSymbol "," >> box <$> pSrcI32 op
+                src5_opt <- P.option [] $ pSymbol "," >> box <$> pSrc_I32 op
                 pComplete [dst] (srcs ++ src3s ++ [src4] ++ src5_opt)
 
           --
@@ -410,7 +412,7 @@ pInstNoPrefix pc = body
 
             -- BPT.TRAP         0x1 {!5,^1};
             OpBPT -> do
-              src0 <- pSrcI32 op
+              src0 <- pSrc_I32 op
               pComplete [] [src0]
 
             -- @!P0  BRA                 `(.L_1) {!5};
@@ -441,7 +443,7 @@ pInstNoPrefix pc = body
               src_pr <- P.option sRC_PT $ (pSrcP <* pSymbol ",")
               src0 <- pSrcR
               -- no comma
-              src1 <- pSrcI32 op
+              src1 <- pSrc_I32 op
               pComplete [] [src_pr, src0, src1]
 
             -- BRXU         UR4 -0x1840 {!5,Y};
@@ -451,7 +453,7 @@ pInstNoPrefix pc = body
               src_pr <- P.option sRC_PT $ (pSrcP <* pSymbol ",")
               src0 <- pSrcUR
               -- no comma
-              src1 <- pSrcI32 op
+              src1 <- pSrc_I32 op
               pComplete [] [src_pr,src0, src1]
 
             -- BSSY             B0, `(.L_31) {!12,Y};
@@ -506,7 +508,7 @@ pInstNoPrefix pc = body
                 P.option [sRC_RZ,sRC_I32_0] $ do
                   pSymbol "["
                   src0 <- pSrcR <|> pSrcUR
-                  src1_imm <- P.option sRC_I32_0 $ SrcI32 . fromIntegral <$> pIntTerm
+                  src1_imm <- P.option sRC_I32_0 $ Src_I32 . fromIntegral <$> pIntTerm
                   pSymbol "]"
                   return [src0,src1_imm]
               pComplete [] srcs
@@ -539,7 +541,7 @@ pInstNoPrefix pc = body
                   b0 <- pBitIx
                   bs <- P.many $ pSymbol "," >> pBitIx
                   pSymbol "}"
-                  return (SrcI32 (foldl' setBit 0 (b0:bs)))
+                  return (Src_I32 (foldl' setBit 0 (b0:bs)))
               pComplete [] [src0, src1, src2]
 
             -- DFMA        R8,   R36, R36, R8  {!6,Y,+1.W,^1};
@@ -669,9 +671,9 @@ pInstNoPrefix pc = body
             OpHSET2 -> do
               dst <- pDstR
               src0 <- pSymbol "," >> pSrcRH2
-              src1s <- pSymbol "," >> pSrcXH2s
+              src1 <- pSymbol "," >> pSrcXH2 op
               src_p <- pSymbol "," >> pSrcP
-              pComplete [dst] (src0:src1s ++ [src_p])
+              pComplete [dst] [src0,src1,src_p]
 
             -- I think:         DST  DST  DST        SRC0        [SRC1]     SRCPR
             --  HSETP2.NE.AND    P1,  PT,  R64,       RZ,                      PT {!2};
@@ -685,10 +687,10 @@ pInstNoPrefix pc = body
               let dsts = [dst_p_lo,dst_p_hi,dst_r]
               --
               src0 <- pSymbol "," >> pSrcRH2
-              src1s <- pSymbol "," >> pSrcXH2s
+              src1 <- pSymbol "," >> pSrcXH2 op
               src_p <- pSymbol "," >> pSrcP
               --
-              pComplete dsts (src0:src1s ++ [src_p])
+              pComplete dsts [src0,src1,src_p]
 
             -- I2F           R4,  R16 {!1,+2.W,+1.R}; // examples/sm_80/samples/BezierLineCDP.sass:1739
             -- I2F.U32.RP    R4,  0x20 {!1,+1.W};   // examples/sm_80/samples/bf16TensorCoreGemm.sass:7074
@@ -872,7 +874,7 @@ pInstNoPrefix pc = body
               pSymbol ","
               (r_addr,ur_off,i_off) <- pLDST_Addrs op
               src_p <- P.option sRC_PT $ pSymbol "," >> pSrcP
-              pComplete [] [src0,SrcI32 imm,r_addr,ur_off,i_off,src_p]
+              pComplete [] [src0,Src_I32 imm,r_addr,ur_off,i_off,src_p]
 
             -- @P0   LDL.U8           R15, [R4+0x6] {!4,+5.W}; // examples/sm_80/libs/nvjpeg64_11/Program.36.sm_80.sass:39875
             --       LDL.LU           R38, [R1+0x14] {!4,+6.W,+1.R}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3108769
@@ -1491,7 +1493,7 @@ pInstOpts op
 
         pInstOpt :: PI [InstOpt]
         pInstOpt = pLabel "instruction option" $ do
-          io <- box <$> pSyntax
+          io <- (\x -> [x]) <$> pSyntax
           return io
 
 

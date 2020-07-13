@@ -64,7 +64,7 @@ runP pma u file inp = body
               -- parse error
               Right (Left err) -> return $ Left (errToDiag err)
               -- success
-              Right (Right (a,u,ws)) -> return (Right (a,u,ws))
+              Right (Right (a,u,ws)) -> return (Right (a,u,reverse ws))
 
         pma_with_warnings = do
           a <- pma
@@ -84,6 +84,9 @@ runP pma u file inp = body
 sourcePosToLoc :: P.SourcePos -> Loc
 sourcePosToLoc sp = lCons (P.sourceName sp) (P.sourceLine sp) (P.sourceColumn sp)
 
+pWarning :: Monad m => Loc -> String -> P m u ()
+pWarning loc msg =
+  P.modifyState $ \ps -> ps{psWarnings = dCons loc msg:psWarnings ps}
 
 pSemanticError :: (MonadTrans t, Monad m) => Loc -> String -> t (ExceptT Diagnostic m) a
 pSemanticError loc msg = pSemanticErrorRethrow $ dCons loc msg

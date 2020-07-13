@@ -31,8 +31,8 @@ pDstUR = pLabel "dst unif reg" $ DstUR <$> pSyntax
 
 
 -- floating point (fp32 or fp64)
-pSrcRCUF :: PI Src
-pSrcRCUF = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcFlt32
+pSrcRCUF :: Op -> PI Src
+pSrcRCUF op = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcFlt32 op
 
 -- pSrcRCUH2 :: PI Src
 -- would parse a pair of fp16 and merge into a W32
@@ -49,9 +49,9 @@ pSrcLblAt pc op loc = pLabel "label expression" $ SrcImmExpr loc <$> pLExpr pc
 
 
 -- imm32, but can be a symbol too
-pSrcI32OrL32 :: PC -> Op -> PI Src
-pSrcI32OrL32 pc op = pLabel "imm operand" $
-  P.try (pSrcI32 op) <|> pSrcLbl pc op
+pSrc_I32OrL32 :: PC -> Op -> PI Src
+pSrc_I32OrL32 pc op = pLabel "imm operand" $
+  P.try (pSrc_I32 op) <|> pSrcLbl pc op
 
 
 -- LDC wedges src0 into the src1 expression
@@ -120,15 +120,9 @@ pDstRH2 = pLabel "dst reg" $ do
 
 -- e.g. R10, R10.H0_H0, or c[0][0], c[0][0].H1_H1, or pair of imm16
 -- TODO: pair ImmH2
-pSrcXH2s :: PI [Src]
-pSrcXH2s =
-  box <$> P.try pSrcRH2 <|>
-    box <$> P.try pSrcCCXH2 <|>
-    box <$> P.try pSrcURH2 <|>
-    pSrcImmH2
-
-box :: a -> [a]
-box a = [a]
+pSrcXH2 :: Op -> PI Src
+pSrcXH2 op =
+  P.try pSrcRH2 <|> P.try pSrcCCXH2 <|> P.try pSrcURH2 <|> pSrcImmH2 op
 
 pSrcCCX :: PI Src
 pSrcCCX = pLabel "const src" $ P.try pConstInd <|> P.try pConstDir
@@ -166,13 +160,10 @@ pSignedInt = do
   sign <- P.option id $ pSymbol "-" >> return negate
   sign <$> pInt
 
-
-pSrcImmH2 :: PI [Src]
-pSrcImmH2 = do
-  -- TODO: these are really supposed to be packed into a single operand
-  s0 <- pSrcFlt32
-  s1 <- pSymbol "," >> pSrcFlt32
-  return [s0,s1]
+-- TODO: these are really supposed to be packed into a single operand
+-- can parse: imm16, imm16
+pSrcImmH2 :: Op -> PI Src
+pSrcImmH2 = pSrcFlt32
 
 -- rejects 32@hi... and 32@lo...
 pSrcI49 :: Op -> PI Src
@@ -191,24 +182,24 @@ pSrcI8 = pLabel "imm8" $ srcIntern <$> pIt
           w8 <- pImmA :: PI Word8 -- will fail gracefully on overflow
           return (SrcImm (Imm32 (fromIntegral w8)))
 
-pSrcI32 :: Op -> PI Src
-pSrcI32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
+pSrc_I32 :: Op -> PI Src
+pSrc_I32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
 pSrcImmNonBranch32 :: Op -> PI Src
 pSrcImmNonBranch32 op = do
     imm <- pVal32
     P.notFollowedBy (P.char '@')
     pWhiteSpace
-    return $ SrcI32 imm
+    return $ Src_I32 imm
   where pVal32
           -- TODO: should we convert integer to FP?
-          | oIsFP op = pFltImm32 <|> pIntImm32
+          | oIsFP op = pFltImm32 op <|> pIntImm32
           | otherwise = pIntImm32
 
-pSrcFlt32 :: PI Src
-pSrcFlt32 = pLabel "imm operand" $ SrcI32 <$> pFltImm32
+pSrcFlt32 :: Op -> PI Src
+pSrcFlt32 op = pLabel "imm operand" $ Src_I32 <$> pFltImm32 op
 
 pSrcInt32 :: PI Src
-pSrcInt32 = pLabel "imm operand" $ SrcI32 <$> pIntImm32
+pSrcInt32 = pLabel "imm operand" $ Src_I32 <$> pIntImm32
 
 
 -- e.g. +0x10 or -0x10 or +-0x10
@@ -396,23 +387,76 @@ pIntImm64 = do
   maybeNegate <- P.option id (pSymbol "-" >> return negate)
   maybeNegate <$> pImmS64
 
-pFltImm32 :: PI Word32
-pFltImm32 = do
-    let pNegSign = pSymbol "-" >> return (flip complementBit 31)
-        pSignFunc =
-          pNegSign <|> (P.option id (pSymbol "+" >> return id))
-    neg <- pSignFunc
-    neg <$> (pInf <|> pQNan <|> P.try pNonInf <|> pWholeNumberFlt)
-  where pInf = pSymbol "INF" >> return 0x7F800000
-        -- pNan = pSymbol "NAN" >> return 0x7FC00000
-        pQNan = pSymbol "QNAN" >> return 0x7FC00000
-        pNonInf = fromIntegral . floatToBits . doubleToFloat <$> pFloating
+pFltImm32 :: Op -> PI Word32
+pFltImm32 op
+  | is_fp16 = pF16
+  | otherwise = pOp
+  where pF16 = do
+          h1 <- pOp
+          pSymbol ","
+          h2 <- pOp
+          return ((h1`shiftL`16) .|. h2)
+
+        pOp = do
+          let sign_bit = if is_fp16 then 15 else 31 -- fp64 is shifted by now
+          let pNegSign = pSymbol "-" >> return (flip complementBit sign_bit)
+          signFunc <- pNegSign <|> (P.option id (pSymbol "+" >> return id))
+          signFunc <$> (pInf <|> pQNan <|> pNonInf)
+
+        pInf = pSymbol "INF" >> return inf
+        pQNan = pSymbol "QNAN" >> return qnan
+
+        pNonInf :: PI Word32
+        pNonInf
+          | is_fp16 = pWithLoc $ \loc -> do
+            f32 <- parseF32
+            let f16 = floatToHalfRaw f32
+            when (halfToFloatRaw f16 /= f32) $
+              pWarning loc "precision loss"
+            return $ fromIntegral f16
+
+          | is_fp64 = pWithLoc $ \loc -> do
+            f64b <- doubleToBits <$> pWholeOrDecimal
+            when ((f64b .&. 0xFFFFFFFF) /= 0) $
+              pSemanticError loc "fp64 imm not-representible imm32"
+            return $ fromIntegral (f64b `shiftR` 32)
+
+          | otherwise = floatToBits <$> parseF32
+          where parseF32 :: PI Float
+                parseF32 = pWithLoc $ \loc -> do
+                  f64 <- pWholeOrDecimal
+                  let f32 = doubleToFloat f64
+                  when (floatToDouble f32 /= f64) $
+                    pWarning loc "precision loss"
+                  return f32
+
+
+        pWholeOrDecimal :: PI Double
+        pWholeOrDecimal = P.try pFloating <|> pWholeNumberFlt
+
+
+        is_fp64 = oIsD op
+        is_fp16 = oIsH2 op
+
+        qnan :: Word32
+        qnan
+          | is_fp16 = ((f16`shiftL`16) .|. f16)
+          | is_fp64 = fromIntegral ((f64_exp_mask .|. f64_qnan_bit) `shiftR` 32)
+          | otherwise = 0x7FC00000
+          where f16 = fromIntegral (f16_exp_mask .|. f16_qnan_bit) :: Word32
+
+        inf :: Word32
+        inf
+          | is_fp16 = ((f16`shiftL`16) .|. f16)
+          | is_fp64 = fromIntegral (f64_exp_mask `shiftR` 32)
+          | otherwise = 0x7F800000
+          where f16 = fromIntegral f16_exp_mask :: Word32
+
         pWholeNumberFlt = do
-          f32 <- read <$> P.many1 P.digit :: PI Float
+          f64 <- read <$> P.many1 P.digit :: PI Double
           -- do I want a not-followed by?
           pWhiteSpace
-          return (floatToBits f32)
-
+          return f64
 
 pSyntax :: (Enum s,Syntax s) => PI s
 pSyntax = pLabel tnm $ pOneOfKeyword tnm es

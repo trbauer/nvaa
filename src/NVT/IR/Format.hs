@@ -69,16 +69,16 @@ fmtInstWithImmFormatter fmt_imm i =
                       isRZ _ = False
                       isR (Src_R _ _) = True
                       isR _ = False
-                      isEqI k (SrcI32 x) = x == k
+                      isEqI k (Src_I32 x) = x == k
                       isEqI _ _ = False
-                      isPow2Gt1 (SrcI32 imm) =
+                      isPow2Gt1 (Src_I32 imm) =
                         imm > 1 && (imm .&. (imm - 1)) == 0
                       isPow2Gt1 _ = False
               _ -> ""
           -- unless I choose to use the LUT as syntax
           | iOp i == OpLOP3 && length (iSrcs i) == 4 =
             case drop 3 (iSrcs i) of
-              [SrcI32 imm] -> ".(" ++ fmtLop3 (fromIntegral imm) ++ ")"
+              [Src_I32 imm] -> ".(" ++ fmtLop3 (fromIntegral imm) ++ ")"
           | iOp i == OpPLOP3 = ".LUT"
           | otherwise = ""
 
@@ -101,7 +101,7 @@ fmtInstWithImmFormatter fmt_imm i =
                   where opIsDefault :: Src -> Bool
                         opIsDefault SrcRZ = True
                         opIsDefault SrcURZ = True
-                        opIsDefault (SrcI32 0) = True
+                        opIsDefault (Src_I32 0) = True
                         opIsDefault _ = False
 
                         all_default = all opIsDefault srcs
