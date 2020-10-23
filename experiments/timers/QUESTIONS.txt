@@ -1,0 +1,58 @@
+
+- how accurate is __nanosleep?
+  ==> docs say [0..2n] <===
+  in pratice though?
+  EXPERIMENT: run timer test that does a nanosleep and measure the deviation
+
+- what's the cost of a clock64 call
+  10's or 100's clocks??
+  EXPERIMENT: time a clock64() call on a block with a single warp
+
+- is clock64() coherent across units??
+  (e.g. can one build a warp occupancy timeline)
+  or is there some globally coherent timer
+
+- what's the latency/cost of %globaltimer
+   https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#special-registers-globaltimer
+  is it coherent
+
+
+
+- PTX %smid maps to what
+  S2R              R0, SR_VIRTUALSMID {!1,+1.W};              /* 000E220000004300`0000000000007919 */
+
+- clock64() frequency
+    I thought ticks, but across dispatches it gives a smaller value than NS (though increasing).
+
+- is clock64 fixed frequency or constant rate?
+   would need to observe a frequency spike
+   ==> EXPERIMENT: ???? fix frequency low and then run a test, see if elapsed
+
+
+- what signal does __trap raise on the host?
+  test Linux and Windows
+  (need to catch in debugger)
+  https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#trap-function
+
+- can my sm_75 card run sm_50 code?
+   EXPERIMENT: compile for sm_50, nvprune, see if it runs
+
+
+=============================== COMPLETED =================================
+- is %globaltimer coherent across dispatches?
+  EXPERIMENT: dispatch, sleep K, dispatch; delta
+  RESULT: timers persist-proc proves it's actually system coherent.
+
+- does block dispatch round-robin?
+  EXPERIMENT: dispatch many and return the IDs (see how they map)
+    if they map uniformly we can feel confident they are
+  ==> RESULT: it's appearing like this is the case with a pure dispatch (1-1).
+      With suffificent numbers, they dispatch to virtual SM's in pairs
+
+- what PTX and SASS does clock64() use
+    //E:\dev\nvaa\experiments\timers\timers.cu:58   auto en = clock64();
+   RESULT:
+    mov.u64     %rd2, %clock64;
+    CS2R   R2, SR_CLOCKLO {!8,Y};  /* 000FD00000015000`0000000000027805 */
+
+
