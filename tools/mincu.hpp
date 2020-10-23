@@ -265,6 +265,139 @@ struct umem_alloc {
   }
 };
 
+#if 0
+// should I enable span access?
+// TODO: add stride
+// TODO: make conversion routines
+// TODO: support with init umem constructors and combine with umem?
+template <typename E>
+class umem_view
+{
+  std::shared_ptr<umem_alloc> ptr;
+  size_t                      off, len;
+
+        E *get_ptr()        {return const_cast<E *>(get_cptr());}
+  const E *get_cptr() const {return (const E *)ptr.get()->mem + off;}
+
+public:
+  umem_view(
+      umem_alloc _alloc,
+      size_t _off = 0,
+      size_t _len = _alloc.mem_size/sizeof(E))
+    : alloc(_alloc)
+    , off(_off)
+    , len(_len)
+  {
+    if (off >= len)
+      fatal("umem_view with off > len");
+    if (off >= _alloc.mem_size/sizeof(E))
+      fatal("umem_view with start off out of bounds");
+    // TODO: we could have a char[13] map to int[2] pruning the tails
+    if (_alloc.mem_size % sizeof(E))
+      fatal("umem_view with misaligned type");
+  }
+
+  void prefetch_to_device() const {
+    CUDA_API(cudaMemPrefetchAsync,
+      get_cptr(),               0, size()*sizeof(E));
+  }
+  void prefetch_to_host() const {
+    CUDA_API(cudaMemPrefetchAsync,
+      get_cptr(), cudaCpuDeviceId, size()*sizeof(E));
+  }
+
+  operator       E *()       {return get_ptr();}
+  operator const E *() const {return get_ptr();}
+
+  size_t size() const {return len - off;}
+
+  template <typename R>
+  void apply(const init<R> &i) {
+    i.apply<E>(get_ptr(), size());
+    // prefetch_to_device();
+  }
+
+  template <typename T>
+  static void format_elem(std::ostream &os, T t, int prec) {
+    if (prec >= 0)
+      os << std::fixed  << std::setprecision(prec) << t;
+    else
+      os << t;
+  }
+
+  template <>
+  static void format_elem(std::ostream &os, uint16_t t, int prec) {
+    os << "0x" << fmtHexDigits(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, uint32_t t, int prec) {
+    os << "0x" << fmtHexDigits(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, uint64_t t, int prec) {
+    os << "0x" << fmtHexDigits(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, int16_t t, int prec) {
+    os << fmtDec(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, int32_t t, int prec) {
+    os << fmtDec(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, int64_t t, int prec) {
+    os << fmtDec(t);
+  }
+
+  template <typename T>
+  static std::string fmtHexDigits(T t, int cw = -1) {
+    cw = cw <= 0 ? 2*sizeof(t) : cw;
+    std::stringstream ss;
+    ss << std::setw(cw) << std::uppercase << std::setfill('0')
+      << std::hex << t;
+    return ss.str();
+  }
+  template <typename T>
+  static std::string fmtDec(T t, int cw = -1) {
+    cw = cw <= 0 ? 2*sizeof(t) : cw;
+    std::stringstream ss;
+    ss << std::setw(cw) << std::dec << t;
+    return ss.str();
+  }
+
+  void str(
+    std::ostream &os = std::cout,
+    int elems_per_line = -1, int prec = -1) const
+  {
+    os << type_name<E>() << "[" << elems << "]: " <<
+      "0x" << fmtHexDigits<uint64_t>((uintptr_t)get_cptr()) << ":\n";
+    elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
+    prec = prec < 0 ? 3 : prec;
+    int addr_size =
+      sizeof(E)*elems <= 0xFFFFull ? 4 :
+      sizeof(E)*elems <= 0xFFFFFFFFull ? 8 :
+      -1;
+    size_t i = 0;
+    while (i < elems) {
+      os << fmtHexDigits<uint64_t>(i, addr_size) << ": ";
+      for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
+        os << "  ";
+        format_elem(os, get_cptr()[i], prec);
+        os.flush();
+      }
+      os << "\n";
+    }
+  }
+  std::string str(int elems_per_line = -1, int prec = -1) const {
+    std::stringstream ss;
+    formt(os, elems_per_line, prec);
+    return ss.str();
+  }
+};
+#endif // 0
+
+// this could derive
 template <typename E>
 class umem // unified memory buffer
 {
@@ -303,6 +436,15 @@ public:
 
   size_t size() const {return elems;}
 
+  operator std::vector<E> () const {
+    std::vector<E> es;
+    es.reserve(size());
+    for (size_t i = 0; i < size(); i++) {
+      es.emplace_back(get_cptr()[i]);
+    }
+    return es;
+  }
+
   // template <typename U>
   // umem<U> as() {
   //   return umem<U>(ptr, elems*sizeof(E)/sizeof(U));
@@ -325,10 +467,9 @@ public:
 
    // elements
    operator       E *()       {return get_ptr();}
-   operator const E *() const {return get_ptr();}
+   operator const E *() const {return get_cptr();}
    //      E &operator[](size_t ix)       {return get_ptr()[ix];}
    //const E &operator[](size_t ix) const {return get_ptr()[ix];}
-
 
 
   template <typename T>
