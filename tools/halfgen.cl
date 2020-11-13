@@ -92,6 +92,7 @@ float float_from_id(uint hi)
 //  uint id_x = get_global_id(0);
 //  uint id_y = get_global_id(1);
 //  return w32_to_float(id_x|(id_y<<16));
+// comes in pre-shifted
     return w32_to_float(hi | get_global_id(0));
 }
 

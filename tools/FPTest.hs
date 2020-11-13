@@ -11,8 +11,9 @@ import Data.List
 import Data.Word
 import Debug.Trace
 import System.Directory
-import System.Exit
 import System.Environment
+import System.Exit
+import System.FilePath
 import System.Process
 import Text.Printf
 import qualified Data.ByteString as BS
@@ -49,7 +50,7 @@ uncurry3 f = \(x,y,z) -> f x y z
 rounding_tests :: [(Round,Word32,Word16)]
 rounding_tests =
     concat [
-      tA 0 0
+      tA 0x00000000 0x0000
       -- roundoff is closer to zero
 --      tA 0x477FEFFF 0x7BFF -- [all modes] no overflow (closer to 0)
       -- roundoff exactly ties
@@ -64,8 +65,10 @@ rounding_tests =
 --    , tn 0xC77FF000 0xFC00 -- +1: rounding towards negative infinity
       -- roundoff closer to one
 --    , tA 0x477FF001 0x7C00 -- RTE         overflow (closer to 1)
---    , tn 0x33000800  0x0000
---    , tp 0x33000800  0x0001
+
+    -- old failing case
+    , tn 0x33000800  0x0001 -- not 0x0000
+--    , tp 0x33000801  0x0001
     ]
   where tA x y = [(r,x,y)| r<-[RoundZ,RoundE,RoundP,RoundN]]
         te x y = [(RoundE,x,y)]
@@ -73,22 +76,41 @@ rounding_tests =
         tp x y = [(RoundP,x,y)]
         tz x y = [(RoundZ,x,y)]
 
+
 main :: IO ()
-main = do
-  as <- getArgs
+main = getArgs >>= run
+run :: [String] -> IO ()
+run as = do
   let exitOn x = if x == 0 then exitSuccess else exitFailure
+  let parseC str = do
+        case reads str of
+          [(x,"")] -> do
+            when (x > 0xF) $
+              die $ str ++ ": group index output of bounds"
+            return x
+          _ -> die $ str ++ ": invalid integer (chunk index)"
+      parseR str =
+        case map toLower str of
+          "e" -> return RoundE
+          "n" -> return RoundN
+          "p" -> return RoundP
+          "z" -> return RoundZ
+          _ -> die $ str ++ ": malformed rounding mode (e|n|p|z)"
+  let usage = "usage: fptest.exe (e|n|p|z) [chunk]"
   case as of
     [] -> do
-      errs1 <- testAll32 RoundE
-      errs2 <- testAll32 RoundN
-      errs3 <- testAll32 RoundP
-      errs4 <- testAll32 RoundZ
-      exitOn (errs1 + errs2 + errs3 + errs4)
-    ["e"] -> testAll32 RoundE >>= exitOn
-    ["n"] -> testAll32 RoundN >>= exitOn
-    ["p"] -> testAll32 RoundP >>= exitOn
-    ["z"] -> testAll32 RoundZ >>= exitOn
-    _ -> die "usage: fptest.exe (e|n|p|z)"
+      errs <- mapM testAll32 [RoundE,RoundN,RoundP,RoundZ]
+      exitOn (sum errs)
+    [h] | h`elem`["-h","--help"] -> putStrLn usage >> exitSuccess
+    [rnd] -> do
+      r <- parseR rnd
+      testAll32 r >>= exitOn
+    [rnd,chk] -> do
+      r <- parseR rnd
+      c <- parseC chk
+      testAll32Chunk r c >>= exitOn
+    _ -> die usage
+
 
 testAll32 :: Round -> IO Int
 testAll32 r = do
@@ -100,80 +122,128 @@ testAll32 r = do
     putStrLn $ "rounding method validated"
   return errs
 
+
+mAX_ERRORS :: Int
+mAX_ERRORS = 5
+-- mAX_ERRORS = maxBound
+
+pain :: IO ()
+pain = repro RoundE 0x33000001
+
+
 testAll32Chunk :: Round -> Word32 -> IO Int
 testAll32Chunk r w32_hi = do
     putStrLn $ printf "**** testing range 0x%X" (w32_hi`shiftR`28)
     lbs <- mkData r w32_hi
+    putStrLn "**** validating"
     run (0 :: Int) 0x0 0x0 lbs <* removeFile dat_file
+    -- run (0 :: Int) 0x0 0x0 lbs
   where dat_file = mkF r w32_hi
+
         run :: Int -> Word32 -> Int -> LBS.ByteString -> IO Int
-        run !errs w32_lo off lbs = do
+        run !errs !w32_lo !off !lbs = do
           when ((w32_lo .&. 0x00FFFFFF) == 0x00FFFFFF) $
             -- the high nibble is implied
-            -- the second highest nibble is the counter
-            putStrLn $ "... " ++ show (0x0F - (w32_lo`shiftR`24)) ++ " left"
+            -- the second highest nibble is the progress counter
+            putStrLn $ printf "... %3d left" (0x10 - (0x0F .&. (w32_lo`shiftR`24)))
+          -- when (LBS.null lbs) $ die $ "reference buffer is too small"
           case LBS.splitAt 2 lbs of
             (lbs_w2,lbs_sfx) -> do
               let w16_ref = fromByteStringU16LE (LBS.toStrict lbs_w2)
               let w32 = (w32_hi`shiftL`28) .|. w32_lo
               z <- testFromF32 r w32 w16_ref
               let errs1 = if z then errs else (errs+1)
-              when (errs1 > 4) $ do
-                putStrLn $ ">>>>>>>>>>>>>>>>>> " ++ dat_file ++ ":" ++ printf "%08X: stopping to max errors" off
+              when (errs1 >= mAX_ERRORS) $ do
+                putStrLn $ ">>>>>>>>>>>>>>>>>> " ++
+                  dat_file ++ ":" ++ printf "%08X: stopping due to max errors reached" off
                 exitFailure
               if w32_lo == 0x0FFFFFFF then do
                   unless (errs == 0) $
                     putStrLn $ show errs ++ " errors"
-                  if LBS.null lbs then do
+                  if not (LBS.null lbs_sfx) then do
                       putStrLn $ "ERROR: extra bits at end of stream"
+                      putStrLn $ "  " ++ show (LBS.length lbs) ++ " B"
                       return (errs+1)
                     else return errs
                 else do
                   run errs1 (w32_lo+1) (off+2) lbs_sfx
 
+floatFromParts :: (Int,Word32) -> Float
+floatFromParts (e,m) = floatFromBits (m .|. ew)
+  where ew = fromIntegral (e + 127) `shiftL` 23 :: Word32
+
+floatToParts :: Float -> (Int,Word32)
+floatToParts f = (e,w32.&.0x7FFFFF)
+  where w32 = floatToBits f
+        e = fromIntegral ((0x7FFFFFFF.&.w32)`shiftR`23) - 127
+
 mkF :: Round -> Word32 -> FilePath
 mkF r w32_hi = "half-rt" ++ roundSuffix r ++ "-" ++ printf "%XXXXXXXX" w32_hi ++ ".dat"
+
 
 mkData :: Round -> Word32 -> IO LBS.ByteString
 mkData r w32_hi = do
   let krn = "all_f16s_rt" ++ roundSuffix r
-  let n = 2^32`div`0xF
+  -- let n = (2^32)`div`0xF :: Integer
+  let n = (2^32) `shiftR` 4 :: Integer -- bottom bits
   let dat_file = mkF r w32_hi
   putStrLn $ "************ generating " ++ dat_file
   let cls_expr =
         "let A=0:w; " ++
-        "#1`tools/halfgen.bin`all_f16s_rt" ++
-          roundSuffix r ++ "<" ++ show n ++ ">(" ++
-          "A," ++ printf "0x%08X" w32_hi ++ "); " ++
+        "#1`tools/halfgen.cl`all_f16s_rt" ++
+          roundSuffix r ++ "<" ++ printf "0x%X" n ++ ">(" ++
+          "A," ++ printf "0x%X<<28" w32_hi ++ "); " ++
         "save('" ++ dat_file ++ "',A);"
+  writeFile (replaceExtension (mkF r w32_hi) "cls") cls_expr
   out <- readProcess "cls64.exe" ["-e", cls_expr] ""
   -- putStr out
   LBS.readFile dat_file
 
--- if roundoff (>=0x1000)
---  0xBAEB9000   0x975C
---  0x3E1D1000   0x30E8
---  0x3D781000   0x2BC0
---  0x3B825000   0x1C12
---  0x3AF89000   0x17C4
--- if roundoff (>0x1000)
---  0xBB75B000   0x9BAE    0x9BAD
---  0x39E07000   0x0F04
---  0x3A413000   0x120A
---  0x3E77F000   0x33C0
---  0x3DC6B000   0x2E36
-cheat :: Round -> Word32 -> IO ()
-cheat r w32 = do
+{-
+FP32 to FP16 Round to Nearest Even with Denorms
+
+I am trying to implement a fp32 to fp16 conversion algorithm and am
+running into problems with denorms.
+
+I am following the IEEE-754-2008 (section 4.3).
+and using OpenCL's `vstore_half_rte` algorithm to referee the algorithm.
+
+The witness value that fails to convert correctly is.
+0x....
+This ends up converting to
+
+-}
+
+
+-- repro  RoundE 0x33800000 ==> 0x0001 or 0x0000
+repro :: Round -> Word32 -> IO ()
+repro = reproGen
+
+reproGen :: Round -> Word32 -> IO ()
+reproGen = reproWith "#1`tools/halfgen.bin"
+-- reproGenDNZ :: Round -> Word32 -> IO ()
+-- reproGenDNZ = reproWith "#1`tools/halfgen.cl[-cl-denorms-are-zero]"
+
+reproNv :: Round -> Word32 -> IO ()
+reproNv = reproWith "#0`tools/halfgen.cl"
+
+
+
+reproWith :: String -> Round -> Word32 -> IO ()
+reproWith devspec r w32 = do
   putStrLn $ show r ++ ":"
   putStrLn $ "F32: " ++ fmtF32 (floatFromBits w32)
-  putStrLn $ "SUT: " ++ fmtF16 (halfFromBits (floatBitsToHalfBits r w32))
-  w16 <- hwToF16 r w32
+  w16 <- hwToF16With devspec r w32
   putStrLn $ "GPU: " ++ fmtF16 (halfFromBits w16)
+  putStrLn $ "SUT: " ++ fmtF16 (halfFromBits (floatBitsToHalfBits r w32))
+
 
 hwToF16 :: Round -> Word32 -> IO Word16
-hwToF16 r w32 = (\[x] -> x) <$> hwToF16s 10000 r [w32]
-hwToF16s :: Int -> Round -> [Word32] -> IO [Word16]
-hwToF16s ix r w32s = do
+hwToF16 = hwToF16With "#1`tools/halfgen.bin"
+hwToF16With :: String -> Round -> Word32 -> IO Word16
+hwToF16With devspec r w32 = (\[x] -> x) <$> hwToF16sWith "#1`tools/halfgen.bin" 10000 r [w32]
+hwToF16sWith :: String -> Int -> Round -> [Word32] -> IO [Word16]
+hwToF16sWith devspec ix r w32s = do
   let in_file = "fptest-in-" ++ show ix ++ ".dat"
       out_file = "fptest-out-" ++ show ix ++ ".dat"
       cls_file = "fptest-" ++ show ix ++ ".cls"
@@ -189,7 +259,7 @@ hwToF16s ix r w32s = do
   writeFile cls_file $
     "let IN=file<bin>('" ++ in_file ++ "'):r\n" ++
     "let OUT=0:w\n" ++
-    "#1`halfgen.cl`" ++ kernel ++ "<" ++ show n ++ ">(IN,OUT)\n" ++
+    devspec ++ "`" ++ kernel ++ "<" ++ show n ++ ">(IN,OUT)\n" ++
     "save('" ++ out_file ++ "',OUT)\n"
   out_str <- readProcess "cls64" [cls_file] ""
   -- putStr out_str
@@ -245,8 +315,8 @@ testFromF32 r w32r w16r = do
   unless equal $ do
     putStrLn $ "under " ++ show r
     putStrLn $ "F32:   " ++ fmtF32 f32r
-    putStrLn $ "  REF: " ++ fmtF16 f16r
-    putStrLn $ "  ERR: " ++ fmtF16 f16x
+    putStrLn $ "  GPU: " ++ fmtF16 f16r
+    putStrLn $ "  SUT: " ++ fmtF16 f16x
   return equal
 --    die "stop"
 
@@ -374,3 +444,9 @@ testFuncsEq f1 f2 as bs = do
 
 -- f1 mnt_len bits = if mnt_len < bits then (bits - mnt_len) else 0
 -- f2 mnt_len bits = max 0 (bits - mnt_len)
+
+
+
+
+
+
