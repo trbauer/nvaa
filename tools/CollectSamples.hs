@@ -269,6 +269,12 @@ collectSampleIsa cso os_raw = body
                   -- copies the .cu file
                   let dst_cu_file = base_output_dir ++ "/" ++ takeFileName src_cu_file
                   copyFile src_cu_file dst_cu_file
+                  --
+                  cuod_exe <- D.findCudaTool os "cuobjdump"
+                  res <- readProcess cuod_exe ["--dump-resource-usage", cubin_output] ""
+                  res_cpp <- readProcess cPP_FILT [] res
+                  writeFile (replaceExtension cubin_output "txt") res_cpp
+                  --
                   printLn $ "  done"
 
 findCudaSamplesDir :: IO FilePath
