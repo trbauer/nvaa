@@ -111,6 +111,12 @@ run as = do
       testAll32Chunk r c >>= exitOn
     _ -> die usage
 
+studyW32 :: Word32 -> IO ()
+studyW32 w32 = do
+  let f32 = floatFromBits w32
+  putStrLn $
+    "  F32: " ++ fmtF32 (floatFromBits w32) ++ "\n" ++
+    ""
 
 testAll32 :: Round -> IO Int
 testAll32 r = do
@@ -298,10 +304,9 @@ testRandF32sR :: Round -> IO ()
 testRandF32sR r = do
   putStrLn $ "testing F32->F16(" ++ show r ++")"
   bs_f32s <- BS.readFile "rand-f32s.bin"
-  bs_f16s <- BS.readFile $ "rand-f32s-f16" ++ roundSuffix r ++ ".bin"
+  bs_f16s <- BS.readFile ("rand-f32s-f16" ++ roundSuffix r ++ ".bin")
   let w16s = toWords fromByteStringU16LE bs_f16s
       w32s = toWords fromByteStringU32LE bs_f32s
-  --
   let ws = zip w32s w16s
   mapM_ (uncurry (testFromF32 r)) ws
   return ()
@@ -354,12 +359,13 @@ testToF32 w16 w32 = do
 extractF32 :: Float -> IO ()
 extractF32 f32 = do
     let w32 = floatToBits f32
-        (e,m) = ((f32_exp_mask .&. w32)`shiftR`23, w32 .&. f32_mnt_mask)
+        (e,m) = ((f32_EXP_MASK .&. w32)`shiftR`f32_MNT_BITS, w32 .&. f32_MNT_MASK)
     putStrLn $ printf "exp: %d; mnt:x%X" e m
 
 
 fmtF16 :: Half -> String
-fmtF16 h = bin_w16 ++ printf " 0x%04X    " (halfToBits h) ++ "  " ++ show h
+fmtF16 h =
+    bin_w16 ++ printf " 0x%04X      %16s = %s" (halfToBits h) (show h) decomp
   where bin_w16 =
           replicate 3 ' ' ++
           fmtBinaryW 1 s ++ "`" ++
@@ -369,19 +375,32 @@ fmtF16 h = bin_w16 ++ printf " 0x%04X    " (halfToBits h) ++ "  " ++ show h
         s = ((f16_sign_bit .&. w)`shiftR`15)
         e = ((f16_exp_mask .&. w)`shiftR`10)
         m = (f16_mnt_mask .&. w)
+
+        decomp :: String
+        decomp = printf "2^(%d = %d) * %c.x%03X" eu e h1 m
+          where eu = ((fromIntegral e :: Int) - 15)
+                h1 = if e == 0 then '0' else '1'
+
 fmtF16x :: Word16 -> String
 fmtF16x = fmtF16 . halfFromBits
 
+
 fmtF32 :: Float -> String
-fmtF32 f = bin_w32 ++ printf " 0x%08X"     (floatToBits f) ++ "  " ++ show f
+fmtF32 f = bin_w32 ++ printf " 0x%08X  %16s = %s" (floatToBits f) (show f) decomp
   where bin_w32 =
           fmtBinaryW 1 s ++ "`" ++
           fmtBinaryW 8 e ++ "`" ++
           fmtBinaryW 23 m
         w = floatToBits f
-        s = ((f32_sign_bit .&. w)`shiftR`31)
-        e = ((f32_exp_mask .&. w)`shiftR`23)
-        m = (f32_mnt_mask .&. w)
+        s = ((f32_SIGN_BIT .&. w)`shiftR`31)
+        e = ((f32_EXP_MASK .&. w)`shiftR`23)
+        m = (f32_MNT_MASK .&. w)
+
+        decomp :: String
+        decomp = printf "2^(%d = %d) * %c.x%06X" eu e h1 m
+          where eu = ((fromIntegral e :: Int) - 127)
+                h1 = if e == 0 then '0' else '1'
+
 fmtF32x :: Word32 -> String
 fmtF32x = fmtF32 . floatFromBits
 

@@ -2,10 +2,11 @@ INSTALL_DST=c:/bin/
 
 main:
 	@echo make install
-	@echo make nva.exe
+	@echo make nva
 	@echo make collect_samples.exe|collect_opcodes.exe
 	@echo make fptest
 
+nva: nva.exe
 nva.exe: Makefile src/Main.hs src/NVT/*.hs src/NVT/Encoders/*.hs src/NVT/Parsers/*.hs
 	mkdir -p build/nva
 	ghc  -hidir build/nva -odir build/nva --make src/Main.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
@@ -24,7 +25,8 @@ collect_opcodes.exe: Makefile tools/CollectOpcodes.hs
 	ghc  -hidir build/libs -odir build/libs --make tools/CollectOpcodes.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
 	strip $@
 
-fptest.exe: Makefile tools/FPTest.hs
+fptest: fptest.exe
+fptest.exe: Makefile tools/FPTest.hs src/NVT/Floats.hs src/NVT/Bits.hs
 	mkdir -p build/libs
 	ghc  -hidir build/libs -odir build/libs --make tools/FPTest.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
 
