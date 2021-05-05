@@ -142,10 +142,10 @@ Some ELF sections are:
       struct{u32 index; u32 regs} per_function;
     };
 
-    struct EIATTR_REGCOUNT = WPS<0x2F>; // 0x2F04
-    struct EIATTR_MAX_STACK_SIZE = WPS<0x23>;
-    struct EIATTR_MIN_STACK_SIZE = WPS<0x12>;
-    struct EIATTR_FRAME_SIZE = WPS<0x11>;
+    using EIATTR_REGCOUNT = WPS<0x2F>; // 0x2F04
+    using EIATTR_MAX_STACK_SIZE = WPS<0x23>;
+    using EIATTR_MIN_STACK_SIZE = WPS<0x12>;
+    using EIATTR_FRAME_SIZE = WPS<0x11>;
 
     // for multiple functions the they appear to just use a
     // pair of entries

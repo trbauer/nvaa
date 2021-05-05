@@ -521,23 +521,26 @@ floatBitsToHalfBits r w32
 
         sgn x = if x /= 0 then 1 else 0
 
+        bias_diff = 127 - 15
+        mnt_diff = 23 - 10
+
         f16_nan :: Word16
         f16_nan =  f16_sign .|. f16_EXP_MASK .|. f16_nan_mnt .|. ensure_nonzero_mantissa
           where f16_nan_mnt = fromIntegral $
-                    ((w32 .&. f32_MNT_MASK)`shiftR`(23 - 10)) :: Word16
+                    ((w32 .&. f32_MNT_MASK)`shiftR`mnt_diff) :: Word16
                 ensure_nonzero_mantissa = if f16_nan_mnt == 0 then 1 else 0
 
         norm :: Word16
         norm = round (f16_sign32 .|. v) g s
-          where v = (((w32_u`shiftR`23) - 112)`shiftL`10) .|.
-                      ((w32_u`shiftR`13) .&. 0x3FF)
+          where v = (((w32_u`shiftR`23) - bias_diff)`shiftL`10) .|.
+                      ((w32_u`shiftR`13) .&. f16_MNT_MASK)
                 g = (w32_u`shiftR`12) .&. 1
-                s = sgn (w32_u .&. 0xFFF)
+                s = sgn (w32_u .&. 0x0FFF)
 
         denorm :: Word16
         denorm = round v g s
           where i = 125 - fromIntegral (w32_u`shiftR`23)
-                w32_u2 = (w32_u .&. 0x7FFFFF) .|. 0x800000
+                w32_u2 = (w32_u .&. 0x007FFFFF) .|. 0x00800000
                 v = f16_sign32 .|. (w32_u2`shiftR`(i+1))
                 g = (w32_u2`shiftR`i) .&. 1
                 s = sgn (w32_u2 .&. ((1`shiftL`i)-1))

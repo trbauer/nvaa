@@ -10,8 +10,8 @@ Ternary integer addition.  This instruction has two major formats:
 
 2. Extended addition 32b (`IADD3.X ...`).
    This accepts carry-ins.  It's unclear if the instruction will also
-   carry out; presumably the X encoding does something different
-   otherwise why not make it all one.
+   carry out; presumably the X encoding does something different.
+   Otherwise, why not just use a single instruction?
 
 
 ### IADD3 Accumulates to predicates
@@ -33,27 +33,28 @@ Ternary integer addition.  This instruction has two major formats:
 
 It appears in sequences such as
 
-   IADD3        R6, P1, R2, c[0x0][0x170], RZ ;
-   IADD3.X      R7,     ....c[0x0][0x174], RZ, P1, !PT;
-   STG.E... [R6]; // writes to R6..R7
+    IADD3        R6, P1, R2, c[0x0][0x170], RZ ;
+    IADD3.X      R7,     ....c[0x0][0x174], RZ, P1, !PT;
+    STG.E... [R6]; // writes to R6..R7
 
 The predicate register `P1` above is used as a carry-in bit.
+The second carry-in is `!PT` or 0.
 
 64b addition will emit sequences such as the following.
 
-  ...
-  IADD3            R11, P0, P1, R34, R32, R11 {!4,Y};
-  IADD3.X          R33,         R35, R33, R29, P0, P1 {!2};
-  ... last adds will zip the live ranges together
+    ...
+    IADD3            R11, P0, P1, R34, R32, R11         {!4,Y};
+    IADD3.X          R33,         R35, R33, R29, P0, P1 {!2};
+    ... last adds will zip the live ranges together
 
 
-The scheduling seems
+The scheduling seems ...
 
 
 ### IADD3 Opens
 
-- Can we use both carry-ins and carry outs at the same time
-- What is the semantic impact of .X?
+- Can we use both carry-ins and carry outs at the same time?
+- What is the semantic impact of .X?  Just to enable carry-ins?
 
 
 
@@ -73,9 +74,8 @@ Performs a 32b x 32b and stores the resulting 64b in successive registers.
      Dst[0] =          Src0*Src1 + Src2
      Dst[1] = OVERFLOW(Src0*Src1 + Src2)
 
-This is used in generating 64b multiplication results
-The .U32 zero-extends the result.  Leaving that option
-off sign extends the result.
+The .U32 zero-extends the result.
+Leaving that option off sign extends the result.
 
      MAD.WIDE.U32  DST, -0x2, 0x4, RZ;
      // (-0x2 is 0xFFFFFFFE)
@@ -87,7 +87,7 @@ gives
 
 but
 
-     MAD.WIDE       DST, -0x2, 0x4, RZ;
+     MAD.WIDE       DST, -0x2, 0x4, RZ; // sign extend
 
 leads to
 
@@ -107,22 +107,22 @@ This would be `-8` as a 64b value.
 
 ### 64b Multiplication
 
-  Signed multiplication uses the following sequence.
-  // R3:R2 *s R5:R4
-  IMAD             R7,  R2, R5,  RZ;
-  IMAD.WIDE.U32    R8,  R2, R4,  RZ;
-  IMAD             R11, R3, R4,  R7;
-  IADD3            R9,  R9, R11, RZ;
-  // output is R9:R8
+Signed multiplication uses the following sequence.
 
+    // R9:R8 = R3:R2 *s R5:R4
+    IMAD             R7,  R2, R5,  RZ;
+    IMAD.WIDE.U32    R8,  R2, R4,  RZ;
+    IMAD             R11, R3, R4,  R7;
+    IADD3            R9,  R9, R11, RZ;
 
-  // R3:R2 *u R5:R4
   Unsigned multiplication uses the following sequence.
-  IMAD             R7,  R2, R5,  RZ
-  IMAD.WIDE.U32    R8,  R2, R4,  RZ
-  IMAD             R11, R3, R4,  R7
-  IADD3            R9,  R9, R11, RZ
-  // output is R9:R8
+
+    // R9:R8 = R3:R2 *u R5:R4
+    IMAD             R7,  R2, R5,  RZ
+    IMAD.WIDE.U32    R8,  R2, R4,  RZ
+    IMAD             R11, R3, R4,  R7
+    IADD3            R9,  R9, R11, RZ
+
 
 
 
