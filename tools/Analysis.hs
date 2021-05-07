@@ -286,8 +286,8 @@ fmtFieldValueBinary f v = padL hdr_len hex_str
 hexDigitsForLen :: Int -> Int
 hexDigitsForLen len = (len + 3)`div`4
 
-padL :: Int -> String -> String
-padL k s = replicate (k - length s) ' ' ++ s
+-- padL :: Int -> String -> String
+-- padL k s = replicate (k - length s) ' ' ++ s
 padR :: Int -> String -> String
 padR k s = s ++ replicate (k - length s) ' '
 

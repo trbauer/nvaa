@@ -5,38 +5,52 @@ import System.Exit
 
 data Opts =
   Opts {
-    oVerbosity :: !Int
-  , oArch :: !String -- e.g. sm_52, sm_75
-  , oOutputFile :: !FilePath
-  , oSaveCuBin :: !FilePath -- if input is .cu, this is the .cubin
-  , oSavePtx :: !FilePath
---  , oUseCuobjdump :: !Bool -- versus nvdisasm
-  , oInputFile :: !FilePath
-  , oSourceMapping :: !Bool
+    oArch :: !String -- e.g. sm_52, sm_75
+  , oCollateListing :: ![Collate] -- implies -lines
+  , oColor :: !Color
+  , oExtraNvccArgs :: ![String]
+  , oExtraNvdisasmArgs :: ![String]
   , oFilterAssembly :: !Bool
-  , oTextOnly :: !Bool
+  , oIncludePaths :: ![FilePath]
+  , oInputFile :: !FilePath
+  , oOutputFile :: !FilePath
+  , oPrintDeps :: !Bool
+  , oPrintEncoding :: !Bool
+  , oPrintLines :: !Bool
+  , oPrintOffsets :: !Bool
   , oRDC :: !Bool
-  , oNoBits :: !Bool
+  , oSaveCuBin :: !FilePath -- if input is .cu, this is the .cubin
+  , oSavePtx :: !Bool
+  , oSavePtxTo :: !FilePath
   , oStdinIs :: !StdinIs
-  , oExtraArgs :: ![String]
+  , oTextSectionsOnly :: !Bool
+--  , oUseCuobjdump :: !Bool -- versus nvdisasm
+  , oVerbosity :: !Int
   } deriving Show
 dft_opts :: Opts
 dft_opts =
   Opts {
-    oVerbosity = 0
-  , oArch = "" -- "sm_62" -- "sm_70" -- "sm_52"
-  , oOutputFile = ""
-  , oSaveCuBin = ""
-  , oSavePtx = ""
-  , oInputFile = ""
---  , oUseCuobjdump = False
-  , oSourceMapping = False
+    oArch = "" -- "sm_62" -- "sm_70" -- "sm_52"
+  , oCollateListing = []
+  , oColor = ColorAuto
+  , oExtraNvccArgs = []
+  , oExtraNvdisasmArgs = []
   , oFilterAssembly = True
-  , oTextOnly = False
+  , oIncludePaths = []
+  , oInputFile = ""
+  , oOutputFile = ""
+  , oPrintDeps = True
+  , oPrintEncoding = False
+  , oPrintLines = False
+  , oPrintOffsets = False
   , oRDC = False
-  , oNoBits = False
+  , oSaveCuBin = ""
+  , oSavePtx = False
+  , oSavePtxTo = ""
   , oStdinIs = StdinIsUnknown
-  , oExtraArgs = []
+  , oTextSectionsOnly = False
+--  , oUseCuobjdump = False
+  , oVerbosity = 0
   }
 
 data StdinIs =
@@ -46,16 +60,28 @@ data StdinIs =
   | StdinIsSass
   deriving (Show,Eq)
 
+data Collate =
+    CollatePTX
+  | CollateSASS
+  deriving (Show,Eq)
+
 -- dft_opts_75 :: Opts
 -- dft_opts_75 = dft_opts{oArch = "sm_75"}
 dft_opts_80 :: Opts
 dft_opts_80 = dft_opts{oArch = "sm_80"}
 
+data Color =
+    ColorAuto | ColorNever | ColorAlways
+  deriving (Show,Eq)
 
 --------------
 debugLn :: Opts -> String -> IO ()
 debugLn os
-  | oVerbosity os > 1 = putStrLn
+  | oVerbosity os >= 2 = putStrLn
+  | otherwise = const (return ())
+verboseLn  :: Opts -> String -> IO ()
+verboseLn os
+  | oVerbosity os >= 1 = putStrLn
   | otherwise = const (return ())
 printLn :: Opts -> String -> IO ()
 printLn os

@@ -245,7 +245,12 @@ pWithNegAbs pBody = do
 
 pAddModRegSuffixesFrom :: [Mod] -> PI ModSet
 pAddModRegSuffixesFrom ms = msIntern . msFromList <$> P.many (pOneOf opts)
-  where opts = map (\m -> (msFormatSuffix m,m)) ms
+  where opts = concatMap expandMod ms
+        expandMod m
+          -- allow my shorthand .reu suffix
+          | m == ModREU = [(msFormatSuffix m,m),(".reu",m)]
+          | otherwise = [(msFormatSuffix m,m)]
+
 
 pSrcR :: PI Src
 pSrcR = pSrcR_WithModSuffixes [ModREU]

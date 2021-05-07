@@ -348,7 +348,7 @@ instance RealFloat Half where
   -- encodeFloat performs the inverse of decodeFloat in the sense that for finite x
   -- with the exception of -0.0, uncurry encodeFloat (decodeFloat x) = x.  encodeFloat m n
   -- is one of the two closest representable floating-point numbers to m*b^^n
-  -- (or ±Infinity if overflow occurs); usually the closer, but if m contains too many
+  -- (or +/-Infinity if overflow occurs); usually the closer, but if m contains too many
   -- bits, the result may be rounded in the wrong direction.
   --
   -- encodeFloat :: Integer -> Int -> a
@@ -533,7 +533,7 @@ floatBitsToHalfBits r w32
         norm :: Word16
         norm = round (f16_sign32 .|. v) g s
           where v = (((w32_u`shiftR`23) - bias_diff)`shiftL`10) .|.
-                      ((w32_u`shiftR`13) .&. f16_MNT_MASK)
+                      ((w32_u`shiftR`13) .&. fromIntegral f16_mnt_mask)
                 g = (w32_u`shiftR`12) .&. 1
                 s = sgn (w32_u .&. 0x0FFF)
 

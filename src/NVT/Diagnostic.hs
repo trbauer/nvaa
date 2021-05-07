@@ -35,5 +35,3 @@ dFormatWithMappings lms d =
 
         ln = lLine (dLoc d)
         cl = lColumn (dLoc d)
-
-

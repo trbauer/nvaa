@@ -4,6 +4,7 @@ module NVT.Driver where
 import NVT.CUDASDK
 import NVT.ElfDecode
 import NVT.FilterAssembly
+import NVT.RawInst
 import NVT.Opts
 
 import           Prog.Args.Args((#))-- progargs
@@ -26,74 +27,119 @@ import qualified Data.ByteString as S
 --                     .ptx -> .sass
 --           .cubin ->      -> .sass
 spec :: PA.Spec Opts
-spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Translator " ++ nvt_version) 0
-            [ -- options
-              PA.optF spec "v" "verbose"
-                "the verbosity level" ""
-                (\o -> (o {oVerbosity = 1})) # PA.OptAttrAllowUnset
-            , PA.optF spec "v2" "debug"
-                "the verbosity level" ""
-                (\o -> (o {oVerbosity = 2})) # PA.OptAttrAllowUnset
-            , PA.optF spec "lines" "line-mappings"
-                "enables line mappings" ""
-                (\o -> (o {oSourceMapping = True})) # PA.OptAttrAllowUnset
-            , PA.optF spec "" "no-filter-asm"
-                "does not filter assembly code" ""
-                (\o -> (o {oFilterAssembly = False})) # PA.OptAttrAllowUnset
-            , PA.optF spec "rdc" "relocatable-device-code"
-                "pass -rdc=true to nvcc" ""
-                (\o -> (o {oRDC = True})) # PA.OptAttrAllowUnset
-            , PA.optF spec "" "no-bits"
-                "eliminates the text bits" ""
-                (\o -> (o {oNoBits = True})) # PA.OptAttrAllowUnset
-            , PA.opt spec "o" "output" "PATH"
-                "sets the output file" "(defaults to stdout)"
-                (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
-            , PA.opt spec "a" "arch" "ARCH"
-                "sets the device architecture (e.g. -a=sm_72)" ""
-                (\a o -> (o {oArch = a})) # PA.OptAttrAllowUnset
+spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version) 0
+    [ -- options
+      PA.opt spec "a" "arch" "ARCH"
+        "sets the device architecture (e.g. -a=sm_72)" ""
+        (\a o -> (o {oArch = a})) # PA.OptAttrAllowUnset
+    , PA.optF spec "lines" "print-line-info"
+        "enables line mappings" ""
+        (\o -> (o {oPrintLines = True})) # PA.OptAttrAllowUnset
+    , PA.optF spec "lineinfo" "generate-line-info"
+        "same as -lines" "for nvcc compatibility"
+        (\o -> (o {oPrintLines = True})) # PA.OptAttrAllowUnset
+    , collate_opt
+    , color_opt
+    , PA.opt spec "I" "include-path" "PATH"
+        "add -I option to nvcc (careful to use =; -I=../path)"
+        "same effect as -X=-I../path"
+        (\a o -> (o {oIncludePaths = oIncludePaths o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
+    , PA.optF spec "" "no-filter-asm"
+        "does not filter assembly code" ""
+        (\o -> (o {oFilterAssembly = False})) # PA.OptAttrAllowUnset
+    , PA.optF spec "ndeps" "no-print-deps"
+        "do not print dependencies" ""
+        (\o -> (o {oPrintDeps = False})) # PA.OptAttrAllowUnset
+    , PA.optF spec "hex" "print-instruction-encoding"
+        "prints instruction encodings" ""
+        (\o -> (o {oPrintEncoding = True})) # PA.OptAttrAllowUnset
+    , PA.opt spec "o" "output" "PATH"
+        "sets the output file" "(defaults to stdout)"
+        (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
+    , PA.optF spec "offs" "print-offsets"
+        "print section offsets in SASS" ""
+        (\o -> (o {oPrintOffsets = True})) # PA.OptAttrAllowUnset
 
-            , PA.opt spec "" "save-cubin" "PATH"
-                "saves the intermediate .cubin file to this path" ""
-                (\f o -> (o {oSaveCuBin = f})) # PA.OptAttrAllowUnset
-            , PA.opt spec "" "save-ptx" "PATH"
-                "saves the intermediate .ptx file to this path" ""
-                (\f o -> (o {oSavePtx = f})) # PA.OptAttrAllowUnset
+    , PA.optF spec "rdc" "relocatable-device-code"
+        "pass -rdc=true to nvcc" ""
+        (\o -> (o {oRDC = True})) # PA.OptAttrAllowUnset
+    , PA.opt spec "" "save-cubin" "PATH"
+        "saves the intermediate .cubin file to this path" ""
+        (\f o -> (o {oSaveCuBin = f})) # PA.OptAttrAllowUnset
+    , PA.optF spec "ptx" "save-ptx"
+        "saves the intermediate .ptx file (based on input file)" ""
+        (\o -> (o {oSavePtx = True})) # PA.OptAttrAllowUnset
+    , PA.opt spec "" "save-ptx-to" "PATH"
+        ("enables and specifies non-default path for ptx") ""
+        (\f o -> (o {oSavePtxTo = f, oSavePtx = True})) # PA.OptAttrAllowUnset
+    , PA.optF spec "text" "print-code"
+        "print text sections only" "via nvdiasm --print-code"
+        (\o -> (o {oTextSectionsOnly = True})) # PA.OptAttrAllowUnset
+    , PA.opt spec "Xnvcc" "" "ANYTHING"
+        "sets an extra argument for the nvcc tool" "(e.g. -Xnvcc=-maxregcount -X=64; note how they are successive)"
+        (\a o -> (o {oExtraNvccArgs = oExtraNvccArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
+    , PA.opt spec "Xnvdisasm" "" "ANYTHING"
+        "sets an extra argument for the nvcc tool" "(e.g. -Xnvcc=-maxregcount -X=64; note how they are successive)"
+        (\a o -> (o {oExtraNvdisasmArgs = oExtraNvdisasmArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
+    , PA.optF spec "v2" "debug"
+        "the verbosity level" ""
+        (\o -> (o {oVerbosity = 2})) # PA.OptAttrAllowUnset
+    , PA.optF spec "v" "verbose"
+        "the verbosity level" ""
+        (\o -> (o {oVerbosity = 1})) # PA.OptAttrAllowUnset
+    ]
+    [ -- arguments
+        PA.arg spec "PATH"
+          "The file to read from" ""
+          (\f o -> (o {oInputFile = f})) # PA.OptAttrAllowUnset
+    ]
+  where collate_opt =
+          PA.optVFIO spec "c" "collate" "[aps]"
+            "collate listing by src line (implies -lines)"
+            ("  'a'/'all' implies all intermediate forms\n" ++
+             "  'p'/'ptx' implies to map PTX lines\n" ++
+             "  's'/'sass' implies to map SASS lines\n")
+            (\o -> return o {oCollateListing = [CollateSASS]})
+            parseCollateOptValue # PA.OptAttrAllowUnset
 
-            , PA.opt spec "X" "" "ANYTHING"
-                "sets an extra argument for the nvcc tool (e.g. -X-Ic:\\foo\\bar)" ""
-                (\a o -> (o {oExtraArgs = oExtraArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
-            ]
-            [ -- arguments
-                PA.arg spec "PATH"
-                  "The file to read from" ""
-                  (\f o -> (o {oInputFile = f})) # PA.OptAttrAllowUnset
-            ]
+        parseCollateOptValue :: String -> Opts -> IO Opts
+        parseCollateOptValue s o = do
+          let parseTk tk = do
+                case tk of
+                  "a" -> return [CollatePTX,CollateSASS]
+                  "all" -> return [CollatePTX,CollateSASS]
+                  "p" -> return [CollatePTX]
+                  "ptx" -> return [CollatePTX]
+                  "s" -> return [CollateSASS]
+                  "sass" -> return [CollateSASS]
+                  _ -> fatal $ "-c=" ++ s ++ ": " ++ tk ++ ": invalid value"
+
+          let tokenizeOnCommas = words . map (\c -> if c == ',' then ' ' else c)
+          cs <- nub . concat <$> mapM parseTk (tokenizeOnCommas s)
+          return o {oCollateListing = cs}
+
+        color_opt =
+          PA.optPIO spec "" "color" "CMODE"
+            "set options to enable output coloring (always|never|auto)"
+            "The 'auto' option uses color if the output is a tty."
+            parseColor # PA.OptAttrAllowUnset
+
+        -- parseColor :: Spec a => String -> Opts -> IO Opts
+        parseColor _ inp os =
+          case inp of
+            "always" -> return os{oColor = ColorAlways}
+            "never" -> return os{oColor = ColorNever}
+            "auto" -> return os{oColor = ColorAuto}
+            "tty" -> return os{oColor = ColorAuto}
+            _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
+
 nvt_version :: String
-nvt_version = "1.0.0"
-
+nvt_version = "1.1.0"
 
 
 run :: [String] -> IO ()
 run as = PA.parseArgs spec dft_opts as >>= runWithOpts
 
-
--- how to inject SASS?
--- http://stackoverflow.com/questions/20012318/how-to-compile-ptx-code
-
-
--- information on the current machine
-{-
-data EnvInfo =
-  EnvInfo {
-    eiSamplesPath :: Maybe FilePath
-  , eiSdkRoot :: Maybe FilePath
-  , eiPathToCpp :: Maybe FilePath
-  } deriving (Show,Eq)
-
-findEnvInfo :: Opts -> IO EnvInfo
-findEnvInfo = ...
--}
 
 getTemporaryFile :: String -> IO FilePath
 getTemporaryFile sfx = try 0
@@ -117,15 +163,23 @@ runWithOpts os
           | otherwise = handleInpFmt stdin_fmt
           where handleInpFmt fmt =
                   case fmt of
-                    StdinIsCu -> useTempFile "tmp.cu"
-                    StdinIsPtx -> useTempFile "tmp.ptx"
-                    StdinIsSass -> processSassToOutput stdin_str
+                    StdinIsCu -> useTempFile "default.cu"
+                    StdinIsPtx -> useTempFile "default.ptx"
+                    StdinIsSass -> processSassToOutput "" stdin_str
 
                 useTempFile fp_sfx = do
                  tmp_fp <- getTemporaryFile fp_sfx
                  writeFile tmp_fp stdin_str
                  runWithOpts (os{oInputFile = tmp_fp})
                  removeFile tmp_fp
+
+        -- given a .cu input, this gives the stem for .ptx or .cubin
+        deriveFileName :: String -> FilePath
+        deriveFileName = deriveFileNameFrom (oInputFile os)
+        deriveFileNameFrom :: FilePath -> String -> FilePath
+        deriveFileNameFrom from ext
+          | null from = "default" ++ ext
+          | otherwise = takeFileName (dropExtension from) ++ ext
 
         inferStdin :: String -> StdinIs
         inferStdin stdin_str
@@ -165,58 +219,101 @@ runWithOpts os
           --
           -- cs <- findCudaSamplesDir
           -- let cuda_sample_incs_dir = if null cs then [] else  ["-I" ++ cs]
-          let mkArgs targ =
-                ["-arch",oArch os,targ] ++
+          let needs_lines = oPrintLines os || not (null (oCollateListing os))
+          let mkNvccArgs targ =
+                ["-arch", oArch os, targ] ++
+                map (\i -> "-I" ++ i) (oIncludePaths os) ++
                 cl_bin_dir ++
-                maybeOpt oSourceMapping "-lineinfo" ++
+                (if needs_lines then ["-lineinfo"] else []) ++
                 maybeOpt oRDC "-rdc=true" ++
-                oExtraArgs os ++
+                oExtraNvccArgs os ++
                 -- cuda_sample_incs_dir ++
                 [oInputFile os]
-          out <- runCudaTool os "nvcc" (mkArgs "-cubin")
-          hPutStrLn stdout out
-          let cubin_file = takeFileName (dropExtension fp) ++ ".cubin"
+          out <- runCudaTool os "nvcc" (mkNvccArgs "-cubin")
+          verboseLn os out
+          let cubin_file = deriveFileName ".cubin"
           let output_path_without_ext
                 | null (oOutputFile os) = takeFileName (dropExtension fp)
                 | otherwise = dropExtension (oOutputFile os)
+              ptx_implicit_output = deriveFileNameFrom fp ".ptx"
+              ptx_required =
+                   oSavePtx os
+                || not (null (oSavePtxTo os))
+                || CollatePTX `elem` oCollateListing os
+              ptx_dst
+                | null (oSavePtxTo os) = deriveFileNameFrom fp ".ptx"
+                | otherwise = oSavePtxTo os
           --
-          unless (null (oSaveCuBin os)) $ do
-            -- putStrLn "copying cubin"
-            bs <- S.readFile cubin_file
-            S.writeFile (output_path_without_ext ++ ".cubin") bs
+          ptx_src <-
+            if not ptx_required then return ""
+              else do
+                -- have to re-run since -ptx and -cubin conflict
+                _ <- runCudaTool os "nvcc" (mkNvccArgs "-ptx")
+                when (ptx_implicit_output /= ptx_dst) $ do
+                  debugLn os $
+                    "copying\n" ++
+                    "   from " ++ ptx_implicit_output ++ "\n" ++
+                    "   to " ++ ptx_dst
+                  renameFile ptx_implicit_output ptx_dst
+                ptx <- readFile ptx_dst
+                length ptx `seq` return ()
+                when (not (oSavePtx os)) $
+                  removeFile ptx_dst
+                return ptx
           --
-          unless (null (oSavePtx os)) $ do
-            runCudaTool os "nvcc" (mkArgs "-ptx")
-            --
-            let ptx_file = takeFileName (dropExtension fp) ++ ".ptx"
-            -- putStrLn $
-            --   "copying\n" ++
-            --   "   from " ++ ptx_file ++ "\n" ++
-            --   "   to " ++ oSavePtx os
-            bs <- S.readFile ptx_file
-            S.writeFile (oSavePtx os) bs
-            removeFile ptx_file
+          -- .cu ==> .cubin => .sass
+          --                ^^ here
+          processCubinFileWithPtx ptx_src cubin_file
           --
-          processCubinFile cubin_file
-          --
-          removeFile cubin_file
+          if null (oSaveCuBin os) then do
+              debugLn os $ cubin_file ++ ": removing"
+              removeFile cubin_file
+            else do
+              debugLn os $
+                cubin_file ++ ": renaming to " ++ output_path_without_ext ++ ".cubin"
+              renameFile cubin_file (output_path_without_ext ++ ".cubin")
 
         processSassFile :: FilePath -> IO ()
-        processSassFile fp
-          | oFilterAssembly os = readFile fp >>= processSassToOutput
+        processSassFile sass_fp
+          | oFilterAssembly os = readFile sass_fp >>= processSassToOutput ""
+          -- should be unreachable
           | otherwise = error "processSassFile: with --no-filter-asm"
 
-        processSassToOutput :: String -> IO ()
-        processSassToOutput inp
-          | null (oOutputFile os) = processSassIO stdout inp
-          | otherwise = withFile (oOutputFile os) WriteMode $ \h -> processSassIO h inp
-        processSassIO :: Handle -> String -> IO ()
-        processSassIO h_out
-          | null (oArch os) = const $ fatal "--arch required for this mode"
+        processSassToOutput :: String -> String -> IO ()
+        processSassToOutput ptx sass
+          | null (oOutputFile os) =
+            processSassIO stdout ptx sass
           | otherwise =
-            if oSourceMapping os
-              then filterAssemblyWithInterleavedSrcIO (oNoBits os) h_out (oArch os)
-              else hPutStr h_out . filterAssembly (oNoBits os) (oArch os)
+            withFile (oOutputFile os) WriteMode $ \h -> processSassIO h ptx sass
+
+        processSassIO :: Handle -> String -> String -> IO ()
+        processSassIO h_out ptx sass
+          | null (oArch os) = fatal "--arch required for this mode"
+          | otherwise = do
+            is_tty <- hIsTerminalDevice h_out
+            let color = oColor os == ColorAlways || oColor os == ColorAuto && is_tty
+                fos = fos_dft {
+                          foArch = oArch os
+                        , foColor = color
+                        , foFmtOpts = (foFmtOpts fos_dft) {
+                              foPrintEncoding = oPrintEncoding os
+                            , foPrintOffsets = oPrintOffsets os
+                            , foPrintDeps = oPrintDeps os
+                            }
+                        , foVerbosity = oVerbosity os
+                        }
+            if not (null (oCollateListing os))
+              then do
+                when (oVerbosity os >= 2) $ do
+                  unless (null ptx) $
+                    writeFile "debug-collate.ptx" ptx
+                  unless (null sass) $
+                    writeFile "debug-collate.sass" sass
+                let c_ptx = if CollatePTX `elem` oCollateListing os then ptx else ""
+                let c_sass = if CollateSASS `elem` oCollateListing os then sass else ""
+                emitCollatedListing fos h_out c_ptx c_sass
+              else if not (oFilterAssembly os) then hPutStr h_out sass
+              else filterAssemblyWithInterleavedSrcIO fos h_out sass
 
         emitOutput :: String -> IO ()
         emitOutput
@@ -228,17 +325,20 @@ runWithOpts os
           | otherwise = appendFile (oOutputFile os)
 
         processCubinFile :: FilePath -> IO ()
-        processCubinFile cubin_file = do
+        processCubinFile = processCubinFileWithPtx ""
+        processCubinFileWithPtx :: String -> FilePath -> IO ()
+        processCubinFileWithPtx maybe_ptx cubin_file = do
           -- let nv_cuod_args = ["--dump-sass", cubin_file]
           -- cuod_out <- runCudaTool os "cuobjdump" nv_cuod_args
           let nvdis_args_no_lines =
-                maybeOpt oTextOnly "--print-code" ++
+                maybeOpt oTextSectionsOnly "--print-code" ++
                 [
                   "--no-vliw" -- disables the {...}
                 , "--print-instruction-encoding"
                 , "--no-dataflow"
                 , cubin_file
-                ]
+                ] ++ oExtraNvdisasmArgs os
+
           let tryNvdisasmWithoutLineNumbers :: SomeException -> IO String
               tryNvdisasmWithoutLineNumbers e = do
                 warningLn os "nvdisasm: failed trying with*out* --print-line-info"
@@ -246,7 +346,7 @@ runWithOpts os
           --
           nvdis_out <- runCudaTool os "nvdisasm" (["--print-line-info"] ++ nvdis_args_no_lines)
             `catch` tryNvdisasmWithoutLineNumbers
-          processSassToOutput nvdis_out
+          processSassToOutput maybe_ptx nvdis_out
           --
           -- cuod_res <- runCudaTool os "cuobjdump" ["--dump-resource-usage", cubin_file]
           -- appendOutput cuod_res

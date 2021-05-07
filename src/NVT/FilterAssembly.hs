@@ -1,15 +1,22 @@
 module NVT.FilterAssembly where
 
+import NVT.Color
+-- import NVT.Demangle
 import NVT.RawInst
 
 import Control.Applicative
+import Control.Monad
 import Data.Bits
 import Data.Array
 import Data.Char
 import Data.List
 import Debug.Trace
 import System.IO
+import System.FilePath
+import System.Directory
 import Text.Printf
+import qualified Data.Map.Strict as DM
+import qualified Data.IntMap.Strict as DIM
 
 type SrcDict = [(FilePath,Array Int String)]
 
@@ -28,7 +35,7 @@ tryParseLineMapping ln
   where lno_pfx = "//## File "
         sfx_file = dropWhile (/='"') ln
 
-lm_test = "//## File \"D:\\\\dev\\\\nvaa\\\\cuda-tests/cf.cu\", line 62"
+-- lm_test = "//## File \"D:\\\\dev\\\\nvaa\\\\cuda-tests/cf.cu\", line 62"
 
 
 -- maxwell =
@@ -41,13 +48,41 @@ lm_test = "//## File \"D:\\\\dev\\\\nvaa\\\\cuda-tests/cf.cu\", line 62"
 type FilterProcessorIO = SrcDict -> [(Int,String)] -> IO ()
 type Arch = String
 
-filterAssemblyWithInterleavedSrcIO :: Bool -> Handle -> Arch -> String -> IO ()
-filterAssemblyWithInterleavedSrcIO no_bits h_out arch = processLns . zip [1..] . lines
+data FilterOpts =
+  FilterOpts {
+    foArch :: !String
+  , foColor :: !Bool
+  , foFmtOpts :: !FmtOpts
+  , foVerbosity :: !Int
+  } deriving Show
+fos_dft :: FilterOpts
+fos_dft = FilterOpts "" False dft_fos 0
+
+isCommentLine :: String -> Bool
+isCommentLine = (=="//") . take 2 . dropWhile isSpace
+
+isLabelLine :: String -> Bool
+isLabelLine "" = False
+isLabelLine (c:cs)
+  | isLabelStart c =
+    case span isLabelChar cs of
+      (lbl,':':_) -> True
+      _ -> False
+isLabelLine _ = False
+
+isLabelStart :: Char -> Bool
+isLabelStart c = isAlpha c || c`elem`"._$"
+
+isLabelChar :: Char -> Bool
+isLabelChar c = isAlphaNum c || c`elem`"._$"
+
+filterAssemblyWithInterleavedSrcIO :: FilterOpts -> Handle -> String -> IO ()
+filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
   where processLns :: [(Int,String)] -> IO ()
         processLns
           -- | arch >= "sm_80" = hPutStr h_out . unlines . map snd
-          | arch >= "sm_70" = processLns128B    empty_dict
-          | arch >= "sm_50" = processLnsMaxwell empty_dict
+          | foArch fos >= "sm_70" = processLns128B    empty_dict
+          | foArch fos >= "sm_50" = processLnsMaxwell empty_dict
           | otherwise = hPutStr h_out . unlines . map snd
 
         empty_dict :: SrcDict
@@ -58,37 +93,62 @@ filterAssemblyWithInterleavedSrcIO no_bits h_out arch = processLns . zip [1..] .
 
         -- Volta, Turing, and Ampere
         processLns128B :: FilterProcessorIO
-        processLns128B _ [] = do
-          return ()
+        processLns128B _ [] = return ()
         processLns128B dict lns@((_,ln0str):(_,ln1str):lns_sfx) =
           case parseSampleInst (ln0str ++ ln1str) of
             Right si -> do
-              emitLn $ fmtSi si
+              emitSpans fos h_out (fmtSi fos si)
               processLns128B dict lns_sfx
             Left _ -> tryProcessLineMapping dict lns processLns128B
-        processLns128B dict [(_,lnstr)] = emitLn lnstr >> processLns128B dict []
-
-        fmtSi :: SampleInst -> String
-        fmtSi si
-          | no_bits = fmtRawInst (siRawInst si)
-          | otherwise = fmtSampleInst si
+        processLns128B dict (ln:lns) =
+          tryProcessLineMapping dict lns processLns128B
 
         tryProcessLineMapping :: SrcDict -> [(Int,String)] -> FilterProcessorIO -> IO ()
-        tryProcessLineMapping dict0 ((_,lnstr):lns) cont =
-          case tryParseLineMapping lnstr of
-            Nothing -> emitLn lnstr >> cont dict0 lns
-            Just (file,lno) -> lookupMapping dict0
-              where lookupMapping :: SrcDict -> IO ()
-                    lookupMapping dict =
-                      case file `lookup` dict of
-                        Nothing -> do
-                          src_lns <- lines <$> readFile file
-                          let arr = listArray (1,length src_lns) src_lns :: Array Int String
-                          lookupMapping ((file,arr):dict)
-                        Just arr -> do
-                          let src_line = "  //" ++ (arr ! lno)
-                          emitLn $ lnstr ++ "\n" ++ src_line
-                          cont dict lns
+        tryProcessLineMapping dict0 [] cont = return ()
+        tryProcessLineMapping dict0 ((_,lnstr):lns) cont
+          | is_global_directive = do
+              hPutStr h_out lnstr
+              emitStyle fos h_out "c" (" // " ++ global_demangled)
+              hPutStrLn h_out ""
+              cont dict0 lns
+          | isLabelLine lnstr && foColor fos = do
+              emitStyle fos h_out "n" lnstr >> emitLn "" >> cont dict0 lns
+          | otherwise =
+            case tryParseLineMapping lnstr of
+              Nothing
+                | isCommentLine lnstr && foColor fos ->
+                    emitStyle fos h_out "c" lnstr >> hPutStr h_out "\n" >> cont dict0 lns
+                | otherwise -> emitLn lnstr >> cont dict0 lns
+              Just (file,lno) -> lookupMapping dict0
+                where lookupMapping :: SrcDict -> IO ()
+                      lookupMapping dict =
+                        case file `lookup` dict of
+                          Nothing -> do
+                            src_lns <- lines <$> readFile file
+                            let arr = listArray (1,length src_lns) src_lns :: Array Int String
+                            lookupMapping ((file,arr):dict)
+                          Just arr -> do
+                            let src_loc = takeFileName file ++ ":" ++ show lno
+                            let src_line = "  // " ++ padR 32 (src_loc ++ ": ") ++ (arr ! lno)
+                            emitStyle fos h_out "c" src_line
+                            emitLn ""
+                            -- emitLn $ lnstr ++ "\n" ++ src_line
+                            cont dict lns
+          where {-
+                global_demangled =
+                  -- .global _Z5add64PyPKyy
+                  case  words lnstr of
+                    [".global", func] ->
+                      case demangle func of
+                        Left e_msg -> "(demangle error: " ++ e_msg ++ ")"
+                        Right func_dem
+                          | func_dem /= func -> func_dem
+                          | otherwise -> "" -- e.g. extern C
+                    _ -> ""
+                is_global_directive = not (null global_demangled)
+                -}
+                is_global_directive = False
+                global_demangled = ""
 
         -- Maxwell and Pascal
         processLnsMaxwell :: FilterProcessorIO
@@ -125,27 +185,50 @@ filterAssemblyWithInterleavedSrcIO no_bits h_out arch = processLns . zip [1..] .
                         shifted_word = dep `shiftL` (64 - 23)
         processLnsMaxwell dict lns = tryProcessLineMapping dict lns processLnsMaxwell
 
+emitSpans :: FilterOpts -> Handle -> [FmtSpan] -> IO ()
+emitSpans fos h_out
+  | foColor fos = loopColor
+  | otherwise = hPutStrLn h_out . fssToString
+  where loopColor [] = hPutStrLn h_out ""
+        loopColor (fs:fss) = do
+          emitStyle fos h_out (fsStyle fs) (fsText fs)
+          loopColor fss
 
+emitStyle :: FilterOpts -> Handle -> String -> String -> IO ()
+emitStyle fos h_out style
+  | not (foColor fos) = hPutStr h_out
+  | otherwise =
+    case style of
+      "o" -> hPutStrCyan h_out -- op
+      -- "s" -> hPutStrDarkCyan h_out -- subop
+      "n" -> hPutStrDarkCyan h_out -- name (register, label, barrier)
+      "c" -> hPutStrDarkGreen h_out -- comment
+      "l" -> hPutStrBlue h_out -- label
+      --
+      -- explicit colors
+      "ML" -> hPutStrMagenta h_out
+      "MD" -> hPutStrDarkMagenta h_out
+      "CL" -> hPutStrCyan h_out
+      "CD" -> hPutStrDarkCyan h_out
+      _ -> hPutStr h_out
 
-filterAssembly :: Bool -> String -> String -> String
-filterAssembly no_bits arch = processLns . zip [1..] . lines
+fmtSi :: FilterOpts -> SampleInst -> [FmtSpan]
+fmtSi fos = fmtSampleInstToFmtSpans (foFmtOpts fos)
+
+filterAssembly :: FilterOpts -> String -> String
+filterAssembly fos = processLns . zip [1..] . lines
   where processLns :: [(Int,String)] -> String
         processLns
-          | arch >= "sm_70" = processLns128B
-          | arch >= "sm_50" = processLnsMaxwell
+          | foArch fos >= "sm_70" = processLns128B
+          | foArch fos >= "sm_50" = processLnsMaxwell
           | otherwise = unlines . map snd
-
-        fmtSi :: SampleInst -> String
-        fmtSi si
-          | no_bits = fmtRawInst (siRawInst si)
-          | otherwise = fmtSampleInst si
 
         -- Volta and Turing
         processLns128B [] = ""
         processLns128B ((lno0,ln0str):(lno1,ln1str):lns) =
           case parseSampleInst (ln0str ++ ln1str) of
             Right si ->
-              fmtSampleInst si ++ "\n" ++
+              fssToString (fmtSi fos si) ++ "\n" ++
               processLns lns
             Left _ ->
               ln0str ++ "\n" ++
@@ -182,7 +265,7 @@ filterAssembly no_bits arch = processLns . zip [1..] . lines
                         -- NOTE: we might drop unused control codes here
                         processLnsMaxwell ((lno,lnstr):lns)
                       Right si ->
-                        fmtSampleInst si ++ "\n" ++
+                        fssToString (fmtSi fos si) ++ "\n" ++
                         parseInstGroup deps lns
                   where fake_second_line = printf "  /* 0x%016X */" shifted_word
                         -- in Volta it is stored at [125:105]
@@ -191,3 +274,406 @@ filterAssembly no_bits arch = processLns . zip [1..] . lines
           lnstr ++ "\n" ++
           processLnsMaxwell lns
 
+
+--------------------------------------------------------------------------------
+-- assembly collating
+type SrcLoc = (FilePath,Int)
+type SassListingMap = ListingMap SassListingLine
+type SassListingLine = (Int,SampleInst)
+type PtxInstMap = ListingMap PtxInstLine
+type PtxInstLine = (Int,String)
+
+-- map source locations to all listing lines/instructions that map there
+type ListingMap a = DM.Map SrcLoc [a]
+
+-- line and string pair for PTX instruction
+no_sloc :: SrcLoc
+no_sloc = ("",0)
+
+-- maps locations to listing line numbers
+collateSassAssembly :: String -> SassListingMap
+collateSassAssembly = loop DM.empty no_sloc . zip [1..] . lines
+  where loop :: SassListingMap -> SrcLoc -> [(Int,String)] -> SassListingMap
+        loop fm _ [] = fm
+        loop fm sl ((lno0,ln0):lns) =
+            case lns of
+              [] -> handleNonAsmLn ln0
+              (_,ln1):lns1 ->
+                case parseSampleInst (ln0 ++ ln1) of
+                  Right si -> loop fm1 sl lns1
+                    where fm1 = fmInsert sl (lno0,si) fm
+                  Left _ -> handleNonAsmLn ln0
+          where handleNonAsmLn ln
+                  | isLabelLine ln =loop fm sl lns -- labels don't break location continuity
+                  | otherwise =
+                    case tryParseLineMapping ln of
+                      Nothing -> loop fm no_sloc lns -- reset loc on inst parse failure
+                      Just sl -> loop fm sl lns
+
+fmInsert :: SrcLoc -> SassListingLine -> SassListingMap -> SassListingMap
+fmInsert sl ll = DM.insertWith (++) sl [ll]
+
+--
+-- data Collated a =
+--   Collated {
+--     cListingMap :: ListingMap a
+--   , cLinesToInsts :: DIM.IntMap a
+--   }
+--
+
+emitCollatedListing :: FilterOpts -> Handle -> String -> String -> IO ()
+emitCollatedListing fos h_out ptx sass = do
+  let sass_lms0 = collateSassAssembly sass
+      ptx_lms0 = collatePtxAssembly ptx
+  ---------------------------
+  -- canonicalize all the paths so that they match the source files we walk
+  -- (e.g. PTX or SASS might normalize the path or produce an absolute path, etc...)
+  -- this requires remapping all of the
+      filesFromMap = map (fst . fst) . DM.toList
+
+  -- all source files mentioned in all listings
+      all_src_fs0 = sort . nub $ filesFromMap sass_lms0 ++ filesFromMap ptx_lms0
+
+  -- canonically and associate (old-name,canon-name)
+  src_f_canons <-
+    forM (filter (not . null) all_src_fs0) $ \src_f -> do
+      src_f_canon <- canonicalizePath src_f
+      return (src_f,src_f_canon)
+
+  -- remap the listings so all file names are correct
+  -- this assumes each listing only uses one mapping for each file
+  let remapEntry :: SrcLoc -> SrcLoc
+      remapEntry e@(src_f,lno) =
+        case src_f `lookup` src_f_canons of
+          Nothing -> e
+          Just src_f_canon -> (src_f_canon,lno)
+  let remapFileNamesToCanonical = DM.mapKeysWith (++) remapEntry
+  let all_src_fs = nub (map snd src_f_canons)
+      ptx_lms = remapFileNamesToCanonical ptx_lms0
+      sass_lms = remapFileNamesToCanonical sass_lms0
+  emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms
+
+
+emitCollatedListingWith ::
+  FilterOpts -> Handle ->
+  [FilePath] -> PtxInstMap -> SassListingMap -> IO ()
+emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms = do
+    mapM_ emitSrcFile all_src_fs
+  where emitFileHeader :: FilePath -> IO ()
+        emitFileHeader src_f = do
+          let hPutHeader = if foColor fos then hPutStrWhite else hPutStr
+          hPutHeader h_out $
+            "// " ++ replicate 72 '=' ++ "\n" ++
+            "// " ++ src_f ++ "\n"
+
+        emitPtxInstLineLn :: Int -> String -> Bool -> IO ()
+        emitPtxInstLineLn llno ptx_ins ooo =
+            emitSpans fos h_out (lno_span:spans ptx_ins)
+          where lno_span = text $ ooo_str ++ printf "%4d" llno ++ "> "
+                  where ooo_str = if ooo then "!" else " "
+
+                spans :: String -> [FmtSpan]
+                spans s
+                  -- filter out non instruction lines
+                  | not (isPtxInstLine s) = [text s]
+                  | otherwise = parseBegin s
+                  where parseBegin "" = []
+                        parseBegin sfx@(c:cs)
+                          | isSpace c =
+                            case span isSpace sfx of
+                              (pfx,sfx) -> text pfx : parsePredOp sfx
+                          | otherwise = parsePredOp sfx
+
+                        parsePredOp ('@':cs) =
+                          case span (not . isSpace) cs of
+                            (pfx,sfx) -> text pfx : parseBegin sfx
+                        parsePredOp str = -- looking at the op
+                          case span (\c -> isAlphaNum c || c == '.') str of
+                            (op,sfx) -> [opText op, text sfx]
+
+                text = FmtSpan "MD"
+                opText = FmtSpan "ML"
+        --
+        -- set of mapped ptx listing lines
+        toListingMap :: DM.Map SrcLoc [(Int,a)] -> DIM.IntMap ()
+        toListingMap = DIM.fromList . concatMap (map ((\x -> (x,())) . fst) . snd) . DM.toList
+
+        all_ptx_listing_lines :: DIM.IntMap ()
+        all_ptx_listing_lines = toListingMap ptx_lms
+        all_sass_listing_lines :: DIM.IntMap ()
+        all_sass_listing_lines = toListingMap sass_lms
+
+        -- true if there's another instruction between these two listing lines
+        areListingLinesDiscontinuous :: DIM.IntMap () -> Int -> Int -> Bool
+        areListingLinesDiscontinuous lls ll_stt ll_end =
+            ll_stt >= 1 &&
+              any (`DIM.member`lls) [ll_stt + 1 .. ll_end - 1]
+        --
+        -- all_sass_listing_lines :: DIM.IntMap [SampleInst]
+        -- all_sass_listing_lines = DIM.fromList (concatMap snd (DM.toList sass_lms))
+        -- hasSassListingLine :: Int -> Bool
+        -- hasSassListingLine = (`DIM.member`all_sass_listing_lines)
+
+        emitSassInstLn :: Int -> SampleInst -> Bool -> IO ()
+        emitSassInstLn llno si ooo =
+            emitSpans fos h_out $ ooo_span : lloc_span : fmtSi fos si
+          where ooo_span = if ooo then FmtSpan "" "!" else FmtSpan "" " "
+                lloc_span
+                  -- emit listing line number (no PCs)
+                  | off < 0 = FmtSpan "" (printf "[line %4d]" llno)
+                  -- use the PC
+                  | otherwise = FmtSpan "" (printf "[%05X] " off)
+                  where off = riOffset (siRawInst si)
+
+        emitSrcLn :: String -> IO ()
+        emitSrcLn s
+          | foColor fos = hPutStrDarkGreen h_out s >> hPutStrLn h_out ""
+          | otherwise = hPutStr h_out s >> hPutStrLn h_out ""
+
+        -- true if there's an instruction between these two listing lines
+        -- areSassDiscontinuous :: Int -> Int -> Bool
+        -- areSassDiscontinuous ll_stt ll_end =
+        --    ll_stt >= 1 && any hasSassListingLine [ll_stt + 1 .. ll_end - 1]
+
+        -- iterates source file line by line keeping track of the
+        -- last listing line we've emitted to avoid out of order (!) warnings
+        -- e.g.
+        -- //  w = x*y + z
+        -- > IMAD ...
+        -- //  w *= 2
+        -- > IADD ... << consider in order with IMAD even though new src line so
+        --     long as there is no instruction between the IMAD and IADD
+        --
+        -- also we are keep track of listing location for PTX too
+        emitSrcFile :: FilePath -> IO ()
+        emitSrcFile src_f = do
+          emitFileHeader src_f
+          --
+          src_lns <- zip [1..] . lines <$> readFile src_f
+          length src_lns `seq` return ()
+          emitSrcFileLines src_f (-1,-1) src_lns
+          --
+          -- don't care about PTX orphans
+          let emit_ptx_orphans = False
+          --
+          -- emit PTX orphans
+          when emit_ptx_orphans $
+            case no_sloc `DM.lookup` ptx_lms of
+              Nothing -> return ()
+              Just oph_ptx_llns -> do
+                emitFileHeader "(PTX orphans)"
+                forM_ (sortOn fst oph_ptx_llns) $ \(ptx_llno,si) ->
+                  emitPtxInstLineLn ptx_llno si False
+          -- emit SASS orphans
+          case no_sloc `DM.lookup` sass_lms of
+            Nothing -> return ()
+            Just oph_llns -> do
+              emitFileHeader "(orphans)"
+              forM_ (sortOn fst oph_llns) $ \(llno,si) ->
+                emitSassInstLn llno si False
+
+        emitSrcFileLines :: FilePath -> (Int,Int) -> [(Int,String)] -> IO ()
+        emitSrcFileLines _ _ [] = return ()
+        emitSrcFileLines src_f (pv_ptx_llno,pv_sass_llno)  ((src_lno,src_ln):src_lns) = do
+          emitSrcLn $ printf "%3d>" src_lno ++ src_ln
+          let src_loc = (src_f,src_lno)
+              -- emitLingMappingsForLanguage ::
+              --   ListingMap a -> Int ->
+              --   (Int -> Int -> Bool) -> (Int -> a -> Bool -> IO ()) -> IO Int
+              emitLingMappingsForLanguage lm pv_llno are_discontinuous emit_inst =
+                case src_loc`DM.lookup`lm of
+                  --
+                  -- no mappings to this source line
+                  Nothing -> return pv_llno
+                  --
+                  -- 'lls' is all the ptx/sass listing lines that map to this source line
+                  Just lls -> emitListingLines pv_llno (sortOn fst lls)
+                    where emitListingLines pv_llno [] = return pv_llno
+                          emitListingLines pv_llno ((llno,si):llns) = do
+                            let discnt = are_discontinuous pv_llno llno
+                            emit_inst llno si discnt
+                            emitListingLines llno llns
+          nxt_ptx_llno <-
+            emitLingMappingsForLanguage
+              ptx_lms pv_ptx_llno
+              (areListingLinesDiscontinuous all_ptx_listing_lines)
+              emitPtxInstLineLn
+          nxt_sass_llno <-
+            emitLingMappingsForLanguage
+              sass_lms pv_sass_llno
+              (areListingLinesDiscontinuous all_sass_listing_lines)
+              emitSassInstLn
+          emitSrcFileLines src_f (nxt_ptx_llno,nxt_sass_llno) src_lns -- next src line
+
+
+--------------------------------------------------------------------------------
+-- PTX collating
+
+-- just internal to collatePtxAssembly
+-- we post process it to a PtxInstMap
+type PtxMapInternal = DM.Map (Int,Int) [PtxInstLine]
+
+no_ptx_loc :: (Int,Int)
+no_ptx_loc = (-1,-1)
+
+collatePtxAssembly :: String -> PtxInstMap
+collatePtxAssembly = loop DM.empty [] no_ptx_loc . zip [1..] . lines
+  where loop :: PtxMapInternal -> [(Int,FilePath)] -> (Int,Int) -> [(Int,String)] -> PtxInstMap
+        loop pmi fs curr_ptx_loc [] = foldl' acc DM.empty (DM.toList pmi)
+          where acc :: PtxInstMap -> ((Int,Int),[PtxInstLine]) -> PtxInstMap
+                acc pm ((f_ix,lno),ptx_lns)
+                  | no_ptx_loc == (f_ix,lno) =
+                     DM.insertWith (++) no_sloc ptx_lns pm
+                  | otherwise =
+                  case f_ix `lookup` fs of
+                    Nothing -> trace "collatePtxAssembly: cannot find .function mapping for .loc"
+                      pm
+                    Just fp -> DM.insertWith (++) (fp,lno) ptx_lns pm
+          -- ... to do convert PtxMapInternal to PtxInstLineMap
+        loop pmi fs curr_ptx_loc ((lno,ln):lns) =
+            case ws of
+              (".loc":f_ix:f_lno:_) ->
+                case (readMaybe f_ix,readMaybe f_lno) of
+                  (Just f_ix,Just f_lno) -> loop pmi fs (f_ix,f_lno) lns -- parsed .loc
+                  _ -> badLine "malformed .loc"
+              (".file":f_ix:f_name:_) ->
+                case readMaybe f_ix of
+                  Just f_ix ->
+                    case decodeFileName f_name of
+                      Just f_name_dec -> loop pmi ((f_ix,f_name_dec):fs) no_ptx_loc lns -- parsed .file
+                      Nothing -> badLine ".file string literal"
+                  _ -> badLine ".file index"
+              [] -> ignoreLine
+              _ -> handleNonEmptyLine
+          where ws = words (map (\c -> if c == ',' then ' ' else c) ln)
+                ws_0 = ws !! 0
+
+                handleNonEmptyLine
+                  -- begin/end of function brace
+                  | "}"`isPrefixOf`ln = invalidateLocAndIgnoreLine
+                  | "{"`isPrefixOf`ln = invalidateLocAndIgnoreLine
+                  | ws_0`elem`[".entry",".func"] = invalidateLocAndIgnoreLine
+                  --
+                  -- these don't invalidate the last .loc, but we drop them
+                  | "//" `isPrefixOf` dropWhile isSpace ln = ignoreLine
+                  | isLabelLine ln = ignoreLine -- FOO:
+                  | ws_0 `elem` ignore_no_invalidate_set  = ignoreLine
+
+                  -- an instruction or block or whatnot (we want them all):
+                  | any (`isPrefixOf`ws_0) ["{","}"] = addLine ln -- scope (e.g. call scope or inline asm)
+                  | ws_0 `elem` [".reg",".shared"] = addLine ln
+                  --
+                    -- call is a little harder because it spans multiple lines;
+                    -- gobble up lines until we hit the ending right paren
+                  | isPtxCallInstFromTokens ws =
+                    case span (not . (";"`isInfixOf`) . dropWhile isSpace . snd) lns of
+                      (_,[]) -> badLine "malformed call"
+                      (call_lns,(_,end_ln):lns) ->
+                          addLineThen (trimLines (ln:sfx_lns)) lns
+                        where sfx_lns = map snd call_lns ++ [end_ln]
+                              trimLines = unwords . words  . intercalate " "
+                  --
+                  -- some other PTX instruction
+                  | isPtxInstLineFromTokens ws = addLine ln
+                  --
+                  | otherwise = badLine "unmatched line"
+                  where ignore_no_invalidate_set =
+                          [
+                              ")" -- end of a function declaration (be conservative and retain loc)
+                            , ".address_size"
+                            , ".const" --
+                            , ".local"
+                            , ".param" -- can be part of //callseq
+                            , ".target"
+                            , ".version"
+                            , ".visible"
+                          ]
+
+                -- call spans multiple lines for some odd reason
+{-
+	// Callseq Start 3
+	{
+	.reg .b32 temp_param_reg;
+	// <end>}
+	.param .b64 param0;
+	st.param.b64	[param0+0], %rd5;
+	.param .b32 retval0;
+	call.uni (retval0),
+	cudaFree,
+	(
+	param0
+	);
+  // <<<< there could be more here (...){, protoype};
+  //                                    ^^^^^^^^^^^^^
+	ld.param.b32	%r6, [retval0+0];
+
+	//{
+	}// Callseq End 3
+-}
+                badLine why = trace ("PTX:" ++ show lno ++ ": " ++ why ++ ": " ++ ln) $
+                   invalidateLocAndIgnoreLine
+                invalidateLocAndIgnoreLine = loop pmi fs no_ptx_loc lns
+
+                -- doesn't invalidate current location
+                ignoreLine = loop pmi fs curr_ptx_loc lns
+
+                -- add just this current line
+                addLine ln = addLineThen ln lns
+
+                -- custom version where we are collapsing lines
+                addLineThen :: String -> [(Int,String)] -> PtxInstMap
+                addLineThen ln lns = loop pmi1 fs curr_ptx_loc lns
+                  where pmi1 = DM.insertWith (++) curr_ptx_loc [(lno,ln)] pmi
+
+-- e.g. "E:\\dev\\nvaa\\micros/addrspaces.cu"
+-- problem is that it's partially escaped
+-- we are parsing ...dev\\\\nvaa...
+-- so the result is still dev\\nvaa and that fails to open the file
+decodeFileName :: String -> Maybe FilePath
+decodeFileName = (fixSlashes <$>) . readMaybe
+  where fixSlashes "" = ""
+        fixSlashes ('\\':'\\':cs) = '\\':fixSlashes cs
+        fixSlashes (c:cs) = c:fixSlashes cs
+
+{-
+data PtxInst =
+  PtxInst {
+    piLine :: Int
+  , piOp
+  }
+
+tryParsePtxLine :: String -> Maybe [String]
+tryParsePtxLine
+-}
+
+isPtxInstLine :: String -> Bool
+isPtxInstLine = isPtxInstLineFromTokens . words
+isPtxInstLineFromTokens :: [String] -> Bool
+isPtxInstLineFromTokens = isPtxInstLineFromTokensWith isPtxOpName
+isPtxCallInstFromTokens :: [String] -> Bool
+isPtxCallInstFromTokens =
+  isPtxInstLineFromTokensWith (\op -> op == "call" || "call."`isPrefixOf`op)
+isPtxInstLineFromTokensWith :: (String -> Bool) -> [String] -> Bool
+isPtxInstLineFromTokensWith op_pred ws =
+    case ws of
+      [] -> False
+      (('@':_):ws_1:_) -> op_pred ws_1 -- @%p2 bra 	BB0_8;
+      (ws_0:_) -> op_pred ws_0 -- e.g. ld.param.u64
+
+-- e.g. shl.b32, cvt.u32.u64, ret;
+-- nullary ops like 'ret' may be suffixed with ;
+isPtxOpName :: String -> Bool
+isPtxOpName "" = False
+isPtxOpName str0
+  | null str = False -- just ;
+  | otherwise =
+    isAlpha (head str) &&
+      all (\c -> isAlphaNum c || c == '.') str
+  where str = if last str0 == ';' then init str0 else str0
+
+-- "\"E:\\\\dev\\\\nvaa\\\\micros/addrspaces.cu\""
+readMaybe :: Read a => String -> Maybe a
+readMaybe inp =
+  case reads inp of
+    [(a,"")] -> Just a
+    _ -> Nothing

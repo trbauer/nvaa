@@ -38,8 +38,6 @@ data RawInst =
   } deriving Show
 
 
-
-
 data SampleInst =
   SampleInst {
     siRawInst :: !RawInst
@@ -47,44 +45,126 @@ data SampleInst =
   } deriving Show
 
 
--- data RawInst2 =
---   RawInst2 {
---
---   } deriving Show
 
---
--- data Inst =
---   Inst {
---     iPredication :: !(Maybe PReg)
---   , iMnemonic :: !(...)
---
---   , iOperands :: !Operands
---   }
---
--- data Operands =
---     Operands_RRRR !Reg !Reg !Reg  !Reg
---   | Operands_RRRC !Reg !Reg !Reg  !Const
---   | Operands_RRRI !Reg !Reg !Reg  !Imm
---   | Operands_PRRRP !PReg !Reg !Reg !Reg !Reg !PReg   e.g. ISETP
---   |
---    ..
---   | Operands_Load !Reg !Reg !UReg !Imm -- LD.... [R12 + UR2 + 0x120]    URZ means none
+data FmtSpan =
+  FmtSpan {
+    fsStyle :: !String
+  , fsText :: !String
+  } deriving Show
+-- infixl 5 <+>
+-- (<+>) :: FmtSpan -> FmtSpan -> [FmtSpan]
+-- (<+>) = \a b -> [a,b]
 
+fssSimplify :: [FmtSpan] -> [FmtSpan]
+fssSimplify [] = []
+fssSimplify (FmtSpan "" "":fss) = fss
+fssSimplify (FmtSpan s1 t1:FmtSpan s2 t2:fss)
+  | s1 == s2 = fssSimplify (FmtSpan s1 (t1++t2):fss)
+fssSimplify (fs:fss) = fs:fssSimplify fss
+
+fssToString :: [FmtSpan] -> String
+fssToString = concatMap fsText
+
+fssLength :: [FmtSpan] -> Int
+fssLength = sum . map (length . fsText)
+
+fssPadR :: Int -> [FmtSpan] -> [FmtSpan]
+fssPadR k fss
+  | len >= k = fss
+  | otherwise = fss ++ [FmtSpan "" (replicate (k - len) ' ')]
+  where len = fssLength fss
 
 fmtRawInst :: RawInst -> String
-fmtRawInst = fmtRawInstG False
-fmtRawInstG :: Bool -> RawInst -> String
-fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
-  where prefix = pred ++ " " ++ padR 16 mne ++ opnds
-          where pred = printf "%-5s" (riPredication ri)
+fmtRawInst = fmtRawInstWith dft_fos
+fmtRawInstWith :: FmtOpts -> RawInst -> String
+fmtRawInstWith fos = concatMap fsText . fmtSpansRawInstWith fos
+
+data FmtOpts =
+  FmtOpts {
+    -- alignment for dep info
+    foColsPerInstBody :: !Int
+    -- width of the mnmeonic (and options/subops)
+  , foColsPerMnemonic :: !Int
+    -- per each operand
+  , foColsPerOperand :: !Int
+    -- per predicate
+  , foColsPerPredicate :: !Int
+    -- do we decode LOP3 expressions
+  , foDecodeLop3 :: !Bool
+    -- do we print deps
+  , foPrintDeps :: !Bool
+    -- print the text encoding
+  , foPrintEncoding :: !Bool
+    -- print PC offsets
+  , foPrintOffsets :: !Bool
+    -- do we permit various short hand forms?
+  , foShortHand :: !Bool
+  } deriving Show
+dft_fos :: FmtOpts
+dft_fos =
+  FmtOpts {
+    foColsPerInstBody = 56
+  , foColsPerMnemonic = 8
+  , foColsPerOperand = 8
+  , foColsPerPredicate = 5
+  , foDecodeLop3 = True
+  , foPrintOffsets = True
+  , foPrintEncoding = True
+  , foPrintDeps = True
+  , foShortHand = True
+  }
+
+-- currently returns formats
+--  "o" -> the mnemonic
+--  "s" -> subop (options)
+--  "n" -> name (register, label, or otherwise)
+--  "p" -> predication
+--  "l" -> label
+--  "c" -> comment
+fmtSpansRawInstWith :: FmtOpts -> RawInst -> [FmtSpan]
+fmtSpansRawInstWith fos ri = fssSimplify $
+   op_part_padded ++ maybe_dep_info ++ noFmt ";"
+  where op_part_padded = if null maybe_dep_info then op_part else fssPadR (foColsPerInstBody fos) op_part
+        op_part = pred ++ noFmt " " ++ fmtd_tokens
+          where pred = fssPadR (foColsPerPredicate fos) [FmtSpan "p" (riPredication ri)]
+
+        fmtd_tokens :: [FmtSpan]
+        fmtd_tokens
+          | null (riOperands ri) = mne
+          | otherwise = mne_padded ++ noFmt "  " ++
+            fmtOpnds 0 (fssLength mne_padded - cols_per_mne) (riOperands ri)
+          where mne_padded = fssPadR cols_per_mne mne
+
+        needs_debug = riMnemonic ri == "RET.REL.NODEC"
+
+        fmtOpnds :: Int -> Int -> [String] -> [FmtSpan]
+        fmtOpnds ix debt (o:os) = -- trace (show debt) $
+            fmtd_o ++ fmtOpnds (ix + 1) new_debt os
+          where maybe_comma = if null os then [] else noFmt ", "
+                fmtd_o = fssPadR (cols_per_opnd - debt) (o_simplified ++ maybe_comma)
+                new_debt = debt - (cols_per_opnd - fssLength fmtd_o)
+
+                o_simplified :: [FmtSpan]
+                o_simplified = fmtOpnd fos o
+
+        fmtOpnds _ _ [] = []
         --
-        opnds
-          | null (riOperands ri) = ""
-          | otherwise  = " " ++ intercalate ", " (riOperands ri)
+        cols_per_mne = foColsPerMnemonic fos
+        cols_per_opnd = foColsPerOperand fos
         --
+        mne :: [FmtSpan]
         mne
-          | not raw && is_lop = lop ++ "." ++ lop_func
-          | otherwise = riMnemonic ri
+          | foDecodeLop3 fos && is_lop =
+              [FmtSpan "o" lop, FmtSpan "s" ("." ++ lop_func)]
+          | otherwise =
+              case span (/='.') (riMnemonic ri) of
+                (op,'.':sfx)
+                  | foShortHand fos && sfx == "MOV.U32" -> fmt "MOV"
+                  | foShortHand fos && sfx == "SHL.U32" -> fmt ""
+                  | otherwise -> fmt sfx
+                  where fmt "" = [FmtSpan "o" op]
+                        fmt so = [FmtSpan "o" op,FmtSpan "s" ('.':so)]
+                _ -> [FmtSpan "o" (riMnemonic ri)]
           where is_lop :: Bool
                 is_lop = any (`isPrefixOf`riMnemonic ri) ["LOP3","PLOP3","ULOP3","UPLOP3"]
 
@@ -102,28 +182,92 @@ fmtRawInstG raw ri = prefix ++ dep_info ++ ";"
                         [(x,"")] | x <= 255 -> "(" ++ fmtLop3 x ++ ")"
                         _ -> "LUT"
         --
-        dep_info :: String
-        dep_info
-          | raw = ""
-          | null tokens = ""
-          | otherwise = " {" ++ intercalate "," tokens ++ "}"
-          where tokens = riDepInfo ri
+        maybe_dep_info :: [FmtSpan]
+        maybe_dep_info
+          | not (null (riDepInfo ri)) && foPrintDeps fos =
+            noFmt (" {" ++ intercalate "," (riDepInfo ri) ++ "}")
+          | otherwise = []
 
+noFmt :: String -> [FmtSpan]
+noFmt = (\c -> [c]) . FmtSpan ""
+
+fmtOpnd :: FmtOpts -> String -> [FmtSpan]
+fmtOpnd fos o
+  | not (foShortHand fos) = noFmt o
+  | ".reuse"`isSuffixOf`o = fmtOpnd fos $ take (length o - 2) o
+  | "c[0x0]["`isPrefixOf`o = noFmt $ "c0" ++ drop 6 o
+  | "c[0x1]["`isPrefixOf`o = noFmt $ "c1" ++ drop 6 o
+  | "c[0x2]["`isPrefixOf`o = noFmt $ "c2" ++ drop 6 o
+  | "`"`isPrefixOf`o = [FmtSpan "l" o]
+  | "["`isPrefixOf`o = -- e.g. [R16.64+0x100] or [R88.X16+UR18+0x400]
+    case splitAt 1 o of
+      ("[",sfx) ->
+        case regSpan sfx of
+          Just (rnm,sfx) -> noFmt "[" ++ reg rnm  ++ rest
+            where rest =
+                    case span (/='U') sfx of
+                      (pfx,usfx) ->
+                        case regSpan usfx of
+                          Just (rn,sfx) -> noFmt pfx ++ reg rn ++ noFmt sfx
+                          _ -> noFmt sfx
+          _ -> noFmt o
+
+  | otherwise =
+    case regSpan o of
+      Just (reg,sfx) -> FmtSpan "n" reg:rest
+         -- RET.REL.NODEC  R2 `(run_query_space) ... ;
+         -- this is "one" operand (no comma)
+        where rest =
+                case span (/='`') sfx of
+                  (pfx,sfx@('`':_)) -> noFmt pfx ++ fmtOpnd fos sfx
+                  _ -> noFmt sfx
+      _ -> noFmt o
+  where reg r = [FmtSpan "n" r]
+
+regSpan :: String -> Maybe (String,String)
+regSpan s =
+  case s of
+    'U':'R':sfx -> tryReg "UR" sfx
+    'U':'P':sfx -> tryReg "UP" sfx
+    'R':sfx -> tryReg "R" sfx
+    'P':sfx -> tryReg "P" sfx
+    _ -> Nothing
+  where tryReg pfx sfx =
+          case span isDigit sfx of
+            (ds@(_:_),sfx) -> Just (pfx ++ ds,sfx)
+            _ -> Nothing
 
 fmtSampleInst :: SampleInst -> String
-fmtSampleInst si =
-    ln_pfx ++ padR 64 (fmtRawInst (siRawInst si)) ++ bits
-  where ln_pfx = printf "  /*%04X*/ " (riOffset (siRawInst si))
+fmtSampleInst = fmtSampleInstWithOpts dft_fos
 
-        bits :: String
-        bits = printf "  /* %016X`%016X */" (wHi64 (siBits si)) (wLo64 (siBits si))
+fmtSampleInstWithOpts :: FmtOpts -> SampleInst -> String
+fmtSampleInstWithOpts fos = fssToString . fmtSampleInstToFmtSpans fos
 
+fmtSampleInstToFmtSpans :: FmtOpts -> SampleInst -> [FmtSpan]
+fmtSampleInstToFmtSpans fos si =
+    ln_pfx ++ fmtSpansRawInstWith fos (siRawInst si) ++ bits
+  where ln_pfx
+          | foPrintOffsets fos = [FmtSpan "c" $ printf "  /*%04X*/ " (riOffset (siRawInst si))]
+          | otherwise = []
+
+        bits
+          | foPrintEncoding fos = [FmtSpan "c" $ printf "  /* %016X`%016X */" (wHi64 (siBits si)) (wLo64 (siBits si))]
+          | otherwise = []
+
+
+
+-- puts the bits in front of the instruction
+-- FFFFFFF000007947`0X000FC0000383FFFF:     BRA `(.L_1);  {Y};
 fmtSampleInstPrefixed :: SampleInst -> String
 fmtSampleInstPrefixed si =
-    bits ++ padR 64 (fmtRawInst (siRawInst si))
+    bits ++ fmtSampleInstWithOpts fos si
   where bits :: String
         bits = printf "%016X`%016X:  " (wHi64 (siBits si)) (wLo64 (siBits si))
-
+        fos =
+          dft_fos {
+            foPrintDeps = False
+          , foPrintEncoding = False
+          }
 
 decodeDepInfo :: Word128 -> [String]
 decodeDepInfo w128 = tokens
@@ -179,7 +323,7 @@ parseRawInst' = parseSyntax . skipWs
         parseSyntax =
             parsePredication $
               RawInst {
-                riOffset = 0
+                riOffset = -1
               , riLine = 0
               , riPredication = ""
               , riMnemonic = ""
@@ -267,10 +411,10 @@ parseSampleInst s = -- parseLongForm s <|> parseShortForm s
             '/':'*':sfx ->
               case span isHexDigit sfx of
                 (xds,'*':'/':sfx)
-                  | null xds -> parseSyntax 0 (skipWs sfx)
+                  | null xds -> parseSyntax (-1) (skipWs sfx)
                   | otherwise -> parseSyntax (read ("0x"++xds)) (skipWs sfx)
                 _ -> Left "expected */"
-            _ -> parseSyntax 0 s
+            _ -> parseSyntax (-1) s
 
         parseSyntax :: Int -> String -> Either String SampleInst
         parseSyntax off s =
@@ -299,6 +443,7 @@ parseSampleInst s = -- parseLongForm s <|> parseShortForm s
         completeInstruction :: SampleInst -> Either String SampleInst
         completeInstruction si = return $
           si{siRawInst = (siRawInst si){riDepInfo = decodeDepInfo (siBits si)}}
+
 
 -- /* F123...`AFD0... */
 parseDualBitsInSingleComment :: String -> Maybe (Word128,String)
@@ -349,6 +494,8 @@ trimWs = reverse .  dropWhile isSpace . reverse .  dropWhile isSpace
 
 padR :: Int -> String -> String
 padR k s = s ++ replicate (k - length s) ' '
+padL :: Int -> String -> String
+padL k s = replicate (k - length s) ' ' ++ s
 
 skipWs :: String -> String
 skipWs [] = []

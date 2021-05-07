@@ -14,22 +14,35 @@ import System.FilePath
 import System.IO
 import System.Process
 
+sdks :: [(Int,Int)]
+sdks =
+  reverse [
+    (7,5)
+  , (8,0)
+  , (9,1)
+  , (9,1)
+  , (9,1)
+  , (10,0)
+  , (10,1)
+  , (10,2)
+  , (11,0)
+  , (11,1)
+  , (11,2)
+  , (11,3)
+  -- just guessing
+  , (12,0)
+  ]
+
+cuda_env_vars :: [String]
+cuda_env_vars = "CUDA_PATH":["CUDA_PATH_V" ++ show mj ++ "_" ++ show mi | (mj,mi)<-sdks]
+
+-- e.g. v11.0 (under cuda toolkit dir)
+cuda_ver_exts :: [String]
+cuda_ver_exts = ["v" ++ show mj ++ "." ++ show mi | (mj,mi)<-sdks]
 
 ------- finds a CUDA executable
 findCudaTool :: Opts -> String -> IO FilePath
-findCudaTool os exe_raw =
-    tryEnvs
-      [
-        "CUDA_PATH"
-      , "CUDA_PATH_V11_0"
-      , "CUDA_PATH_V10_2"
-      , "CUDA_PATH_V10_1"
-      , "CUDA_PATH_V10_0"
-      , "CUDA_PATH_V9_0"
-      , "CUDA_PATH_V9_1"
-      , "CUDA_PATH_V8_0"
-      , "CUDA_PATH_V7_5"
-      ]
+findCudaTool os exe_raw = tryEnvs cuda_env_vars
   where exe = mkExe exe_raw
 
         tryEnvs (e:es) = do
@@ -40,8 +53,7 @@ findCudaTool os exe_raw =
               tryPath (d </> "bin" </> exe) (tryEnvs es)
 #ifdef mingw32_HOST_OS
         tryEnvs [] =
-          tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) vers)
-            where vers = ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0","v7.5"]
+          tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) cuda_ver_exts)
 #else
         -- TODO: /opt/nvidia/nvcc ?
         tryEnvs [] = tryFixedPaths ["/usr/local/cuda/bin"]
@@ -63,19 +75,8 @@ findCudaTool os exe_raw =
 
 ------- finds a CUDA executable
 findCudaRoot :: IO FilePath
-findCudaRoot =
-    tryEnvs
-      [
-        "CUDA_PATH"
-      , "CUDA_PATH_V11_0"
-      , "CUDA_PATH_V10_2"
-      , "CUDA_PATH_V10_1"
-      , "CUDA_PATH_V10_0"
-      , "CUDA_PATH_V9_0"
-      , "CUDA_PATH_V9_1"
-      , "CUDA_PATH_V8_0"
-      , "CUDA_PATH_V7_5"
-      ]
+findCudaRoot = tryEnvs cuda_env_vars
+
   where tryEnvs (e:es) = do
           mv <- lookupEnv e
           case mv of
@@ -83,8 +84,7 @@ findCudaRoot =
             Just d -> tryDir d (tryEnvs es)
 #ifdef mingw32_HOST_OS
         tryEnvs [] =
-          tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) vers)
-            where vers = ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0","v7.5"]
+          tryFixedPaths (map ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\"++) cuda_ver_exts)
 #else
         -- TODO: /opt/nvidia/nvcc ?
         tryEnvs [] = tryFixedPaths ["/usr/local/cuda/bin"]
@@ -221,13 +221,19 @@ findWindowsKitsInclude = do
 
 
 
-mkExe :: FilePath -> FilePath
 #ifdef mingw32_HOST_OS
+mkExe :: FilePath -> FilePath
 mkExe fp
   | ".exe" `isSuffixOf` fp = fp
   | otherwise = fp ++ ".exe"
+shellLineSplice :: String
+shellLineSplice = "^"
 #else
-mkExe fp = fp
+mkExe :: FilePath -> FilePath
+mkExe = id
+
+shellLineSplice :: String
+shellLineSplice = "\\"
 #endif
 
 
@@ -244,10 +250,17 @@ runCudaTool os tool args = do
           unlines (map (\ln -> "[" ++ mkExe tool ++ "] " ++ ln) (lines err))
       return out
 
+fmtCommandLine :: String -> [String] -> String
+fmtCommandLine exe as =
+    "% " ++ intercalate (shellLineSplice ++ "\n" ++ "      ") (map escArg (exe:as))
+  where escArg a
+          | any isSpace a = "\"" ++ a ++ "\""
+          | otherwise = a
+
 runCudaToolWithExitCode :: Opts -> String -> [String] -> IO (ExitCode,String,String)
 runCudaToolWithExitCode os tool args = do
   tool_exe <- findCudaTool os (mkExe tool)
-  debugLn os $ "% " ++ tool_exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
+  debugLn os $ fmtCommandLine (mkExe tool) args
   r@(ec,_,_) <- readProcessWithExitCode tool_exe args ""
   debugLn os $ "  ==> " ++ show ec
   return r
@@ -256,7 +269,7 @@ runCudaToolWithExitCode os tool args = do
 runCudaToolToHandle :: Opts -> String -> [String] -> Handle -> IO ()
 runCudaToolToHandle os tool args h_out = do
   tool_exe <- findCudaTool os (mkExe tool)
-  debugLn os $ "% " ++ tool_exe ++ "\n" ++ concatMap (\a -> "      "++a ++ "\n") args
+  debugLn os $ fmtCommandLine (mkExe tool) args
   ph <- runProcess tool_exe args Nothing Nothing Nothing (Just h_out) (Just stderr)
   ec <- waitForProcess ph
   debugLn os $ "  ==> " ++ show ec

@@ -26,12 +26,12 @@ cUDA_SAMPLES_ROOT = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples"
 
 -- "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.0\bin\"
 main :: IO ()
-main = do
-  checkSetup
-  getArgs >>= run
+main = getArgs >>= run
 
 run :: [String] -> IO ()
-run as = parseCSOpts cso_dft as >>= runWithOpts
+run as = do
+  checkSetup
+  parseCSOpts cso_dft as >>= runWithOpts
 
 runWithOpts :: CSOpts -> IO ()
 runWithOpts cso = do
@@ -133,7 +133,7 @@ collectSampleIsa cso os_raw = body
           walkSamples comp_ds
 
         os :: D.Opts
-        os = os_raw{D.oSourceMapping = True}
+        os = os_raw {D.oPrintLines = True, D.oPrintEncoding = True, D.oPrintOffsets = True}
 
         base_output_dir :: FilePath
         base_output_dir = "examples/" ++ D.oArch os ++ "/samples"
@@ -238,8 +238,9 @@ collectSampleIsa cso os_raw = body
                         os {
                           D.oOutputFile = sass_output
                         , D.oSaveCuBin = cubin_output
-                        , D.oSavePtx = ptx_output
-                        , D.oExtraArgs = ["-I"++samples_inc_dir, "-I" ++ takeDirectory src_cu_file]
+                        , D.oSavePtxTo = ptx_output
+                        , D.oSavePtx = True
+                        , D.oExtraNvccArgs = ["-I"++samples_inc_dir, "-I" ++ takeDirectory src_cu_file]
                         , D.oInputFile = src_cu_file
                         }
                   printLn $ "\n     % nva.exe  " ++
@@ -247,7 +248,7 @@ collectSampleIsa cso os_raw = body
                       "-o=" ++ sass_output
                     , "--save-cubin=" ++ cubin_output
                     , "--save-ptx=" ++ ptx_output
-                    ] ++ map ("-X"++) (D.oExtraArgs nvcc_os) ++ [src_cu_file])
+                    ] ++ map ("-X"++) (D.oExtraNvccArgs nvcc_os) ++ [src_cu_file])
                   --
                   let handler :: Bool -> SomeException -> IO ()
                       handler double_fault e
@@ -300,7 +301,7 @@ collectLibrarySampleIsa cso os_raw = body
           let dll_dir = takeDirectory cuod_exe
           dumpLibs cuod_exe nvdis_exe dll_dir
 
-        os = os_raw{D.oSourceMapping = True}
+        os = os_raw{D.oPrintLines = True, D.oPrintOffsets = True, D.oPrintEncoding = True}
 
         dumpLibs :: FilePath -> FilePath -> FilePath -> IO ()
         dumpLibs cuod_exe nvdis_exe dll_dir = body
@@ -350,7 +351,7 @@ collectLibrarySampleIsa cso os_raw = body
 -- should generalize the top one to call this one
 collectLibrarySampleIsaFromDir :: D.Opts -> FilePath -> IO ()
 collectLibrarySampleIsaFromDir os_raw full_dll = body
-  where os = os_raw{D.oSourceMapping = True}
+  where os = os_raw{D.oPrintLines = True, D.oPrintOffsets = True, D.oPrintEncoding = True}
 
         body = do
           putStrLn $ "*** DUMPING " ++ full_dll
