@@ -3,7 +3,7 @@ INSTALL_DST=c:/bin/
 main:
 	@echo make install
 	@echo make nva
-	@echo make collect_samples.exe|collect_opcodes.exe
+	@echo make collect_samples.exe  collect_opcodes.exe
 	@echo make fptest
 
 nva: nva.exe

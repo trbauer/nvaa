@@ -134,7 +134,7 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.0"
+nvt_version = "1.1.1"
 
 
 run :: [String] -> IO ()
