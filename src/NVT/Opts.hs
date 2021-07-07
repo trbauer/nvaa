@@ -55,6 +55,7 @@ dft_opts =
 
 data StdinIs =
     StdinIsUnknown
+  | StdinIsCl
   | StdinIsCu
   | StdinIsPtx
   | StdinIsSass

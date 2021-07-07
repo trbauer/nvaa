@@ -188,6 +188,7 @@ runWithOpts os
           | any (".target"`isPrefixOf`) pfx_lns = StdinIsPtx
           | any ("#include"`isPrefixOf`) pfx_lns = StdinIsCu
           | any ("#define"`isPrefixOf`) pfx_lns = StdinIsCu
+          | any ("__kernel"`isPrefixOf`) pfx_lns = StdinIsCl
           | otherwise = StdinIsUnknown
           where pfx_lns = take 32 (lines stdin_str)
 
@@ -195,6 +196,7 @@ runWithOpts os
         processFile fp = do
           debugLn os $ show os
           case takeExtension fp of
+            ".cl" -> processClFile fp
             ".cu" -> processCuFile fp
             ".cubin" -> processCubinFile fp
             ".ptx" -> processPtxFile fp  -- (use NVCC)
@@ -206,6 +208,35 @@ runWithOpts os
 
         processPtxFile :: FilePath -> IO ()
         processPtxFile = processCuFile
+
+        processClFile :: FilePath -> IO ()
+        processClFile fp = do
+          (ec,_,_) <- readProcessWithExitCode (mkExe "cl2ptx") ["--find-compiler"] ""
+          case ec of
+            ExitFailure err -> fatal $ "could not find cl2ptx (https://gitlab.com/trbauer/cl2ptx)"
+            ExitSuccess -> return ()
+          when (null (oArch os)) $
+            fatal $ fp ++ ": requires --arch argument"
+          z <- doesFileExist fp
+          when (not z) $
+            fatal $ fp ++ ": file not found"
+          when (oPrintLines os) $
+            warningLn os "cannot get lines via cl2ptx"
+          when (not (null (oCollateListing os))) $
+            fatal "cannot collate listings for OpenCL input"
+          let ptx_dst = deriveFileNameFrom fp ".ptx"
+          let cl2ptx_args =
+                [fp, "-b=-cl-nv-arch " ++ oArch os ++
+                     " -cl-nv-cstd=CL1.2","-o=" ++ ptx_dst]
+          (ec,out,err) <- readProcessWithExitCode (mkExe "cl2ptx") cl2ptx_args ""
+          case ec of
+            ExitFailure e ->
+              fatal $
+                "cl2ptx: exited " ++ show e ++ "\n" ++
+                err ++ (if null out then "" else "\n") ++ out
+            ExitSuccess -> return ()
+          runWithOpts os{oInputFile = ptx_dst}
+
 
         -- foo.cu --> $temp.cubin and disassembles it that file
         processCuFile :: FilePath -> IO ()

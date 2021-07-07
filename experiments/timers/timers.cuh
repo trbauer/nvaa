@@ -31,7 +31,7 @@ extern "C" static __device__ int get_tid()
 extern "C" static __device__ uint32_t get_smid()
 {
   uint32_t smid;
-  asm("mov.u32 %0, %smid;" : "=r"(smid));
+  asm volatile("mov.u32 %0, %smid;" : "=r"(smid));
   return smid;
 }
 
@@ -39,21 +39,21 @@ extern "C" static __device__ uint32_t get_smid()
 extern "C" static __device__ uint32_t get_nsmid()
 {
   uint32_t nsmid;
-  asm("mov.u32 %0, %nsmid;" : "=r"(nsmid));
+  asm volatile("mov.u32 %0, %nsmid;" : "=r"(nsmid));
   return nsmid;
 }
 
 extern "C" static __device__ uint64_t get_globaltimer()
 {
   uint64_t globaltimer;
-  asm("mov.u64  %0, %globaltimer;" : "=l"(globaltimer));
+  asm volatile("mov.u64  %0, %globaltimer;" : "=l"(globaltimer));
   return globaltimer;
 }
 
 extern "C" static __device__ uint32_t get_warpid()
 {
   uint32_t warpid;
-  asm("mov.u32 %0, %warpid;" : "=r"(warpid));
+  asm volatile("mov.u32 %0, %warpid;" : "=r"(warpid));
   return warpid;
 }
 
