@@ -12,7 +12,9 @@ import qualified Prog.Args.Args as PA -- progargs
 
 import Control.Exception
 import Control.Monad
+import Data.Char
 import Data.List
+import Debug.Trace
 import System.FilePath
 import System.Directory
 import System.Process
@@ -26,6 +28,7 @@ import qualified Data.ByteString as S
 --    .cu -> .cubin -> .ptx -> .sass     nvcc -cubin =>
 --                     .ptx -> .sass
 --           .cubin ->      -> .sass
+--    .cl           -> .ptx -> .sass
 spec :: PA.Spec Opts
 spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version) 0
     [ -- options
@@ -134,7 +137,7 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.1"
+nvt_version = "1.1.2"
 
 
 run :: [String] -> IO ()
@@ -210,33 +213,46 @@ runWithOpts os
         processPtxFile = processCuFile
 
         processClFile :: FilePath -> IO ()
-        processClFile fp = do
-          (ec,_,_) <- readProcessWithExitCode (mkExe "cl2ptx") ["--find-compiler"] ""
+        processClFile cl_fp = do
+          (ec,_,_) <- runProcessWithExitCode (mkExe "cl2ptx") ["--find-compiler"]
           case ec of
             ExitFailure err -> fatal $ "could not find cl2ptx (https://gitlab.com/trbauer/cl2ptx)"
             ExitSuccess -> return ()
           when (null (oArch os)) $
-            fatal $ fp ++ ": requires --arch argument"
-          z <- doesFileExist fp
+            fatal $ cl_fp ++ ": requires --arch argument"
+          z <- doesFileExist cl_fp
           when (not z) $
-            fatal $ fp ++ ": file not found"
-          when (oPrintLines os) $
-            warningLn os "cannot get lines via cl2ptx"
-          when (not (null (oCollateListing os))) $
-            fatal "cannot collate listings for OpenCL input"
-          let ptx_dst = deriveFileNameFrom fp ".ptx"
-          let cl2ptx_args =
-                [fp, "-b=-cl-nv-arch " ++ oArch os ++
-                     " -cl-nv-cstd=CL1.2","-o=" ++ ptx_dst]
-          (ec,out,err) <- readProcessWithExitCode (mkExe "cl2ptx") cl2ptx_args ""
+            fatal $ cl_fp ++ ": file not found"
+          let needs_lines = oPrintLines os || not (null (oCollateListing os))
+          when needs_lines $
+            verboseLn os "warning: -nv-line-info may be poor quality on OpenCL"
+          let ptx_dst = deriveFileNameFrom cl_fp ".ptx"
+              build_opts =
+                  "-cl-nv-arch " ++ oArch os ++ " -cl-nv-cstd=CL1.2" ++ maybe_lines
+                where maybe_lines = if oPrintLines os then " -nv-line-info" else ""
+              cl2ptx_args =
+                [cl_fp, "-b=" ++ build_opts,"-o=" ++ ptx_dst]
+          (ec,out,err) <- runProcessWithExitCode (mkExe "cl2ptx") cl2ptx_args
           case ec of
             ExitFailure e ->
               fatal $
                 "cl2ptx: exited " ++ show e ++ "\n" ++
                 err ++ (if null out then "" else "\n") ++ out
             ExitSuccess -> return ()
+          when needs_lines $
+            fixDotFileDirectiveInPtxForOpenCL ptx_dst cl_fp
           runWithOpts os{oInputFile = ptx_dst}
 
+        runProcessWithExitCode :: FilePath -> [String] -> IO (ExitCode,String,String)
+        runProcessWithExitCode exe args = do
+          let escArg a = if any isSpace a then show a else a
+          verboseLn os $ "% " ++ exe ++ "^\n" ++
+            concatMap (\a -> "   " ++ escArg a ++ "\n") args
+          r@(ec,out,err) <- readProcessWithExitCode exe args ""
+          verboseLn os ("  ==> " ++ show ec)
+          debugLn os err
+          debugLn os out
+          return r
 
         -- foo.cu --> $temp.cubin and disassembles it that file
         processCuFile :: FilePath -> IO ()
@@ -392,3 +408,22 @@ runWithOpts os
         maybeOpt f tk
           | f os = [tk]
           | otherwise = []
+
+
+-- e.g.
+-- .file	2 "D:\\work\\projects\\new-eu\\setup\\<kernel>"
+-- ==>
+-- .file  2 "D:\\work\\projects\\new-eu\\setup\\foo.cl"
+fixDotFileDirectiveInPtxForOpenCL :: FilePath -> FilePath ->  IO ()
+fixDotFileDirectiveInPtxForOpenCL ptx_fp cl_fp = do
+  flns <- lines <$> readFile ptx_fp
+  length flns `seq` return () -- close handle so we can re-write it
+  let fixLine ln
+        | ".file"`isInfixOf`ln = fix ln
+        | otherwise = ln
+        where fix [] = []
+              fix s@(c:cs)
+                | "<kernel>"`isPrefixOf`s = cl_fp ++ drop (length "<kernel>") s
+                | otherwise = c : fix cs
+  writeFile ptx_fp $
+    unlines (map fixLine flns)
