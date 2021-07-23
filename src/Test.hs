@@ -1,6 +1,7 @@
 module Test where
 
 import NVT.Opts
+import NVT.PTX.PTXParser
 import qualified NVT.Driver as D
 
 import Control.Monad
