@@ -1,0 +1,12 @@
+000FE200078E20FF`0000001015207811:        LEA              R32,    R21,        0x10,      0x4 {!1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7376
+040FE400078A10FF`0000000410047211:        LEA              R4, P5, R16.reuse,  R4,        0x2 {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7427
+040FE400078A10FF`0000000410047211:        LEA              R4:P5,  R16.reuse,  R4,        0x2 {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7427
+000FC600010F1405`00000007041D7211:        LEA.HI.X         R29,    R4,         R7,    R5, 0x2, P2 {!3,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7336
+140FE400020F1411`0000000710077211:        LEA.HI.X         R7,     R16.reuse,  R7,    R17.reuse, 0x2, P4 {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7430
+000FC400078208FF`00005A0002030A11:  @P0   LEA              R3, P1, R2,  c[0x0][0x168],     0x1 {!2,Y}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7818
+000FE400008F0C07`00005B0002020A11:  @P0   LEA.HI.X         R2,     R2,  c[0x0][0x16c], R7, 0x1, P1 {!2}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7824
+000FE400008F0EFF`000000FF09097211:        LEA.HI.X.SX32    R9,     R9,         RZ,         0x1, P1 {!2}; // examples/sm_80/samples/boxFilter_kernel.sass:9014
+000FC800078FF0FF`0000000103037811:        LEA.HI           R3,     R3,         0x1,    RZ, 0x1e {!4,Y}; // examples/sm_80/samples/dmmaTensorCoreGemm.sass:5725
+//
+040FE400078A11FF`0000000410047211:        LEA R4,          P5,   -R16.reuse,   R4,         0x2 {!2};
+040FE400078A10FF`8000000410047211:        LEA R4,          P5,    R16.reuse,  -R4,         0x2 {!2};

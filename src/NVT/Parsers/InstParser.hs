@@ -85,7 +85,7 @@ pInstNoPrefix pc = body
               pDstsP_R :: PI [Dst]
               pDstsP_R = do
                 dst_pred <- P.option [] $ P.try $ do
-                  p <- pDstP <* pSymbol ","
+                  p <- pDstP <* pCommaOrColon
                   return [p]
                 dst_reg <- pDstR
                 return $ dst_pred ++ [dst_reg]
@@ -109,21 +109,20 @@ pInstNoPrefix pc = body
               pLop3LutOptSrc :: PI Src
               pLop3LutOptSrc =
                 case m_lop3_opt of
-                  -- if they didn't give us an explicit code, it better be here
-                  Nothing -> pSrcI8
+                  -- if they didn't give us an explicit code, then it better be here
+                  Nothing -> pSymbol "," >> pSrcI8
+                  --
+                  -- otherwise we can try for it, but if it's absent, we can ignore it
                   Just lop3_opt -> do
                     -- if they gave us a code earlier, it better match
                     -- anything parsed here
                     loc_hex_lut <- pGetLoc
-                    m_hex_lut <- P.optionMaybe (pImmA :: PI Word8)
-                    case m_hex_lut of
-                      Just hex_lut
-                        | hex_lut /= lop3_opt ->
-                          pSemanticError
-                            loc_hex_lut
-                            ("mismatch between inst opt logical option expression and classic-form LUT operand; inst. opt expression evaluates to " ++ printf "0x02X" lop3_opt)
-                      _ -> return () -- better that they omit it
-                    return (SrcImm (Imm32 (fromIntegral lop3_opt)))
+                    hex_lut <- P.option lop3_opt $ P.try $ pSymbol "," >> pImmA :: PI Word8
+                    unless (hex_lut == lop3_opt) $
+                      pSemanticError
+                        loc_hex_lut
+                        ("mismatch between inst opt logical option expression and classic-form LUT operand; inst. opt expression evaluates to " ++ printf "0x02X" lop3_opt)
+                    return (SrcI8 (fromIntegral lop3_opt))
 
               --  R (+ UR) (+ IMM)
               --       UR  (+ IMM)
@@ -287,7 +286,7 @@ pInstNoPrefix pc = body
               pLDX = do
                 let pDstPred = do
                       p <- pDstP
-                      pSymbol_ ","
+                      pCommaOrColon
                       return [p]
                 dst_p <- if InstOptZD`iosElem`ios then pDstPred else return []
                 dst_r <- pDstR
@@ -508,7 +507,7 @@ pInstNoPrefix pc = body
                 P.option [sRC_RZ,sRC_I32_0] $ do
                   pSymbol "["
                   src0 <- pSrcR <|> pSrcUR
-                  src1_imm <- P.option sRC_I32_0 $ Src_I32 . fromIntegral <$> pIntTerm
+                  src1_imm <- P.option sRC_I32_0 $ SrcI32 . fromIntegral <$> pIntTerm
                   pSymbol "]"
                   return [src0,src1_imm]
               pComplete [] srcs
@@ -541,7 +540,7 @@ pInstNoPrefix pc = body
                   b0 <- pBitIx
                   bs <- P.many $ pSymbol "," >> pBitIx
                   pSymbol "}"
-                  return (Src_I32 (foldl' setBit 0 (b0:bs)))
+                  return (SrcI32 (foldl' setBit 0 (b0:bs)))
               pComplete [] [src0, src1, src2]
 
             -- DFMA        R8,   R36, R36, R8  {!6,Y,+1.W,^1};
@@ -814,16 +813,19 @@ pInstNoPrefix pc = body
             -- ISETP.GT.U32.AND P0, PT, R6, 0xfd, PT {!4,Y};
             -- ISETP.GE.AND.EX  P0, PT, R7, c[0x0][0x16c], PT, P0 {!1};
             -- ISETP.LT.AND     P0, PT, R13, UR5, PT {!1}; // examples/sm_80/samples/binomialOptions_kernel.sass:2656
+            --                      ^ I've never seen this
             --
             -- [71:68] = second predicate src (only on .EX)
             -- [72] = .EX (extended)
             -- [73] = .U32
             -- [75:74] = {AND,OR,XOR,INVALID3}
             -- [78:76] = {F,LT,EQ,LE,GT,NE,GE,T}
+            -- [83:81] = first dst pred
+            -- [86:84] = second dst pred
             -- [90:87] = first predicate src
             OpISETP -> do
               dst0 <- pDstP
-              dst1 <- pSymbol "," >> pDstP
+              dst1 <- pCommaOrColon >> pDstP
               src0 <- pSymbol "," >> pSrcR
               src1 <- pSymbol "," >> pSrcX
               src2 <- pSymbol "," >> pSrcP
@@ -874,7 +876,7 @@ pInstNoPrefix pc = body
               pSymbol ","
               (r_addr,ur_off,i_off) <- pLDST_Addrs op
               src_p <- P.option sRC_PT $ pSymbol "," >> pSrcP
-              pComplete [] [src0,Src_I32 imm,r_addr,ur_off,i_off,src_p]
+              pComplete [] [src0,SrcI32 imm,r_addr,ur_off,i_off,src_p]
 
             -- @P0   LDL.U8           R15, [R4+0x6] {!4,+5.W}; // examples/sm_80/libs/nvjpeg64_11/Program.36.sm_80.sass:39875
             --       LDL.LU           R38, [R1+0x14] {!4,+6.W,+1.R}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3108769
@@ -894,7 +896,7 @@ pInstNoPrefix pc = body
             --
             -- [71:64]  src2 (only enabled if .HI and not .SX32)
             -- [72]     ~ on src0
-            -- [73]     .SX32
+            -- [73]     .SX32 (sign extends the high part)
             -- [74]     .X (activates the carry-in predicate)
             -- [79:75]  the shift amount (0x0 to 0x1F)?
             -- [80]     .HI
@@ -902,11 +904,11 @@ pInstNoPrefix pc = body
             -- [90:87]  carry-in predicate expression (defults to !PT)
             OpLEA -> do
               dst <- pDstR
-              dst_co <- P.option dST_PT $ P.try $ pSymbol "," >> pDstP
+              dst_co <- P.option dST_PT $ P.try $ pCommaOrColon >> pDstP
               --
               src0 <- pSymbol "," >> pSrcR
               src1 <- pSymbol "," >> pSrcX
-              src2 <- P.option sRC_RZ $ P.try $ pSymbol "," >> pSrcR
+              src2 <- P.option sRC_RZ $ P.try (pSymbol "," >> pSrcR)
               src3 <- pSymbol "," >> pSrcI8 -- the shift
               src4_ci <- P.option sRC_NPT $ P.try $ pSymbol "," >> pSrcP
               --
@@ -924,14 +926,15 @@ pInstNoPrefix pc = body
             --  LOP3.(s0&s1)    P2,  RZ,  R35, 0x7fffffff,  RZ, 0xc0, !PT {!4,Y}; // examples/sm_75/samples\bilateral_kernel.sass:1557
             --  LOP3.LUT.PAND        R15 ...
             OpLOP3 -> do
-              dsts <- pDstsP_R
+              dst_p <- P.option dST_PT $ P.try $ (pDstP <* pCommaOrColon)
+              dst_r <- pDstR
               --
               src0 <- pSymbol "," >> pSrcR
               src12s <- pSymbol "," >> pSrc_RX_XR
-              src3_lut <- pSymbol "," >> pLop3LutOptSrc
+              src3_lut <- pLop3LutOptSrc
               src4 <- pSymbol "," >> pSrcP
               --
-              pComplete dsts (src0:src12s ++ [src3_lut,src4])
+              pComplete [dst_p,dst_r] (src0:src12s ++ [src3_lut,src4])
 
             -- MATCH.ALL         R18, R34
             -- MATCH.ANY         R18, R34
@@ -953,7 +956,7 @@ pInstNoPrefix pc = body
             OpMOV -> do
               dst <- pDstR
               src0 <- pSymbol "," >> pSrcX
-              src1 <- P.option sRC_I32_15 $ pSymbol "," >> pSrcI8
+              src1 <- P.option sRC_I32_0xF $ pSymbol "," >> pSrcI8
               pComplete [dst] $ [src0,src1]
 
             -- MOVM.16.MT88     R12, R13 {!4,+1.W,+2.R,^3}; // examples/sm_80/libs/cusolver64_10/Program.2634.sm_80.sass:2866
@@ -1446,11 +1449,13 @@ pInstNoPrefix pc = body
         --       p_src1 <- pSymbol "," >> pPredSrcP
         --       return [p_src0,p_src1]
 
+pCommaOrColon :: PI ()
+pCommaOrColon = (pSymbol "," <|> pSymbol ":") >> return ()
 
 pPred :: PI Pred
 pPred = pLabel "predication" $ do
     pSymbol "@"
-    sign <- P.option PredNEG $ pSymbol "!" >> return PredPOS
+    sign <- P.option PredPOS $ pSymbol "!" >> return PredNEG
     tryP sign <|> tryUP sign
   where tryP sign = PredP sign <$> pSyntax
         tryUP sign = PredUP sign <$> pSyntax

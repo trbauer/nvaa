@@ -189,7 +189,8 @@ testListing fp = do
   length inp `seq` return ()
   case parseListingG fp inp of
     Left err -> die $ dFormatWithLines (lines inp) err
-    Right (ts,ldefs) -> do
+    Right (ts,ldefs,ws) -> do
+      mapM_ print ws
       mapM_ print ldefs
       forM_ ts $ \(kernel,is) -> do
         putStrLn (kernel ++ ":")
@@ -379,7 +380,7 @@ testAllG fail_fast = do
         if fail_fast && np /= nt then return ((np,nt):rs)
           else runTestFiles ((np,nt):rs) sass_fs
   --
-  sass_fs <- filter (".sass"`isSuffixOf`) <$> listDirectory "tests"
+  sass_fs <- filter (".sass"`isSuffixOf`) . sort <$> listDirectory "tests"
   (nps,nts) <- unzip <$> runTestFiles [] sass_fs
   let (np,nt) = (sum nps,sum nts)
   putStrLn $ "******** passed " ++ show np ++ " of " ++ show nt ++ " ********"
@@ -419,9 +420,8 @@ testFileGK emit_io k fp = do
           case parseInst 0 fp 1 syntax of
             Left err -> do
               -- putStrLn $ "==> " ++ show ln
-              let fmtDiag = dFormatWithLines flns
               emit_io $ putStrLn "ERROR: parsed SampleInst, but InstParser failed"
-              emit_io $ putStrLn $ fmtDiag err
+              emit_io $ putStrLn $ dFormatWithLines flns err
               return (np,nt+1)
             Right _ -> do
               --
@@ -434,9 +434,9 @@ testFileGK emit_io k fp = do
               emit_io $ putStrLn $ "FAILED TO PARSE SAMPLE: " ++ ln
               testLoop (np,nt+1) lns
             Right si -> do
-              emit_io $ putStrYellow (ln++"\n")
+              -- emit_io $ putStrYellow (ln ++ "\n")
               z <- testSampleInst emit_io False si (fp,lno) (dropPrefixBits ln)
-              if not z then return (np,nt+1)
+              if not z then return (np,nt + 1)
                 else do
                   testLoop (np+1,nt+1) lns
         where skipped_spaces = dropWhile isSpace ln
@@ -483,6 +483,14 @@ parseTestInst pc fp lno inp =
         Left err -> Left err
         Right i -> Right (i,ws)
 
+testParse :: String -> IO ()
+testParse inp =
+  case parseTestInst 0 "<interactive>" 1 inp of
+    Left err -> putStrLn $ dFormatWithLines (lines inp) err
+    Right (i,ws) -> do
+      mapM_ print ws
+      putStrLn $ fmtInstIr i
+
 
 testSampleInst :: (IO () -> IO ()) -> Bool -> SampleInst -> (FilePath,Int) -> String -> IO Bool -- (Int,Int)
 testSampleInst emit_io verbose si (fp,lno) syntax = do
@@ -491,40 +499,50 @@ testSampleInst emit_io verbose si (fp,lno) syntax = do
         -- (this function only gets a single line from a bigger file)
         -- this way we get both the right line number
         where syntax_lines = replicate (lno-1) "\n" ++ [syntax]
+      emit = emit_io . putStr
       emitLn = emit_io . putStrLn
-      emitLnRed = emit_io . putStrRed
+      emitLnRed = emit_io . putStrRed . (++"\n")
+      emitLnYellow = emit_io . putStrYellow . (++"\n")
+      emitFailingInst = emitLnYellow $ fmtSampleInstPrefixed si
+
   case parseTestInst 0 fp lno syntax of
     Left err -> do
       emitLn "ERROR: parsed SampleInst, but InstParser failed"
+      emitFailingInst
       emitLn $ fmtDiag err
       return False
-    Right (i,ws) -> do
+    Right (i0,ws) -> do
       emit_io $ mapM_ (putStrLn . fmtDiag) ws
-      let i_formatted = format i
-          -- move the line number for "line 1" since we only get
-          -- a line at a time
-      case parseTestInst 0 fp lno i_formatted of
+      let i0_formatted = format i0
+      -- move the line number for "line 1" since we only get
+      -- a line at a time
+      case parseTestInst 0 fp lno i0_formatted of
         Left err -> do
+          emitFailingInst
           emitLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
-          emitLn $ fmtInstIr i
-          emitLn $ "formatted as ==> " ++ i_formatted
-          emitLn $ "but failed to re-parse"
-          emitLn $ dFormatWithLines (lines i_formatted) err
+          emitLn $ fmtInstIr i0
+          emit $ "============ formatted as ==> "
+          emitLnYellow i0_formatted
+          emitLnRed $ "but failed to re-parse"
+          emitLn $ dFormatWithLines (lines i0_formatted) err
           return False
-        Right (i2,_)
-          | i{iLoc=lNONE} /= i2{iLoc=lNONE} -> do
+        Right (i1,_)
+          | i0{iLoc = lNONE} /= i1{iLoc = lNONE} -> do
+            emitFailingInst
             emitLn $ fp ++ ":"++ show lno ++ ": " ++ syntax
-            emitLn $ "formatted as ==> " ++ i_formatted
-            emitLn $ "re-parsed differently"
-            emitLn $ fmtInstIr i
-            emitLn "========"
-            emitLn $ fmtInstIr i2
+            emit $ "============ formatted as ==> "
+            emitLnYellow i0_formatted
+            emitLn $ fmtInstIr i0
+            emitLn "======== reparsed differently"
+            emitLn $ fmtInstIr i1
             return False
           | otherwise -> do
-            case runInstDbgEncoder i of
+            case runInstDbgEncoder i1 of
               Left err -> do
-                emitLn $ fmtInstIr i
-                emitLnRed $ "encode failed: " ++ fmtDiag err ++ "\n"
+                emitFailingInst
+                emitLn $ fmtInstIr i1
+                emitLnYellow i0_formatted
+                emitLnRed $ "encode failed: " ++ dFormatWithLines (lines i0_formatted) err ++ "\n"
                 return False
               Right (w_enc,ws_enc,fs_enc) -> do
                 emit_io $ mapM_ (putStrLn . fmtDiag) ws_enc
@@ -546,13 +564,14 @@ testSampleInst emit_io verbose si (fp,lno) syntax = do
                 let (oks,diags) = unzip oks_diags
                     all_ok = and oks
                 unless all_ok $ do
+                  emitFailingInst
                   emit_io $ do
                     putStrLn "encoding mismatch"
                     putStrLn ""
                 when (not all_ok || verbose) $ do
                   emitLn syntax
                   emitLn ""
-                  emitLn $ fmtInstIr i
+                  emitLn $ fmtInstIr i0
                   emitLn ""
                   emitLn "=== encoded fields ==="
                   emitLn $ "     " ++ printf "    %-32s   %16s %32s  %16s %32s" "FIELD" "REFERENCE" "" "ENCODED" ""

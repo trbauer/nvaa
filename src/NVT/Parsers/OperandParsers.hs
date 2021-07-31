@@ -128,17 +128,22 @@ pSrcCCX :: PI Src
 pSrcCCX = pLabel "const src" $ P.try pConstInd <|> P.try pConstDir
   where pConstDir :: PI Src
         pConstDir = do
+          let pConSurf = do
+                P.try (pSymbol "c0" >> return 0) <|>
+                  P.try (pSymbol "c1" >> return 1) <|>
+                  P.try (pSymbol "c2" >> return 2) <|>
+                  P.try (pSymbol "c3" >> return 3) <|>
+                  do {pSymbol "c"; pSymbol "["; pInt <* pSymbol "]"}
+
           let pCon = do
-                pSymbol "c"
-                pSymbol "["
-                s <- pInt
-                pSymbol "]"
+                s <- pConSurf
                 pSymbol "["
                 o <- pSignedInt
                 pSymbol "]"
                 return (SurfImm s,o)
           ((s,o),ms_neg_abs) <- pWithNegAbs pCon
           return $ SrcCon ms_neg_abs s o
+
 
         pConstInd :: PI Src
         pConstInd = do
@@ -178,9 +183,7 @@ pSrcImmNonBranch49 op = do
 -- cannot be a label
 pSrcI8 :: PI Src
 pSrcI8 = pLabel "imm8" $ srcIntern <$> pIt
-  where pIt = pLexeme $ do
-          w8 <- pImmA :: PI Word8 -- will fail gracefully on overflow
-          return (SrcImm (Imm32 (fromIntegral w8)))
+  where pIt = pLexeme $ SrcI8 <$> pImmA -- will fail gracefully on overflow
 
 pSrc_I32 :: Op -> PI Src
 pSrc_I32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
@@ -189,17 +192,17 @@ pSrcImmNonBranch32 op = do
     imm <- pVal32
     P.notFollowedBy (P.char '@')
     pWhiteSpace
-    return $ Src_I32 imm
+    return $ SrcI32 imm
   where pVal32
           -- TODO: should we convert integer to FP?
           | oIsFP op = pFltImm32 op <|> pIntImm32
           | otherwise = pIntImm32
 
 pSrcFlt32 :: Op -> PI Src
-pSrcFlt32 op = pLabel "imm operand" $ Src_I32 <$> pFltImm32 op
+pSrcFlt32 op = pLabel "imm operand" $ SrcI32 <$> pFltImm32 op
 
 pSrcInt32 :: PI Src
-pSrcInt32 = pLabel "imm operand" $ Src_I32 <$> pIntImm32
+pSrcInt32 = pLabel "imm operand" $ SrcI32 <$> pIntImm32
 
 
 -- e.g. +0x10 or -0x10 or +-0x10
@@ -415,8 +418,9 @@ pFltImm32 op
         pNonInf
           | is_fp16 = pWithLoc $ \loc -> do
             f32 <- parseF32
-            let f16 = floatToHalfRaw f32
-            when (halfToFloatRaw f16 /= f32) $
+            let w32 = floatToBits f32
+            let f16 = floatBitsToHalfBits RoundE w32
+            when (halfBitsToFloatBits f16 /= w32) $
               pWarning loc "precision loss"
             return $ fromIntegral f16
 
@@ -446,16 +450,16 @@ pFltImm32 op
         qnan :: Word32
         qnan
           | is_fp16 = ((f16`shiftL`16) .|. f16)
-          | is_fp64 = fromIntegral ((f64_exp_mask .|. f64_qnan_bit) `shiftR` 32)
+          | is_fp64 = fromIntegral ((f64_EXP_MASK .|. f64_QNAN_BIT) `shiftR` 32)
           | otherwise = 0x7FC00000
-          where f16 = fromIntegral (f16_exp_mask .|. f16_qnan_bit) :: Word32
+          where f16 = fromIntegral (f16_EXP_MASK .|. f16_QNAN_BIT) :: Word32
 
         inf :: Word32
         inf
           | is_fp16 = ((f16`shiftL`16) .|. f16)
-          | is_fp64 = fromIntegral (f64_exp_mask `shiftR` 32)
+          | is_fp64 = fromIntegral (f64_EXP_MASK `shiftR` 32)
           | otherwise = 0x7F800000
-          where f16 = fromIntegral f16_exp_mask :: Word32
+          where f16 = fromIntegral f16_EXP_MASK :: Word32
 
         pWholeNumberFlt = do
           f64 <- read <$> P.many1 P.digit :: PI Double

@@ -34,15 +34,22 @@ type TextSection = (String,[Inst])
 -- data TextSection =
 --  TextSection {tsName :: !String, tsInsts :: [Inst]}
 
+-- parses a full cubin listing
 parseListing :: FilePath -> String -> Either Diagnostic [TextSection]
-parseListing fp inp = fst <$> parseListingG fp inp
+parseListing fp inp = (\(ts,_,_) -> ts) <$> parseListingG fp inp
 
-parseListingG :: FilePath -> String -> Either Diagnostic ([TextSection],LabelIndex)
+parseListingG :: FilePath -> String -> Either Diagnostic ([TextSection],LabelIndex,[Diagnostic])
 parseListingG fp inp = do
-  case runPI pListing fp inp of
+  case runPI (pWhiteSpace >> pListing) fp inp of
     Left err -> Left err
-    Right (ts,pis,_) -> return (ts,pisLabelDefinitions pis)
+    Right (ts,pis,ws) -> return (ts,pisLabelDefinitions pis,ws)
 
+--- just parse a bare list of instructions
+parseInsts :: FilePath -> String -> Either Diagnostic ([Inst],LabelIndex,[Diagnostic])
+parseInsts fp inp = do
+  case runPI (pWhiteSpace >> pInsts 0) fp inp of
+    Left err -> Left err
+    Right (is,pis,ws) -> return (is,pisLabelDefinitions pis,ws)
 
 pListing :: PI [TextSection]
 pListing = do
@@ -52,7 +59,6 @@ pListing = do
 --	.headerflags	@"EF_CUDA_TEXMODE_UNIFIED EF_CUDA_64BIT_ADDRESS EF_CUDA_SM80 EF_CUDA_VIRTUAL_SM(EF_CUDA_SM80)"
 pListingHeader :: PI String
 pListingHeader = pLabel "listing header (.headerflags ...)" $ do
-  pWhiteSpace
   pKeyword ".headerflags"
   pSymbol "@"
   pWithLoc $ \loc -> do
@@ -117,5 +123,6 @@ pInsts pc = pEndOfKernel <|> pLabelDef <|> pInstI
 
         pInstI :: PI [Inst]
         pInstI = do
-          ui <- pInst pc
-          (ui:) <$> pInsts (pc+16)
+          i <- pInst pc
+          (i:) <$> pInsts (pc + 16)
+

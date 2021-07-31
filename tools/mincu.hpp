@@ -200,14 +200,16 @@ RANDOMIZE_INSTANCE(uint64_t,randomize_integral)
 
 template <typename R>
 struct init {
-  enum class init_type{NONE,CONST,RANDOM} type;
+  enum class init_type{NONE, CONST, SEQ, RANDOM} type;
   union {
-    struct {R val_const;};
+    struct {R const_val;};
+    struct {R seq_init; R seq_delta;};
     struct {R rnd_lo; R rnd_hi;};
   };
   init() : type(init_type::NONE) { }
-  init(R _const) : type(init_type::CONST), val_const(_const) { }
+  init(R _const) : type(init_type::CONST), const_val(_const) { }
   init(R _lo, R _hi) : type(init_type::RANDOM), rnd_lo(_lo), rnd_hi(_hi) { }
+  init(bool, R _init, R _delta) : type(init_type::SEQ), seq_init(_init), seq_delta(_delta) { }
 
   template <typename T = R>
   void apply(T *vals, size_t elems) const
@@ -218,7 +220,11 @@ struct init {
     case init_type::CONST:
       // TODO: use device kernel
       for (size_t k = 0; k < elems; k++)
-        vals[k] = (T)val_const;
+        vals[k] = (T)const_val;
+      return;
+    case init_type::SEQ:
+      for (size_t k = 0; k < elems; k++)
+        vals[k] = seq_init + (R)k * seq_delta;
       return;
     case init_type::RANDOM:
       randomize<T>(vals, elems, rnd_lo, rnd_hi);
@@ -231,6 +237,8 @@ template <typename R>
 static init<R> init_none() {return init<R>();}
 template <typename R>
 static init<R> init_const(R _const) {return init<R>(_const);}
+template <typename R>
+static init<R> init_seq(R _init, R _delta = (R)1) {return init<R>(true, _init, _delta);}
 template <typename R>
 static init<R> init_random(R _rnd_lo, R _rnd_hi) {return init<R>(_rnd_lo,_rnd_hi);}
 

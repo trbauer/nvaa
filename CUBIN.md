@@ -72,8 +72,7 @@ dispatch built-in uniforms.  User uniforms usually start at `c[0x0][0x160]`.
 c[0x0][] = kernel args
 c[0x1][] = ???
 c[0x2][] = compiler (e.g. math constants c.f. bisect-large sample)
-c[0x3][] = user consts
-
+c[0x3][] = user consts (e.g. __constant__)
 
 
 ## Sections

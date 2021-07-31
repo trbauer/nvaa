@@ -186,16 +186,16 @@ oIsD :: Op -> Bool
 oIsD = (`elem`[OpDADD,OpDFMA,OpDMUL,OpDSETP])
 oIsF :: Op -> Bool
 oIsF = (`elem`[OpF2F,OpF2FP,OpF2I,OpFADD,OpFFMA,OpFCHK,OpFMNMX,
-             OpFMUL,OpFSEL,OpFSET,OpFSETP])
+               OpFMUL,OpFSEL,OpFSET,OpFSETP])
 oIsH :: Op -> Bool
-oIsH op = op == OpHMMA || oIsH op
+oIsH op = op == OpHMMA || oIsH2 op
 oIsH2:: Op -> Bool
 oIsH2 = (`elem`[OpHADD2,OpHFMA2,OpHMUL2,OpHSET2,OpHSETP2])
 oIsI :: Op -> Bool
 oIsI = (`elem`[OpI2I,OpI2F,OpIABS,OpIADD3,OpIDP,OpIMAD,OpIMMA,OpIMNMX,OpISETP])
 
 oIsFP :: Op -> Bool
-oIsFP op = any ($op) [oIsF,oIsH,oIsD]
+oIsFP op = any ($ op) [oIsF,oIsH,oIsD]
 
 oIsSetP :: Op -> Bool
 oIsSetP op = op `elem` [OpISETP,OpHSETP2,OpFSETP,OpDSETP]

@@ -39,6 +39,14 @@ instance Codeable Word32 where
   -- encode :: c -> Either String Word64
   encode = Right . fromIntegral
 
+instance Codeable Word8 where
+  -- decode :: Word64 -> Either String c
+  decode w
+    | w > 0xFFFFFFFF = Left "value out of bounds"
+    | otherwise  = Right $ fromIntegral w
+  -- encode :: c -> Either String Word64
+  encode = Right . fromIntegral
+
 instance Codeable Int where
   -- decode :: Word64 -> Either String c
   decode = Right . fromIntegral

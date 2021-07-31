@@ -124,7 +124,26 @@ Signed multiplication uses the following sequence.
     IADD3            R9,  R9, R11, RZ
 
 
+### Address Seqeunces
+Load effective address.
 
+`R2-R3` is 64b index.
+Output is `R4-R5 = ((R2-3 + const64) * 2^3)`??
+Or is it
+Output is `R4-R5 = ((R2-3 * 2^3) + const64)`??
+
+T buf[ix]
+  buf + ix*sizeof(T)
+
+    LEA       R4|P0, R2,  c0[0x170],      0x3;
+    LEA.HI.X  R5,    R2,  c0[0x174], R3,  0x3, P0;
+
+    STG.E.64  [R4.64], ...;
+
+Semantics:
+
+    R4|P0 = LO32(R2 << 3) + c0[0x170] + RZ
+    R4    = HI32(R2 << 3) + c0[0x174] + (R3 << 3) + P0
 
 
 ## LOP3

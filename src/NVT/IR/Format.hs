@@ -21,6 +21,7 @@ type ImmFormatter = Imm -> String
 defaultImmFormatter :: Op -> ImmFormatter
 defaultImmFormatter op imm =
   case imm of
+    Imm8 u8 -> printf "0x%02X" u8
     Imm32 u32
       -- e.g. FADD
       | oIsFP op -> printf "%f" (bitsToFloat u32)
@@ -69,22 +70,24 @@ fmtInstWithImmFormatter fmt_imm i =
                       isRZ _ = False
                       isR (Src_R _ _) = True
                       isR _ = False
-                      isEqI k (Src_I32 x) = x == k
+                      isEqI k (SrcI32 x) = x == k
                       isEqI _ _ = False
-                      isPow2Gt1 (Src_I32 imm) =
+                      isPow2Gt1 (SrcI32 imm) =
                         imm > 1 && (imm .&. (imm - 1)) == 0
                       isPow2Gt1 _ = False
               _ -> ""
           -- unless I choose to use the LUT as syntax
-          | iOp i == OpLOP3 && length (iSrcs i) == 4 =
-            case drop 3 (iSrcs i) of
-              [Src_I32 imm] -> ".(" ++ fmtLop3 (fromIntegral imm) ++ ")"
+          | iOp i == OpLOP3 =
+            case iSrcs i of
+              [s0,s1,s2,SrcI32 imm,s4] ->
+                ".(" ++ fmtLop3 (fromIntegral imm) ++ ")"
+              _ -> ".LUT"
           | iOp i == OpPLOP3 = ".LUT"
           | otherwise = ""
 
         opnds_str :: String
         opnds_str
-          | oIsLD (iOp i) = intercalate "," dsts ++ ", " ++ fmtAddrs (iSrcs i)
+          | oIsLD (iOp i) = intercalate ":" dsts ++ ", " ++ fmtAddrs (iSrcs i)
           | oIsST (iOp i) = st_src_addr ++ ", " ++ st_src_data
           | otherwise = intercalate ", " (dsts ++ srcs)
           where (st_src_addr,st_src_data) =
@@ -101,7 +104,7 @@ fmtInstWithImmFormatter fmt_imm i =
                   where opIsDefault :: Src -> Bool
                         opIsDefault SrcRZ = True
                         opIsDefault SrcURZ = True
-                        opIsDefault (Src_I32 0) = True
+                        opIsDefault (SrcI32 0) = True
                         opIsDefault _ = False
 
                         all_default = all opIsDefault srcs
@@ -112,8 +115,20 @@ fmtInstWithImmFormatter fmt_imm i =
                               | not (opIsDefault src) || all_default -> [formatSrcWithOpts fmt_imm src]
                             _ -> [formatSrcWithOpts fmt_imm src]
 
-                dsts = map format (iDsts i)
-                srcs = map (formatSrcWithOpts fmt_imm) visible_srcs
+                dsts = map format visible_dsts
+
+                visible_dsts
+                  | iOp i == OpLOP3 =
+                    case iDsts i of
+                  --    [DstP PT, dst_r] -> [dst_r]
+                      _ -> iDsts i
+                  | otherwise = iDsts i
+
+                srcs = map (uncurry fmtSrc) (zip [1..] visible_srcs)
+                  where fmtSrc :: Int -> Src -> String
+                        fmtSrc src_ix src =
+                          case (src_ix, iOp i,src) of
+                            _ -> formatSrcWithOpts fmt_imm src
 
                 visible_srcs
                   | iOp i == OpIADD3 =
@@ -123,7 +138,16 @@ fmtInstWithImmFormatter fmt_imm i =
                       SrcPT:SrcPT:sfx -> sfx
                       SrcPT:sfx -> sfx
                       sfx -> sfx
-                  | iOp i == OpLOP3 = take 3 (iSrcs i)
+                  | iOp i == OpLOP3 && not (".LUT"`isInfixOf`synthetic_tokens) =
+                    -- for LOP3 if we used an expression then we can drop src3
+                    -- e.g. LOP3.(...)
+                    case iSrcs i of
+                      [s0,s1,s2,SrcI32 imm,s4] -> [s0,s1,s2,s4]
+                      _ -> iSrcs i
+                  | iOp i == OpMOV =
+                    case iSrcs i of
+                      [src0, SrcI32 0xF] -> [src0] -- hidden parameter for MOV
+                      _ -> iSrcs i
                   | otherwise = iSrcs i
 
         depinfo_str = if null d then "" else (" " ++ d)

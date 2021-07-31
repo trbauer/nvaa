@@ -225,60 +225,15 @@ pImm32 = pImmA
 pImm64 :: Monad m => P m u Word64
 pImm64 = pImmA
 
-pImmA :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
+
+pImmA :: (Show a, Bounded a, FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
 pImmA = do
-  a <- pImmBody
+  a <- pHexImm <|> pBinImm <|> pDecImm
   -- P.notFollowedBy $ P.char '.' >> P.char '#'
   pWhiteSpace
   return a
 
-pImmBody :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
-pImmBody = pHexImm <|> pBinImm <|> pDecImm
-
--- 0x[0-9A-Fa-f]+
-pHexImm :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
-pHexImm = pWithLoc $ \loc -> do
-  P.try (P.char '0' >> P.oneOf "xX");
-  ds <- P.many1 P.hexDigit
-  pImmLoopHexBin 16 loc ds
-
--- 0b[0-1]+
-pBinImm :: (FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
-pBinImm = pWithLoc $ \loc -> do
-  P.try (P.char '0' >> P.oneOf "bB");
-  ds <- P.many1 (P.oneOf "01")
-  pImmLoopHexBin 2 loc ds
-
-
--- For the hex/binary version
---
--- This is because the immediates for signed types can fail the
--- overflow test.  E.g. 0xFFFFFFFF on Int32, the last digit
--- goes from small positive to negative; hence we just
--- use a max count here
-pImmLoopHexBin ::
-  (FiniteBits a, Monad m, Integral a, Ord a, Num a) =>
-  a ->
-  Loc ->
-  [Char] ->
-  P m u a
-pImmLoopHexBin r loc = loop 0 0
-  where loop ix v [] = return v
-        loop ix v (d:ds)
-          | ix >= max_chars = pSemanticError loc "integer too large for type"
-          | otherwise = loop (ix+1) n ds
-          where n = r*v + fromIntegral (digitToInt d)
-
-        -- e.g. Int32 allows 32/(8/2) = 8 digits
-        --  binary allows 32/(2/2) = 32 digits
-        max_chars :: Int
-        max_chars = finiteBitSize r`div`bits_per_digit
-          where bits_per_digit
-                  | r == 16 = 4
-                  | r == 8 = 3
-                  | r == 2 = 1
---        max_chars = (finiteBitSize r)`div`(fromIntegral r`div`2)
-
+{-
 -- [0-9]+
 --
 -- This progressively multiplies the old value by 10
@@ -293,6 +248,50 @@ pDecImm = pWithLoc $ \loc -> do
           | n < v     = pSemanticError loc "integer too large" -- overflow
           | otherwise = mulAddLoop loc n ds
           where n = 10*v + fromIntegral (digitToInt d)
+-}
+pDecImm :: (Show a, Bounded a, FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
+pDecImm = pWithLoc $ \loc -> do
+  ds <- P.many1 P.digit
+  pImmLoopUnsigned 10 loc ds
+
+-- 0x[0-9A-Fa-f]+
+pHexImm :: (Show a, Bounded a, FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
+pHexImm = pWithLoc $ \loc -> do
+  P.try (P.char '0' >> P.oneOf "xX");
+  ds <- P.many1 P.hexDigit
+  pImmLoopUnsigned 16 loc ds
+
+-- 0b[0-1]+
+pBinImm :: (Show a, Bounded a, FiniteBits a, Monad m, Integral a, Ord a, Num a) => P m u a
+pBinImm = pWithLoc $ \loc -> do
+  P.try (P.char '0' >> P.oneOf "bB");
+  ds <- P.many1 (P.oneOf "01")
+  pImmLoopUnsigned 2 loc ds
+
+
+-- For the hex/binary version
+pImmLoopUnsigned ::
+  (Show a, Bounded a, FiniteBits a, Monad m, Integral a, Ord a, Num a) =>
+  a ->
+  Loc ->
+  [Char] ->
+  P m u a
+pImmLoopUnsigned r loc = loop 0
+  where loop v [] = return v
+        loop v0 (d:ds)
+          | overflowed = do
+            pTrace $ show (v0,d_a,v1)
+            pSemanticError loc "integer too large for type"
+          | otherwise = loop v1 ds
+          where v1 = r*v0 + d_a
+                d_a = fromIntegral (digitToInt d) `asTypeOf` v0
+                --    r*v + d > maxBound
+                -- => v > (maxBound - d)/r
+                overflowed =
+                    v0 > ((maxBound - d_a)`div`r)
+                -- underflowed =
+                --    v < 0 && ((minBound - d)`div`r)
+
 
 
 pInt :: Monad m => P m u Int

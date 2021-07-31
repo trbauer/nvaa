@@ -75,7 +75,8 @@ fmtInstIr i =
     fS "iOp" iOp ++
     fS "iOptions" iOptions ++
     fS "iDsts" iDsts ++
-    fS "iSrcs" iSrcs ++
+    ", iSrcs = " ++ src_val ++
+    -- fS "iSrcs" iSrcs ++
     fS "iDepInfo" iDepInfo ++
     "}"
   where fS :: Show a => String -> (Inst -> a) -> String
@@ -86,6 +87,29 @@ fmtInstIr i =
 
         r "" = ""
         r (',':sfx) = ' ':sfx
+
+        src_val
+          | length short_str < 64 = short_str ++ "\n"
+          | otherwise =
+              case iSrcs i of
+                src0:srcs_sfx ->
+                  "[\n" ++
+                  "    " ++ show src0 ++ "\n" ++
+                  concatMap ((++ "\n") . ("  , " ++) . showS) srcs_sfx ++
+                  "  ]\n"
+          where short_str = intercalate "," (map showS (iSrcs i))
+
+        showS :: Src -> String
+        showS s =
+          case s of
+            SrcRZ -> "SrcRZ"
+            SrcURZ -> "SrcURZ"
+            SrcPT -> "SrcPT"
+            -- SrcPNT -> "SrcPNT" (can't figure otu the pattern)
+            SrcR r -> "SrcR " ++ show r
+            SrcP p -> "SrcP " ++ show p
+            SrcI32 i -> "SrcI32 " ++ show i
+            _ -> show s
 
 data Pred =
     --     neg.      rgr.
@@ -161,8 +185,12 @@ data Src =
   deriving (Show,Eq,Ord)
 pattern SrcRZ :: Src
 pattern SrcRZ  = SrcReg ES.EnumSetEMPTY (RegR RZ)
+pattern SrcR r  = SrcReg ES.EnumSetEMPTY (RegR r)
 pattern SrcURZ = SrcReg ES.EnumSetEMPTY (RegUR URZ)
 pattern SrcPT  = SrcReg ES.EnumSetEMPTY (RegP PT)
+pattern SrcP p  = SrcReg ES.EnumSetEMPTY (RegP p)
+pattern SrcI32 i = SrcImm (Imm32 i)
+pattern SrcI8 i = SrcImm (Imm8 i)
 --
 pattern Src_B ms b = SrcReg ms (RegB b)
 pattern Src_P ms p = SrcReg ms (RegP p)
@@ -171,7 +199,6 @@ pattern Src_SB ms r = SrcReg ms (RegSB r)
 pattern Src_SR ms r = SrcReg ms (RegSR r)
 pattern Src_UP ms up = SrcReg ms (RegUP up)
 pattern Src_UR ms ur = SrcReg ms (RegUR ur)
-pattern Src_I32 i = SrcImm (Imm32 i)
 ----------------------------------------------------
 -- common values
 dST_PT :: Dst
@@ -234,11 +261,11 @@ sRC_SR_TID_X :: Src
 sRC_SR_TID_X = SrcReg msEmpty (RegSR SR_TID_X)
 --
 sRC_I32_0 :: Src
-sRC_I32_0 = Src_I32 0
+sRC_I32_0 = SrcI32 0
 sRC_I32_1 :: Src
-sRC_I32_1 = Src_I32 1
-sRC_I32_15 :: Src
-sRC_I32_15 = Src_I32 0xF
+sRC_I32_1 = SrcI32 1
+sRC_I32_0xF :: Src
+sRC_I32_0xF = SrcI32 0xF
 sRC_C00 :: Src
 sRC_C00 = SrcCon msEmpty (SurfImm 0) 0
 
@@ -282,27 +309,28 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   , SrcReg msEmpty (RegUR UR2)
   , SrcReg msEmpty (RegUR UR3)
   --
-  , Src_I32 0xFFFFFFFF
+  , SrcI32 0xFFFFFFFF
   , sRC_I32_0
   , sRC_I32_1
-  , Src_I32 0x02
-  , Src_I32 0x04
-  , Src_I32 0x08
-  , Src_I32 0x10
+
+  , SrcI32 0x02
+  , SrcI32 0x04
+  , SrcI32 0x08
+  , SrcI32 0x10
   -- FP32
-  , Src_I32 0xFF800000 -- -INF
-  , Src_I32 0xFFC00000 -- -QNAN
-  , Src_I32 0xC0000000 -- -2
-  , Src_I32 0xBF800000 -- -1
-  , Src_I32 0xBF000000 -- -0.5
-  , Src_I32 0xBE800000 -- -0.25
+  , SrcI32 0xFF800000 -- -INF
+  , SrcI32 0xFFC00000 -- -QNAN
+  , SrcI32 0xC0000000 -- -2
+  , SrcI32 0xBF800000 -- -1
+  , SrcI32 0xBF000000 -- -0.5
+  , SrcI32 0xBE800000 -- -0.25
   -- 0.0 is above
-  , Src_I32 0x3E800000 -- 0.25
-  , Src_I32 0x3F000000 -- 0.5
-  , Src_I32 0x3F800000 -- 1
-  , Src_I32 0x40000000 -- 2
-  , Src_I32 0x7F800000 -- +INF
-  , Src_I32 0x7FC00000 -- +QNAN
+  , SrcI32 0x3E800000 -- 0.25
+  , SrcI32 0x3F000000 -- 0.5
+  , SrcI32 0x3F800000 -- 1
+  , SrcI32 0x40000000 -- 2
+  , SrcI32 0x7F800000 -- +INF
+  , SrcI32 0x7FC00000 -- +QNAN
   --
   , sRC_SR_TID_X
   , sRC_SR_CTAID_X
@@ -318,7 +346,8 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   ]
 
 data Imm =
-    Imm32 !Word32
+    Imm8  !Word8 -- for LEA, LOP3, ...
+  | Imm32 !Word32
   | Imm49 !Int64 -- for branches
   deriving (Show,Eq,Ord)
 data Surf =
@@ -879,7 +908,7 @@ data InstOpt =
   | InstOptL -- SHF.L / QSPC.L
   | InstOptR -- SHF.R
   --
-  | InstOptHI -- SHF, IADD3, ...
+  | InstOptHI -- SHF, IADD3, LEA, ...
   --
   -- SHFL
   | InstOptUP

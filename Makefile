@@ -31,5 +31,9 @@ fptest.exe: Makefile tools/FPTest.hs src/NVT/Floats.hs src/NVT/Bits.hs
 	ghc  -hidir build/libs -odir build/libs --make tools/FPTest.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
 
 
+run-micros:
+    make -f tools/Makefile
+
+
 clean:
 	rm -rf build *.exe
