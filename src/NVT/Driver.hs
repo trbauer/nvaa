@@ -137,7 +137,7 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.2"
+nvt_version = "1.1.3"
 
 
 run :: [String] -> IO ()
@@ -410,6 +410,8 @@ runWithOpts os
           | otherwise = []
 
 
+--  .file   1 "E:\\dev\\nvaa\\<unknown>"
+--  .file   2 "E:\\dev\\nvaa\\<kernel>"
 -- e.g.
 -- .file	2 "D:\\work\\projects\\new-eu\\setup\\<kernel>"
 -- ==>
@@ -418,12 +420,17 @@ fixDotFileDirectiveInPtxForOpenCL :: FilePath -> FilePath ->  IO ()
 fixDotFileDirectiveInPtxForOpenCL ptx_fp cl_fp = do
   flns <- lines <$> readFile ptx_fp
   length flns `seq` return () -- close handle so we can re-write it
+  let is_abs = isAbsolute cl_fp
   let fixLine ln
+        | is_abs && ".file"`isInfixOf`ln && "<kernel>\""`isSuffixOf`ln =
+          case words ln of
+            ".file":f_ix:sfx -> "\t.file  " ++ f_ix ++ "  " ++ show cl_fp
+            _ -> fix ln
         | ".file"`isInfixOf`ln = fix ln
         | otherwise = ln
         where fix [] = []
               fix s@(c:cs)
-                | "<kernel>"`isPrefixOf`s = cl_fp ++ drop (length "<kernel>") s
+                | "<kernel>\""`isPrefixOf`s = drop 1 (show cl_fp) ++ drop (length "<kernel>\"") s
                 | otherwise = c : fix cs
   writeFile ptx_fp $
     unlines (map fixLine flns)

@@ -32,8 +32,9 @@ fptest.exe: Makefile tools/FPTest.hs src/NVT/Floats.hs src/NVT/Bits.hs
 
 
 run-micros:
-    make -f tools/Makefile
+	make -f tools/Makefile
 
 
 clean:
 	rm -rf build *.exe
+

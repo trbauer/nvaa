@@ -121,7 +121,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                 | otherwise -> emitLn lnstr >> cont dict0 lns
               Just (file,lno) -> lookupMapping dict0
                 where lookupMapping :: SrcDict -> IO ()
-                      lookupMapping dict =
+                      lookupMapping dict = do
                         case file `lookup` dict of
                           Nothing -> do
                             src_lns <- lines <$> readFile file
