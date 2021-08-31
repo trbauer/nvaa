@@ -132,8 +132,13 @@ Output is `R4-R5 = ((R2-3 + const64) * 2^3)`??
 Or is it
 Output is `R4-R5 = ((R2-3 * 2^3) + const64)`??
 
-T buf[ix]
-  buf + ix*sizeof(T)
+    T buf[N];
+    ...
+    buf + ix*sizeof(T)
+
+    `R2-R3` are 64b `ix` (LO and HI)
+    `c[0x0][0x170]` = LO(buf)
+    `c[0x0][0x174]` = HI(buf)
 
     LEA       R4|P0, R2,  c0[0x170],      0x3;
     LEA.HI.X  R5,    R2,  c0[0x174], R3,  0x3, P0;
@@ -143,7 +148,7 @@ T buf[ix]
 Semantics:
 
     R4|P0 = LO32(R2 << 3) + c0[0x170] + RZ
-    R4    = HI32(R2 << 3) + c0[0x174] + (R3 << 3) + P0
+    R5    = LO32(R3 << 3) + c0[0x174] + HI32(R2 << 3) + P0
 
 
 ## LOP3

@@ -563,7 +563,7 @@ pOperand op opnd_ix =
             PTXOperandImm <$> do
               P.char '0' >> (P.char 'f' <|> P.char 'd')
               ds <- P.many1 P.hexDigit
-              pImmLoopHexBin 16 loc ds
+              pImmLoopUnsigned 16 loc ds
         pImmI = do
           modf <- P.option id $ pSymbol "-" >> return complement
           PTXOperandImm . modf <$> pImm64

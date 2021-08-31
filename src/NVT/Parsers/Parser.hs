@@ -292,7 +292,36 @@ pImmLoopUnsigned r loc = loop 0
                 -- underflowed =
                 --    v < 0 && ((minBound - d)`div`r)
 
+{-
+-- For the hex/binary version
+--
+-- This is because the immediates for signed types can fail the
+-- overflow test.  E.g. 0xFFFFFFFF on Int32, the last digit
+-- goes from small positive to negative; hence we just
+-- use a max count here
+pImmLoopHexBin ::
+  (FiniteBits a, Monad m, Integral a, Ord a, Num a) =>
+  a ->
+  Loc ->
+  [Char] ->
+  P m u a
+pImmLoopHexBin r loc = loop 0 0
+  where loop ix v [] = return v
+        loop ix v (d:ds)
+          | ix >= max_chars = pSemanticError loc "integer too large for type"
+          | otherwise = loop (ix+1) n ds
+          where n = r*v + fromIntegral (digitToInt d)
 
+        -- e.g. Int32 allows 32/(8/2) = 8 digits
+        --  binary allows 32/(2/2) = 32 digits
+        max_chars :: Int
+        max_chars = finiteBitSize r`div`bits_per_digit
+          where bits_per_digit
+                  | r == 16 = 4
+                  | r == 8 = 3
+                  | r == 2 = 1
+--        max_chars = (finiteBitSize r)`div`(fromIntegral r`div`2)
+-}
 
 pInt :: Monad m => P m u Int
 pInt = pImmA
