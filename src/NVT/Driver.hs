@@ -78,11 +78,14 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
     , PA.optF spec "text" "print-code"
         "print text sections only" "via nvdiasm --print-code"
         (\o -> (o {oTextSectionsOnly = True})) # PA.OptAttrAllowUnset
+    , PA.opt spec "Xcl2ptx" "" "ANYTHING"
+        "sets an extra argument for the cl2ptx tool" "(e.g. -Xcl2ptx=-cl-fp32-correctly-rounded-divide-sqrt)"
+        (\a o -> (o {oExtraCl2ptxArgs = oExtraCl2ptxArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
     , PA.opt spec "Xnvcc" "" "ANYTHING"
         "sets an extra argument for the nvcc tool" "(e.g. -Xnvcc=-maxregcount -X=64; note how they are successive)"
         (\a o -> (o {oExtraNvccArgs = oExtraNvccArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
     , PA.opt spec "Xnvdisasm" "" "ANYTHING"
-        "sets an extra argument for the nvcc tool" "(e.g. -Xnvcc=-maxregcount -X=64; note how they are successive)"
+        "sets an extra argument for the nvdiasm tool" ""
         (\a o -> (o {oExtraNvdisasmArgs = oExtraNvdisasmArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
     , PA.optF spec "v2" "debug"
         "the verbosity level" ""
@@ -137,7 +140,7 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.3"
+nvt_version = "1.1.4"
 
 
 run :: [String] -> IO ()
@@ -228,8 +231,11 @@ runWithOpts os
             verboseLn os "warning: -nv-line-info may be poor quality on OpenCL"
           let ptx_dst = deriveFileNameFrom cl_fp ".ptx"
               build_opts =
-                  "-cl-nv-arch " ++ oArch os ++ " -cl-nv-cstd=CL1.2" ++ maybe_lines
+                  "-cl-nv-arch " ++ oArch os ++ " -cl-nv-cstd=CL1.2" ++ maybe_lines ++ maybe_extra_args
                 where maybe_lines = if oPrintLines os then " -nv-line-info" else ""
+                      maybe_extra_args
+                        | null (oExtraCl2ptxArgs os) = ""
+                        | otherwise = " " ++ intercalate " " (oExtraCl2ptxArgs os)
               cl2ptx_args =
                 [cl_fp, "-b=" ++ build_opts,"-o=" ++ ptx_dst]
           (ec,out,err) <- runProcessWithExitCode (mkExe "cl2ptx") cl2ptx_args

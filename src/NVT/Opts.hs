@@ -8,6 +8,7 @@ data Opts =
     oArch :: !String -- e.g. sm_52, sm_75
   , oCollateListing :: ![Collate] -- implies -lines
   , oColor :: !Color
+  , oExtraCl2ptxArgs :: ![String]
   , oExtraNvccArgs :: ![String]
   , oExtraNvdisasmArgs :: ![String]
   , oFilterAssembly :: !Bool
@@ -33,6 +34,7 @@ dft_opts =
     oArch = "" -- "sm_62" -- "sm_70" -- "sm_52"
   , oCollateListing = []
   , oColor = ColorAuto
+  , oExtraCl2ptxArgs = []
   , oExtraNvccArgs = []
   , oExtraNvdisasmArgs = []
   , oFilterAssembly = True
