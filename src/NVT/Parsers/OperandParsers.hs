@@ -58,8 +58,12 @@ pSrc_I32OrL32 pc op = pLabel "imm operand" $
 -- c[0x3][R3+0x8]
 -- cx[UR3][R0+0x8]
 pXLdcSrcs :: PI Src -> Src -> PI [Src]
-pXLdcSrcs pSrcXR xrz = pLabel "const addr" $ pInd <|> pDir
-  where pDir = do
+pXLdcSrcs pSrcXR xrz = pLabel "const addr" $ pInd <|> P.try pDir <|> pDirShort
+  where pDirShort = do
+          P.char 'c'
+          s <- pInt
+          pSurfOff (SurfImm s)
+        pDir = do
           pSymbol "c"
           pSymbol "["
           s <- pSignedInt

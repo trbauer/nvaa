@@ -19,7 +19,8 @@ import System.IO
 import System.Process
 
 cPP_FILT :: FilePath
-cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.3\\mingw\\bin\\c++filt.exe"
+-- cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.3\\mingw\\bin\\c++filt.exe"
+cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.5\\mingw\\bin\\c++filt.exe"
 
 cUDA_SAMPLES_ROOT :: FilePath
 cUDA_SAMPLES_ROOT = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples"
@@ -36,8 +37,8 @@ run as = do
 runWithOpts :: CSOpts -> IO ()
 runWithOpts cso = do
   case csoTool cso of
-    "samples" -> collectSampleIsa cso D.dft_opts_80
-    "libs" -> collectLibrarySampleIsa cso D.dft_opts_80
+    "samples" -> collectSampleIsa cso D.dft_opts_86
+    "libs" -> collectLibrarySampleIsa cso D.dft_opts_86
     t -> fatal $ "-t=" ++ t ++ ": invalid tool"
 
 
@@ -245,10 +246,11 @@ collectSampleIsa cso os_raw = body
                         }
                   printLn $ "\n     % nva.exe  " ++
                     intercalate "^\n      " ([
-                      "-o=" ++ sass_output
+                      "--arch=" ++ D.oArch nvcc_os
+                    , "-o=" ++ sass_output
                     , "--save-cubin=" ++ cubin_output
                     , "--save-ptx=" ++ ptx_output
-                    ] ++ map ("-X"++) (D.oExtraNvccArgs nvcc_os) ++ [src_cu_file])
+                    ] ++ map ("-Xnvcc="++) (D.oExtraNvccArgs nvcc_os) ++ [src_cu_file])
                   --
                   let handler :: Bool -> SomeException -> IO ()
                       handler double_fault e
@@ -279,7 +281,7 @@ collectSampleIsa cso os_raw = body
                   printLn $ "  done"
 
 findCudaSamplesDir :: IO FilePath
-findCudaSamplesDir = tryPathVers ["v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0"]
+findCudaSamplesDir = tryPathVers ["v11.4","v11.0","v10.2","v10.1","v10.0","v9.1","v9.0","v8.0"]
   where tryPathVers [] = return ""
         tryPathVers (p:ps) = do
           z <- doesDirectoryExist (mkCudaSampleDir p)

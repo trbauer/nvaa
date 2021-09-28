@@ -19,7 +19,8 @@ import Text.Printf
 import qualified Data.ByteString as S
 
 sm_ver :: String
-sm_ver = "sm_80"
+sm_ver = "sm_86"
+-- sm_ver = "sm_80"
 -- sm_ver = "sm_75"
 
 main :: IO ()

@@ -16,7 +16,7 @@ import qualified Text.Parsec.Pos       as P
 import qualified Text.Parsec.Token     as P
 
 import System.Directory
-import Util
+-- import Util
 
 
 
@@ -401,10 +401,10 @@ pLoc = do
 
   return $ PTXLoc fno lno col attrs
 
--- 	st.param.b32	[func_retval0+0], %r4;
--- 	setp.eq.s32	%p1, %r22, 1;
---	@%p1 bra 	BB0_5;
--- 	ld.param.v4.b32	{%r25, %r26, %r27, %r28}, [retval0+0];
+--  st.param.b32  [func_retval0+0], %r4;
+--  setp.eq.s32 %p1, %r22, 1;
+--  @%p1 bra  BB0_5;
+--  ld.param.v4.b32 {%r25, %r26, %r27, %r28}, [retval0+0];
 pInst :: PPTX PTXInst
 pInst = pWithLoc $ \loc -> do
     pred <- P.optionMaybe pPred

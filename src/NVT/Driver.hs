@@ -6,6 +6,9 @@ import NVT.ElfDecode
 import NVT.FilterAssembly
 import NVT.RawInst
 import NVT.Opts
+import NVT.Diagnostic
+import NVT.Parsers.ListingParser
+import NVT.SASSGraph
 
 import           Prog.Args.Args((#))-- progargs
 import qualified Prog.Args.Args as PA -- progargs
@@ -140,7 +143,7 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.4"
+nvt_version = "1.1.5"
 
 
 run :: [String] -> IO ()
@@ -327,10 +330,26 @@ runWithOpts os
               renameFile cubin_file (output_path_without_ext ++ ".cubin")
 
         processSassFile :: FilePath -> IO ()
-        processSassFile sass_fp
-          | oFilterAssembly os = readFile sass_fp >>= processSassToOutput ""
-          -- should be unreachable
-          | otherwise = error "processSassFile: with --no-filter-asm"
+        processSassFile sass_fp = do
+          -- | oFilterAssembly os = readFile sass_fp >>= processSassToOutput ""
+          -- | otherwise = error "processSassFile: with --no-filter-asm"
+          fstr <- readFile sass_fp
+          case parseListing sass_fp fstr of
+            Left err -> do
+              -- hPutStrLn stderr (dFormatWithLines (lines sass_fp) d)
+              fatal (dFormatWithLines (lines sass_fp) err)
+              return ()
+            Right l -> do
+              {-
+              let withOutput : String -> IO ()
+                  withOutput str
+                    | null (oOutputFile os) = hPutStr stdout
+                    | otherwise = withFile (oOutputFile os) WriteMode
+
+                    | withFile (oOutputFile os) WriteMode
+              withOutput $ fmtListingGraph l
+              -}
+              mapM_ emitTextSection (lTextSections l)
 
         processSassToOutput :: String -> String -> IO ()
         processSassToOutput ptx sass
@@ -348,7 +367,8 @@ runWithOpts os
                 fos = fos_dft {
                           foArch = oArch os
                         , foColor = color
-                        , foFmtOpts = (foFmtOpts fos_dft) {
+                        , foFmtOpts =
+                            (foFmtOpts fos_dft) {
                               foPrintEncoding = oPrintEncoding os
                             , foPrintOffsets = oPrintOffsets os
                             , foPrintDeps = oPrintDeps os

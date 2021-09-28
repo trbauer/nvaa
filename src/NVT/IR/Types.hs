@@ -48,6 +48,7 @@ lmElem s (LabelMap m) =
 data Inst =
   Inst {
     iLoc :: !Loc
+  , iId :: !Int
   , iPc :: !PC
   , iPredication :: !Pred
   , iOp :: !Op
@@ -70,6 +71,7 @@ fmtInstIr :: Inst -> String
 fmtInstIr i =
     "Inst {\n" ++
     r (fS "iLoc" iLoc) ++
+    fS "iId" iId ++
     fS "iPc" iPc ++
     fS "iPredication" iPredication ++
     fS "iOp" iOp ++

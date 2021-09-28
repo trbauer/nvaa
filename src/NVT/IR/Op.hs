@@ -51,6 +51,7 @@ data Op =
   | OpHSET2
   | OpHSETP2
   | OpI2F
+  | OpI2FP
   | OpI2I
   | OpI2IP
   | OpIABS
@@ -128,7 +129,7 @@ data Op =
   deriving (Show,Eq,Ord,Read,Enum)
 
 all_ops :: [Op]
-all_ops = [toEnum 0..]
+all_ops = [toEnum 0 ..]
 
 oMnemonic :: Op -> String
 oMnemonic = drop 2 . show

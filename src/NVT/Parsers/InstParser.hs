@@ -51,6 +51,7 @@ pInstNoPrefix pc = body
                 return $
                   Inst {
                     iLoc = loc
+                  , iId = 0
                   , iPc = pc
                   , iPredication = prd
                   , iOp = op
@@ -714,6 +715,9 @@ pInstNoPrefix pc = body
                   pSrcInt32
               pComplete [dst] [src]
 
+            -- I2FP.F32.U32  R2, R24
+            -- I2FP.F32.S32  R0, c0[0x190]
+            OpI2FP -> pUnaryOp
 
             -- I2I.U16.S32.SAT  R10, R10 {!2};        // examples/sm_80/libs/nppial64_11/Program.28.sm_80.sass:142955
             -- I2I.U16.S32.SAT R10, 0xa {!2}
@@ -1010,7 +1014,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcP
               src1 <- pSymbol "," >> (pSrcP <|> pSrcUP)
               src2 <- pSymbol "," >>  (pSrcP <|> pSrcUP)
-              src3_lut <- pSymbol "," >> pLop3LutOptSrc -- [??]
+              src3_lut <- pLop3LutOptSrc -- [??]
               src4_unk <- pSymbol "," >> pSrcI8 -- bits [23:16]
               --
               pComplete [dst0,dst1] [src0,src1,src2,src3_lut,src4_unk]
@@ -1281,6 +1285,7 @@ pInstNoPrefix pc = body
 
             -- ULDC       UR5, c[0x0][0x160] {!1}; // examples/sm_80/libs/cublas64_11/Program.224.sm_80.sass:54823
             -- ULDC.64    UR4, c[0x0][0x118] {!2}; // examples/sm_80/libs/cublas64_11/Program.224.sm_80.sass:56237
+            -- ULDC.64    UR4, c0[0x118]
             OpULDC -> do
               dst <- pDstUR
               srcs <- pSymbol "," >> pXLdcSrcs pSrcUR SrcURZ
@@ -1321,6 +1326,7 @@ pInstNoPrefix pc = body
             -- ULOP3.(s0|s1)         UR16, UR6, 0x1,        URZ, 0xfc, !UPT {!2};
             -- ULOP3.(s0&s1)         UR7,  UR9, 0xffffffe0, URZ, 0xc0, !UPT {!2};
             -- ULOP3.LUT.PAND  UP2,  UR4,  UR4, UR5,        URZ, 0xc0, !UPT ...
+            -- ULOP3.(s0&s1)         UR5,  UR5, 0xffffff,   URZ, 0xc0, !UPT  {!6,Y,^1};  /* 001FCC000F8EC03F`00FFFFFF05057892 */
             OpULOP3 -> do
               dst_p <- P.option dST_UPT $ pDstUP <* pSymbol ","
               dst <- pDstUR
@@ -1328,7 +1334,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
               src2 <- pSymbol "," >> pSrcUR
-              src3_lut <- pSymbol "," >> pLop3LutOptSrc
+              src3_lut <- pLop3LutOptSrc
               src4_pr <- pSymbol "," >> pSrcUP
               --
               pComplete [dst_p,dst] [src0,src1,src2,src3_lut,src4_pr]
@@ -1439,7 +1445,7 @@ pInstNoPrefix pc = body
               pComplete [] [src0]
 
             -- TODO: disable and force everything through a pre-chosen path
-            _ -> pSemanticError loc $ "unsupported op"
+            _ -> pSemanticError loc $ "unmatched op (InstParser.hs case)"
 
         -- up to two predicate sources
         -- pOptPreds = do
