@@ -1,8 +1,10 @@
 module NVT.IR.LExpr where
 
+import NVT.IR.Syntax
 import NVT.Loc
 
 import Data.Int
+import Text.Printf
 
 -- Label/Listing expressions
 --
@@ -72,3 +74,40 @@ data LExpr =
   -- usually (always?) nested in a 32@lo(...)
   | LExprFunFDesc !Loc !LExpr -- fun@fdesc(<LExpr>)
   deriving (Show,Eq,Ord)
+
+instance Syntax LExpr where
+  format le =
+      case le of
+        LExprAdd _ l r -> format l ++ " + " ++ format r
+        LExprSub _ l r -> format l ++ " - " ++ format r
+        LExprMul _ l r -> fmtMulOp l ++ "*" ++ fmtMulOp r
+        LExprDiv _ l r -> fmtMulOp l ++ "/" ++ fmtMulOp r
+        LExprMod _ l r -> fmtMulOp l ++ "%" ++ fmtMulOp r
+        LExprNeg _ e -> "-" ++ fmtUnr e
+        LExprCompl _ e -> "~" ++ format e
+        LExprImm _ i -> printf "0x%08X" i
+        LExprLabel _ lbl -> lbl
+        LExprLo32 _ e -> "32@lo(" ++ format e ++ ")"
+        LExprHi32 _ e -> "32@hi(" ++ format e ++ ")"
+        LExprSRel _ i e -> format e ++ "@srel"
+        LExprFunFDesc _ e -> "fun@fdesc(" ++ format e ++ ")"
+    where fmtMulOp x
+            | isLtMul x = ("(" ++ format x ++ ")")
+            | otherwise = format x
+          fmtUnr x
+            | isLtUnr x = ("(" ++ format x ++ ")")
+            | otherwise = format x
+
+          isLtUnr le =
+            case le of
+              LExprAdd _ _ _ -> True
+              LExprSub _ _ _ -> True
+              LExprMul _ _ _ -> True
+              LExprDiv _ _ _ -> True
+              LExprMod _ _ _ -> True
+          isLtMul le =
+            case le of
+              LExprAdd _ _ _ -> True
+              LExprSub _ _ _ -> True
+
+

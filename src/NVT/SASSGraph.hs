@@ -12,16 +12,32 @@ emitTextSection :: TextSection -> IO ()
 emitTextSection ts =
 --  writeFile (tsKernelName ts ++ ".gvz") $
 --    fmtTextSect ts
-  putStrLn $
-    tsKernelName ts ++ ":\n" ++
-    concatMap (\b -> "B#" ++ show (bId b) ++ ":\n" ++
-        concatMap (\i -> "  I#" ++ show (iId i) ++ "\n") (bInsts b)
-      ) (tsBlocks ts)
+    putStrLn $
+      tsKernelName ts ++ ":\n" ++
+      concatMap (\b -> "B#" ++ show (bId b) ++ ": " ++ intercalate "," (bLabels b) ++ "\n" ++
+          concatMap (\i -> "  I#" ++ show (iId i) ++ ": " ++ format i ++ "\n") (bInsts b)
+        ) (tsBlocks ts) ++ "\n" ++
+      show idg ++ "\n" ++
+      "\n" ++
+      df_str
+
+  where idg = computePreds (tsBlocks ts)
+        dus = computeDUs (tsBlocks ts)
+        df_str =
+          "DUs:\n" ++
+          concatMap (\du -> "  " ++ show du ++ "\n") dus
+
 --
 -- digraph sample3 {
 -- A -> {B ; C ; D}
 -- C -> {B ; A}
 -- }
 
+{-
 fmtTextSect :: TextSection -> String
-fmtTextSect ts = ""
+fmtTextSect ts =
+    "digraph " ++ tsKernelName ts ++ "{\n" ++
+
+    "}"
+  where idg = computePreds (tsBlocks ts)
+-}

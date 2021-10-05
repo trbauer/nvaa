@@ -164,5 +164,5 @@ formatSrcWithOpts fmt_imm src =
     SrcReg ms r -> msDecorate ms (format r)
     SrcCon ms six soff -> msDecorate ms (format six ++ printf "[0x%X]" soff)
     SrcImm i -> fmt_imm i
+    SrcImmExpr _ le -> format le
     SrcTex to -> format to
-

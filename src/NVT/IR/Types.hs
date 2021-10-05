@@ -116,9 +116,9 @@ fmtInstIr i =
 data Pred =
     --     neg.      rgr.
     PredP  !PredSign !PR -- regular predicate
-  | PredUP !PredSign !UP -- uniform predicate (True,UP7) is "UPZ"
+  | PredUP !PredSign !UP -- uniform predicate (True,UP7) is "UPT"
                          -- this should act the same as PredNONE
-  deriving (Show,Eq)
+  deriving (Show,Eq,Ord)
 -- SPECIFY: Pred PredSign PReg
 -- SPECIFY: data PReg = PRegPR !PR | PRegUP !UP
 instance Syntax Pred where
@@ -128,7 +128,7 @@ instance Syntax Pred where
         PredUP z p -> "@" ++ format z ++ format p
     where sign z = if z == PredNEG then "!" else ""
 data PredSign = PredPOS | PredNEG
-   deriving (Show,Eq)
+   deriving (Show,Eq,Ord,Enum)
 instance Syntax PredSign where
   format PredPOS = ""
   format PredNEG = "!"
@@ -141,7 +141,7 @@ pred_upt = PredUP PredPOS UPT
 data Reg =
     RegR !R -- general register
   | RegP !PR -- predicate register
-  | RegB !BR -- barrier register (used by BSYNC, BSSY)
+  | RegB !BR -- convergence barrier register (used by BSYNC, BSSY, BREAK)
   | RegUR !UR -- uniform register
   | RegUP !UP -- uniform predicate
   | RegSB !SB -- (scoreboard register?) (used in DEPBAR)
