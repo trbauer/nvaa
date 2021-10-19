@@ -20,7 +20,9 @@ import System.Process
 
 cPP_FILT :: FilePath
 -- cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.3\\mingw\\bin\\c++filt.exe"
-cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.5\\mingw\\bin\\c++filt.exe"
+-- cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.5\\mingw\\bin\\c++filt.exe"
+-- cPP_FILT = C:\ProgramData\chocolatey\lib\ghc\tools\ghc-8.10.2\mingw\bin
+cPP_FILT = "c++filt.exe"
 
 cUDA_SAMPLES_ROOT :: FilePath
 cUDA_SAMPLES_ROOT = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples"
@@ -112,7 +114,8 @@ checkSetup = do
   let checkDir f = do
         z <- doesDirectoryExist f
         unless z $ error $ f ++ ": dir not found"
-  checkFile cPP_FILT
+  me <- findExecutable cPP_FILT
+  when (me == Nothing) $ error $ cPP_FILT ++ ": cannot find executable in $PATH"
   checkDir cUDA_SAMPLES_ROOT
 
 

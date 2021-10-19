@@ -232,7 +232,10 @@ runWithOpts os
           let needs_lines = oPrintLines os || not (null (oCollateListing os))
           when needs_lines $
             verboseLn os "warning: -nv-line-info may be poor quality on OpenCL"
-          let ptx_dst = deriveFileNameFrom cl_fp ".ptx"
+          let (ptx_dst,del_ptx)
+                | oSavePtx os = (deriveFileNameFrom cl_fp ".ptx",False)
+                | not (null (oSavePtxTo os)) = (oSavePtxTo os,False)
+                | otherwise = ("nva-" ++ deriveFileNameFrom cl_fp ".ptx",True)
               build_opts =
                   "-cl-nv-arch " ++ oArch os ++ " -cl-nv-cstd=CL1.2" ++ maybe_lines ++ maybe_extra_args
                 where maybe_lines = if oPrintLines os then " -nv-line-info" else ""
@@ -251,6 +254,7 @@ runWithOpts os
           when needs_lines $
             fixDotFileDirectiveInPtxForOpenCL ptx_dst cl_fp
           runWithOpts os{oInputFile = ptx_dst}
+          when del_ptx $ removeFile ptx_dst
 
         runProcessWithExitCode :: FilePath -> [String] -> IO (ExitCode,String,String)
         runProcessWithExitCode exe args = do

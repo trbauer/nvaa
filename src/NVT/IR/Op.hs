@@ -122,6 +122,7 @@ data Op =
   | OpUSEL
   | OpUSGXT
   | OpUSHF
+  | OpVABSDIFF
   | OpVOTE
   | OpVOTEU
   | OpWARPSYNC
