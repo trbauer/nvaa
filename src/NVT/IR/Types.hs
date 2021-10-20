@@ -165,6 +165,7 @@ pattern DstRms :: ModSet -> R -> Dst
 pattern DstRms ms r = Dst ms (RegR r)
 pattern DstR :: R -> Dst
 pattern DstR r = Dst ES.EnumSetEMPTY (RegR r)
+pattern DstRZ :: Dst
 pattern DstRZ = DstR RZ
 pattern DstP :: PR -> Dst
 pattern DstP p = Dst ES.EnumSetEMPTY (RegP p)

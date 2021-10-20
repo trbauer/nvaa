@@ -34,9 +34,17 @@ data DU =
 --  , duBlocks :: !DIS.IntSet
   } deriving (Show,Eq)
 
+data DUAnalysis =
+  DUAnalysis {
+    duS :: ![DU]
+  , duLiveIn :: ![(Int,Reg)]
+  , duDead :: ![(Int,Reg)]
+  , duLiveOut :: ![(Int,Reg)]
+  } deriving (Show,Eq)
+
 
 computeDUs :: [Block] -> [DU]
-computeDUs bs = iterate ist0
+computeDUs bs = sortOn duDef (iterate ist0)
   where rbs = reverse (map (\b -> b{bInsts = reverse (bInsts b)}) bs)
         ist0 =
           ItrSt {
@@ -44,7 +52,7 @@ computeDUs bs = iterate ist0
           , istItr = 0
           , istDus = []
           , istCopyOut = False
-          , istChanged = False
+          , istChanged = True
           }
 
         prds :: IDGraph
@@ -52,16 +60,17 @@ computeDUs bs = iterate ist0
 
         iterate :: ItrSt -> [DU]
         iterate ist
-          | istCopyOut ist = reverse (istDus ist)
-          | istChanged ist1 = iterate (ist1 {istItr = istItr ist1 + 1,istChanged = False})
-          | otherwise = iterate (ist1 {istCopyOut = True})
-          where ist1 = foldl' accB ist rbs
-                accB ist b =
+          | istChanged ist = iterate $ iterateBlocks (ist {istItr = istItr ist + 1,istChanged = False})
+          | otherwise = istDus (iterateBlocks (ist {istCopyOut = True}))
+
+        iterateBlocks :: ItrSt -> ItrSt
+        iterateBlocks ist0 = foldl' accB ist0 rbs
+          where accB ist b =
                   case bId b`DIM.lookup`istLiveOuts ist of
                     Just b_live_out -> ist1 {istDus = rdus ++ istDus ist}
                       where (b_new_live_in,rdus) =
                               iterateBlock (istCopyOut ist) b_live_out b
-                            ist1 = trace (debugB b b_new_live_in)  $
+                            ist1 = -- trace (debugB b b_new_live_in)  $
                               case bId b`DIM.lookup`prds of
                                 Just prds -> foldl' propBack ist (DIS.toList prds)
                                   where propBack :: ItrSt -> Int -> ItrSt
@@ -76,10 +85,10 @@ computeDUs bs = iterate ist0
                                                       b_plps1 =
                                                         DM.unionWith DIS.union b_plps b_new_live_in
 
-        debugB :: Block -> LivePaths -> String
-        debugB b lps =
-          "B#" ++ show (bId b) ++ ": " ++ intercalate ", " (bLabels b) ++ "\n" ++
-          concatMap (\(r,is) -> "  " ++ show r ++ "=>" ++ intercalate ", " (map (\i -> "I#" ++ show i) (DIS.toList is)) ++ "\n") (DM.toList lps)
+        -- debugB :: Block -> LivePaths -> String
+        -- debugB b lps =
+        --   "B#" ++ show (bId b) ++ ": " ++ intercalate ", " (bLabels b) ++ "\n" ++
+        --   concatMap (\(r,is) -> "  " ++ format r ++ "=>" ++ intercalate ", " (map (\i -> "I#" ++ show i) (DIS.toList is)) ++ "\n") (DM.toList lps)
 
         iterateBlock :: Bool -> LivePaths -> Block -> (LivePaths,[DU])
         iterateBlock copy_out live0 b = loopInst [] DM.empty live0 (bInsts b)
@@ -87,7 +96,8 @@ computeDUs bs = iterate ist0
                 loopInst rdus _ live [] = (live,rdus)
                 loopInst rdus pks live (i:ris) =
                     case foldl' remOu (rdus,live,pks) ous of
-                      (new_rdus,new_live,new_pks) -> loopInst new_rdus new_pks new_new_live ris
+                      (new_rdus,new_live,new_pks) ->
+                          loopInst new_rdus new_pks new_new_live ris
                         where new_new_live = foldl' addIn new_live (DS.toList ins)
                   where (ins,ous) = depsInpsOups i
 

@@ -9,7 +9,7 @@ import Data.Char
 import Data.List
 
 emitTextSection :: TextSection -> IO ()
-emitTextSection ts =
+emitTextSection ts = do
 --  writeFile (tsKernelName ts ++ ".gvz") $
 --    fmtTextSect ts
     putStrLn $
@@ -17,7 +17,7 @@ emitTextSection ts =
       concatMap (\b -> "B#" ++ show (bId b) ++ ": " ++ intercalate "," (bLabels b) ++ "\n" ++
           concatMap (\i -> "  I#" ++ show (iId i) ++ ": " ++ format i ++ "\n") (bInsts b)
         ) (tsBlocks ts) ++ "\n" ++
-      show idg ++ "\n" ++
+      -- show idg ++ "\n" ++
       "\n" ++
       df_str
 
@@ -25,7 +25,8 @@ emitTextSection ts =
         dus = computeDUs (tsBlocks ts)
         df_str =
           "DUs:\n" ++
-          concatMap (\du -> "  " ++ show du ++ "\n") dus
+          concatMap (\du -> "  " ++ show du ++ "\n") dus ++
+          "END"
 
 --
 -- digraph sample3 {
