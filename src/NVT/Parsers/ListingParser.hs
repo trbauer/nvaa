@@ -181,6 +181,17 @@ pTextSectionHeader = do
 pTextSectionBody :: String -> String -> PI TextSection
 pTextSectionBody knm prot = do
   --
+  -- .sectionflags @"SHF_BARRIERS=1"
+  nbars <-
+    P.option 0 $ do
+      P.try (pKeyword ".sectionflags")
+      pSymbol "@"
+      P.char '\"'
+      pSymbol "SHF_BARRIERS="
+      nbars <- pInt
+      P.char '\"'
+      pWhiteSpace
+      return nbars
   -- .sectioninfo  @"SHI_REGISTERS=39"
   pKeyword ".sectioninfo"
   pSymbol "@"
@@ -189,16 +200,7 @@ pTextSectionBody knm prot = do
   nregs <- pInt
   P.char '\"'
   pWhiteSpace
-  -- .sectionflags @"SHF_BARRIERS=1"
-  nbars <-
-    P.option 0 $ P.try $ do
-      pKeyword ".sectionflags"
-      pSymbol "@"
-      P.char '\"'
-      pSymbol "SHF_BARRIERS="
-      nbars <- pInt
-      P.char '\"'
-      return nbars
+
   align <- P.option 0 (P.try pAlign)
   --
   -- .global  _Z19d_renderFastBicubicP6uchar4jjfffffy

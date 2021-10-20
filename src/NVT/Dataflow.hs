@@ -43,8 +43,8 @@ data DUAnalysis =
   } deriving (Show,Eq)
 
 
-computeDUs :: [Block] -> [DU]
-computeDUs bs = sortOn duDef (iterate ist0)
+bsDefUses :: [Block] -> [DU]
+bsDefUses bs = sortOn duDef (iterate ist0)
   where rbs = reverse (map (\b -> b{bInsts = reverse (bInsts b)}) bs)
         ist0 =
           ItrSt {
@@ -56,7 +56,7 @@ computeDUs bs = sortOn duDef (iterate ist0)
           }
 
         prds :: IDGraph
-        prds = computePreds bs
+        prds = bsPreds bs
 
         iterate :: ItrSt -> [DU]
         iterate ist
@@ -167,8 +167,21 @@ data ItrSt =
   , istChanged :: !Bool
   } deriving Show
 
-computePreds :: [Block] -> IDGraph
-computePreds bs = itr ps0 bs
+-- type IDGraph = DIM.IntMap DIS.IntSet
+
+bsSuccs :: [Block] -> IDGraph
+bsSuccs bs = foldl' acc DIM.empty pairs
+  where idg = bsPreds bs
+
+        acc :: IDGraph -> (Int,Int) -> IDGraph
+        acc m (b_prd,b_suc) = DIM.insertWith DIS.union b_prd (DIS.singleton b_suc) m
+
+        pairs :: [(Int,Int)]
+        pairs = concatMap (\(b_succ,b_prds) -> map (\b_prd -> (b_prd,b_succ)) (DIS.toList b_prds)) (DIM.toList idg)
+
+
+bsPreds :: [Block] -> IDGraph
+bsPreds bs = itr ps0 bs
   where ps0 = DIM.fromList $ map (\b -> (bId b,DIS.empty)) bs
 
         lbl_map :: DM.Map String Int
