@@ -74,6 +74,8 @@ data Collate =
 -- dft_opts_80 = dft_opts{oArch = "sm_80"}
 dft_opts_86 :: Opts
 dft_opts_86 = dft_opts{oArch = "sm_86"}
+-- dft_opts_87 :: Opts
+-- dft_opts_87 = dft_opts{oArch = "sm_87"}
 
 data Color =
     ColorAuto | ColorNever | ColorAlways

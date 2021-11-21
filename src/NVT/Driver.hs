@@ -143,7 +143,7 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.5"
+nvt_version = "1.1.6"
 
 
 run :: [String] -> IO ()
@@ -230,20 +230,19 @@ runWithOpts os
           when (not z) $
             fatal $ cl_fp ++ ": file not found"
           let needs_lines = oPrintLines os || not (null (oCollateListing os))
-          when needs_lines $
-            verboseLn os "warning: -nv-line-info may be poor quality on OpenCL"
           let (ptx_dst,del_ptx)
                 | oSavePtx os = (deriveFileNameFrom cl_fp ".ptx",False)
                 | not (null (oSavePtxTo os)) = (oSavePtxTo os,False)
                 | otherwise = ("nva-" ++ deriveFileNameFrom cl_fp ".ptx",True)
               build_opts =
-                  "-cl-nv-arch " ++ oArch os ++ " -cl-nv-cstd=CL1.2" ++ maybe_lines ++ maybe_extra_args
+                  "-cl-nv-arch " ++ oArch os ++ maybe_clstd ++ maybe_lines
                 where maybe_lines = if oPrintLines os then " -nv-line-info" else ""
-                      maybe_extra_args
-                        | null (oExtraCl2ptxArgs os) = ""
-                        | otherwise = " " ++ intercalate " " (oExtraCl2ptxArgs os)
+                      maybe_clstd
+                        | any hasClstd (oExtraCl2ptxArgs os) = ""
+                        | otherwise = " -cl-nv-cstd=CL1.2"
+                        where hasClstd x = "-b="`isPrefixOf`x && "-cl-nv-cstd="`isInfixOf`x
               cl2ptx_args =
-                [cl_fp, "-b=" ++ build_opts,"-o=" ++ ptx_dst]
+                [cl_fp, "-b=" ++ build_opts,"-o=" ++ ptx_dst] ++ oExtraCl2ptxArgs os
           (ec,out,err) <- runProcessWithExitCode (mkExe "cl2ptx") cl2ptx_args
           case ec of
             ExitFailure e ->
@@ -334,26 +333,26 @@ runWithOpts os
               renameFile cubin_file (output_path_without_ext ++ ".cubin")
 
         processSassFile :: FilePath -> IO ()
-        processSassFile sass_fp = do
-          -- | oFilterAssembly os = readFile sass_fp >>= processSassToOutput ""
-          -- | otherwise = error "processSassFile: with --no-filter-asm"
-          fstr <- readFile sass_fp
-          case parseListing sass_fp fstr of
-            Left err -> do
-              -- hPutStrLn stderr (dFormatWithLines (lines sass_fp) d)
-              fatal (dFormatWithLines (lines sass_fp) err)
-              return ()
-            Right l -> do
-              {-
-              let withOutput : String -> IO ()
-                  withOutput str
-                    | null (oOutputFile os) = hPutStr stdout
-                    | otherwise = withFile (oOutputFile os) WriteMode
+        processSassFile sass_fp
+          | oFilterAssembly os = readFile sass_fp >>= processSassToOutput ""
+          | otherwise = do
+            fstr <- readFile sass_fp
+            case parseListing sass_fp fstr of
+              Left err -> do
+                -- hPutStrLn stderr (dFormatWithLines (lines sass_fp) d)
+                fatal (dFormatWithLines (lines sass_fp) err)
+                return ()
+              Right l -> do
+                {-
+                let withOutput : String -> IO ()
+                    withOutput str
+                      | null (oOutputFile os) = hPutStr stdout
+                      | otherwise = withFile (oOutputFile os) WriteMode
 
-                    | withFile (oOutputFile os) WriteMode
-              withOutput $ fmtListingGraph l
-              -}
-              mapM_ emitTextSection (lTextSections l)
+                      | withFile (oOutputFile os) WriteMode
+                withOutput $ fmtListingGraph l
+                -}
+                mapM_ emitTextSection (lTextSections l)
 
         processSassToOutput :: String -> String -> IO ()
         processSassToOutput ptx sass
@@ -443,7 +442,7 @@ runWithOpts os
 --  .file   1 "E:\\dev\\nvaa\\<unknown>"
 --  .file   2 "E:\\dev\\nvaa\\<kernel>"
 -- e.g.
--- .file	2 "D:\\work\\projects\\new-eu\\setup\\<kernel>"
+-- .file  2 "D:\\work\\projects\\new-eu\\setup\\<kernel>"
 -- ==>
 -- .file  2 "D:\\work\\projects\\new-eu\\setup\\foo.cl"
 fixDotFileDirectiveInPtxForOpenCL :: FilePath -> FilePath ->  IO ()

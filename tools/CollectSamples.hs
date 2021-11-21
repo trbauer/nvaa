@@ -237,6 +237,15 @@ collectSampleIsa cso os_raw = body
                 buildIt clobbering = do
                   printLn $ "building" ++ (if clobbering then " (clobbering)" else "")
                   samples_inc_dir <- (++"\\common\\inc") <$> findCudaSamplesDir
+                  flns <- lines <$> readFile src_cu_file
+                  let has_glfw = any ("<GLFW/glfw3.h>"`isInfixOf`) flns
+                      maybe_glfw_opts
+                        | not has_glfw = []
+                        | otherwise = ["-Ideps/glfw/include"]
+                  let has_vulk = any ("<vulkan/vulkan.h>"`isInfixOf`) flns
+                      maybe_vulk_opts
+                        | not has_vulk = []
+                        | otherwise = ["-IC:\\vulkanSDK\\1.2.189.2\\Include"]
                   --
                   let nvcc_os =
                         os {
@@ -244,7 +253,8 @@ collectSampleIsa cso os_raw = body
                         , D.oSaveCuBin = cubin_output
                         , D.oSavePtxTo = ptx_output
                         , D.oSavePtx = True
-                        , D.oExtraNvccArgs = ["-I"++samples_inc_dir, "-I" ++ takeDirectory src_cu_file]
+                        , D.oExtraNvccArgs = ["-I"++samples_inc_dir, "-I" ++ takeDirectory src_cu_file] ++
+                            maybe_glfw_opts ++ maybe_vulk_opts
                         , D.oInputFile = src_cu_file
                         }
                   printLn $ "\n     % nva.exe  " ++
@@ -411,6 +421,7 @@ collectLibrarySampleIsaFromDir os_raw full_dll = body
               os {
                 D.oInputFile = tmp_sass
               , D.oOutputFile = output_dir ++ "/" ++ dropExtension elf_cubin ++ ".sass"
+              , D.oFilterAssembly = True
               }
             removeFile tmp_sass
 

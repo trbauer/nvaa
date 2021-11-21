@@ -16,19 +16,19 @@ install: nva.exe
 	@cp nva.exe ${INSTALL_DST}
 
 collect_samples.exe: Makefile tools/CollectSamples.hs
-	mkdir -p build/libs
-	ghc  -hidir build/libs -odir build/libs --make tools/CollectSamples.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
+	mkdir -p build/csel
+	ghc  -hidir build/csel -odir build/csel --make tools/CollectSamples.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
 	strip $@
 
 collect_opcodes.exe: Makefile tools/CollectOpcodes.hs
-	mkdir -p build/libs
-	ghc  -hidir build/libs -odir build/libs --make tools/CollectOpcodes.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
+	mkdir -p build/cops
+	ghc  -hidir build/cops -odir build/cops --make tools/CollectOpcodes.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
 	strip $@
 
 fptest: fptest.exe
 fptest.exe: Makefile tools/FPTest.hs src/NVT/Floats.hs src/NVT/Bits.hs
 	mkdir -p build/libs
-	ghc  -hidir build/libs -odir build/libs --make tools/FPTest.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
+	ghc  -hidir build/fptst -odir build/fptst --make tools/FPTest.hs -O2 -o $@ -with-rtsopts="-N" -rtsopts -isrc -threaded
 
 
 run-micros:
