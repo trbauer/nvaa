@@ -206,7 +206,7 @@ runWithOpts os
           debugLn os $ show os
           case takeExtension fp of
             ".cl" -> processClFile fp
-            ".cu" -> processCuFile fp
+            ".cu" -> processCuFile fp []
             ".cubin" -> processCubinFile fp
             ".ptx" -> processPtxFile fp  -- (use NVCC)
             ".sass" -> processSassFile fp
@@ -216,7 +216,17 @@ runWithOpts os
             _ -> fatal (takeFileName fp ++ ": unable to handle file by extension")
 
         processPtxFile :: FilePath -> IO ()
-        processPtxFile = processCuFile
+        processPtxFile ptx_fp = do
+          -- .address_size 32
+          let isA32Line ln =
+                case words ln of
+                  [".address_size","32"] -> True
+                  _ -> False
+          has_a32 <- any isA32Line . lines <$> readFile ptx_fp
+          let a32_opt
+                | has_a32 = ["-m32"]
+                | otherwise = []
+          processCuFile ptx_fp a32_opt
 
         processClFile :: FilePath -> IO ()
         processClFile cl_fp = do
@@ -231,8 +241,8 @@ runWithOpts os
             fatal $ cl_fp ++ ": file not found"
           let needs_lines = oPrintLines os || not (null (oCollateListing os))
           let (ptx_dst,del_ptx)
-                | oSavePtx os = (deriveFileNameFrom cl_fp ".ptx",False)
                 | not (null (oSavePtxTo os)) = (oSavePtxTo os,False)
+                | oSavePtx os = (deriveFileNameFrom cl_fp ".ptx",False)
                 | otherwise = ("nva-" ++ deriveFileNameFrom cl_fp ".ptx",True)
               build_opts =
                   "-cl-nv-arch " ++ oArch os ++ maybe_clstd ++ maybe_lines
@@ -267,8 +277,8 @@ runWithOpts os
           return r
 
         -- foo.cu --> $temp.cubin and disassembles it that file
-        processCuFile :: FilePath -> IO ()
-        processCuFile fp = do
+        processCuFile :: FilePath -> [String] -> IO ()
+        processCuFile fp maybe_bitsize_opt = do
           when (null (oArch os)) $
             fatal $ fp ++ ": requires --arch argument"
           z <- doesFileExist fp
@@ -279,8 +289,10 @@ runWithOpts os
           -- cs <- findCudaSamplesDir
           -- let cuda_sample_incs_dir = if null cs then [] else  ["-I" ++ cs]
           let needs_lines = oPrintLines os || not (null (oCollateListing os))
-          let mkNvccArgs targ =
+
+              mkNvccArgs targ =
                 ["-arch", oArch os, targ] ++
+                maybe_bitsize_opt ++
                 map (\i -> "-I" ++ i) (oIncludePaths os) ++
                 cl_bin_dir ++
                 (if needs_lines then ["-lineinfo"] else []) ++
@@ -291,7 +303,7 @@ runWithOpts os
           out <- runCudaTool os "nvcc" (mkNvccArgs "-cubin")
           verboseLn os out
           let cubin_file = deriveFileName ".cubin"
-          let output_path_without_ext
+              output_path_without_ext
                 | null (oOutputFile os) = takeFileName (dropExtension fp)
                 | otherwise = dropExtension (oOutputFile os)
               ptx_implicit_output = deriveFileNameFrom fp ".ptx"
@@ -304,21 +316,21 @@ runWithOpts os
                 | otherwise = oSavePtxTo os
           --
           ptx_src <-
-            if not ptx_required then return ""
-              else do
-                -- have to re-run since -ptx and -cubin conflict
-                _ <- runCudaTool os "nvcc" (mkNvccArgs "-ptx")
-                when (ptx_implicit_output /= ptx_dst) $ do
-                  debugLn os $
-                    "copying\n" ++
-                    "   from " ++ ptx_implicit_output ++ "\n" ++
-                    "   to " ++ ptx_dst
-                  renameFile ptx_implicit_output ptx_dst
-                ptx <- readFile ptx_dst
-                length ptx `seq` return ()
-                when (not (oSavePtx os)) $
-                  removeFile ptx_dst
-                return ptx
+            if ".ptx"`isSuffixOf`fp then readFile fp -- input was .ptx
+              else if not ptx_required then return "" -- input was .cu, but ptx isn't needed
+                else do -- have to re-run since -ptx and -cubin conflict
+                  _ <- runCudaTool os "nvcc" (mkNvccArgs "-ptx")
+                  when (ptx_implicit_output /= ptx_dst) $ do
+                    debugLn os $
+                      "copying\n" ++
+                      "   from " ++ ptx_implicit_output ++ "\n" ++
+                      "   to " ++ ptx_dst
+                    renameFile ptx_implicit_output ptx_dst
+                  ptx <- readFile ptx_dst
+                  length ptx `seq` return ()
+                  when (not (oSavePtx os)) $
+                    removeFile ptx_dst
+                  return ptx
           --
           -- .cu ==> .cubin => .sass
           --                ^^ here
