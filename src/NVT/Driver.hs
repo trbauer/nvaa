@@ -59,6 +59,9 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
     , PA.optF spec "hex" "print-instruction-encoding"
         "prints instruction encodings" ""
         (\o -> (o {oPrintEncoding = True})) # PA.OptAttrAllowUnset
+    , PA.optF spec "" "override-ptx-bitsize"
+        "overrides .address_size 32 directive to omit the proper -m32 in nvcc (workaround for line number issues)" ""
+        (\o -> (o {oOverridePtxAddrSize32 = True})) # PA.OptAttrAllowUnset
     , PA.opt spec "o" "output" "PATH"
         "sets the output file" "(defaults to stdout)"
         (\f o -> (o {oOutputFile = f})) # PA.OptAttrAllowUnset
@@ -222,9 +225,10 @@ runWithOpts os
                 case words ln of
                   [".address_size","32"] -> True
                   _ -> False
-          has_a32 <- any isA32Line . lines <$> readFile ptx_fp
+          fstr <- readFile' ptx_fp
+          let has_a32 = any isA32Line (lines fstr)
           let a32_opt
-                | has_a32 = ["-m32"]
+                | not (oOverridePtxAddrSize32 os) && has_a32 = ["-m32"]
                 | otherwise = []
           processCuFile ptx_fp a32_opt
 
@@ -262,8 +266,14 @@ runWithOpts os
             ExitSuccess -> return ()
           when needs_lines $
             fixDotFileDirectiveInPtxForOpenCL ptx_dst cl_fp
-          runWithOpts os{oInputFile = ptx_dst}
+          runWithOpts os {oInputFile = ptx_dst}
           when del_ptx $ removeFile ptx_dst
+
+        readFile' :: FilePath -> IO String
+        readFile' fp = do
+          fstr <- readFile fp
+          length fstr `seq` return ()
+          return fstr
 
         runProcessWithExitCode :: FilePath -> [String] -> IO (ExitCode,String,String)
         runProcessWithExitCode exe args = do
@@ -316,7 +326,7 @@ runWithOpts os
                 | otherwise = oSavePtxTo os
           --
           ptx_src <-
-            if ".ptx"`isSuffixOf`fp then readFile fp -- input was .ptx
+            if ".ptx"`isSuffixOf`fp then readFile' fp -- input was .ptx
               else if not ptx_required then return "" -- input was .cu, but ptx isn't needed
                 else do -- have to re-run since -ptx and -cubin conflict
                   _ <- runCudaTool os "nvcc" (mkNvccArgs "-ptx")

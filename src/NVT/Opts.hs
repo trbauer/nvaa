@@ -1,6 +1,7 @@
 module NVT.Opts where
 
 import System.Exit
+import System.IO
 
 
 data Opts =
@@ -15,6 +16,7 @@ data Opts =
   , oIncludePaths :: ![FilePath]
   , oInputFile :: !FilePath
   , oOutputFile :: !FilePath
+  , oOverridePtxAddrSize32 :: !Bool
   , oPrintDeps :: !Bool
   , oPrintEncoding :: !Bool
   , oPrintLines :: !Bool
@@ -41,6 +43,7 @@ dft_opts =
   , oIncludePaths = []
   , oInputFile = ""
   , oOutputFile = ""
+  , oOverridePtxAddrSize32 = False
   , oPrintDeps = True
   , oPrintEncoding = False
   , oPrintLines = False
@@ -84,19 +87,19 @@ data Color =
 --------------
 debugLn :: Opts -> String -> IO ()
 debugLn os
-  | oVerbosity os >= 2 = putStrLn
+  | oVerbosity os >= 2 = hPutStrLn stderr
   | otherwise = const (return ())
 verboseLn  :: Opts -> String -> IO ()
 verboseLn os
-  | oVerbosity os >= 1 = putStrLn
+  | oVerbosity os >= 1 = hPutStrLn stderr
   | otherwise = const (return ())
 printLn :: Opts -> String -> IO ()
 printLn os
-  | oVerbosity os >= 0 = putStrLn
+  | oVerbosity os >= 0 = hPutStrLn stderr
   | otherwise = const (return ())
 warningLn :: Opts -> String -> IO ()
 warningLn os
-  | oVerbosity os >= -1 = putStrLn
+  | oVerbosity os >= -1 = hPutStrLn stderr
   | otherwise = const (return ())
 
 
