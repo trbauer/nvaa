@@ -156,5 +156,45 @@ Semantics:
 The `LOP3` instruction has several predicate inputs and an optional
 predicate destination.  The predicate output appears to be a non-zero flag.
 
-[ what're the extra arguments? ]
+[ what're the extra arguments? Output non-zero or zero?? ]
 
+
+
+## Sampler Messages
+
+
+    const sampler_t sampler0 =
+        CLK_NORMALIZED_COORDS_FALSE |
+        CLK_ADDRESS_CLAMP_TO_EDGE |
+        CLK_FILTER_NEAREST;
+
+Yields:
+
+      TLD.SCR.LZ.CL.NODEP  R12, R10, R0, R7,    UR4,    0x0,    2D
+
+
+`.CL` seems to mean match `CLK_ADDRESS_CLAMP_TO_EDGE` (but not `CL_ADDRESS_CLAMP`).
+Twiddling the others doesn't seem to affect things.
+
+We can tell this is generally:
+
+    TLD.... DST1.ZW, DST0.XY, Us, Vs, SamplerIx?, Imm??, <GEOM>
+
+`SamplerIx`? parameter above seems to come from const buffer and sometimes
+derived via pair of const buffer inputs.
+E.g. `c0[0x178]`, `c0[0x190]`, `ULOP3.(s0&s1|~s1&s2) ... UR14, 0xfffff, UR5`, derived
+`s0&s1|~s1&s2` with 0xFFFFF is `s0&0xFFFFF|0xFFF00000&s2`
+s2 comes from `c0[0x17C]` and `UR14` from `c0[0x168]`.
+s0 is the LSB and s2 must be some sort of index.
+This is a pairing function `s2 * 1MB + s0` and we see one of the indexes is shifted up 20 (1MB).
+
+Given:
+
+      // images.cl:57:    px = read_imagef(srcImg0, sampler0, (int2)(pX,pY));
+      TLD.SCR.LZ.NODEP  R4, R2, R8, R9, UR4, 0x0, 2D {!1,Y,+6.W};
+
+Able to prove that:
+ `R2` holds `float4::s0`
+ `R3` holds `float4::s1`
+ `R4` holds `float4::s2`
+ `R5` holds `float4::s3`

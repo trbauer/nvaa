@@ -321,8 +321,8 @@ pInstNoPrefix pc = body
               --                                   ^
               -- TLD.SCR.LZ  RZ, R8, R18, 0x0, 0x64, 1D, 0x3 {!3,Y};
               --                        ^
-              pTextureOp :: Dst -> [Src] -> PI Inst
-              pTextureOp dst srcs = do
+              pTextureOp :: [Dst] -> [Src] -> PI Inst
+              pTextureOp dsts srcs = do
                 -- maybe a pair of imm
                 pSymbol ","
                 let pNoImms = do
@@ -335,7 +335,7 @@ pInstNoPrefix pc = body
                       return ([src3a,src3b],src4)
                 (src3s,src4) <- P.try pNoImms <|> pImmsFirst
                 src5_opt <- P.option [] $ pSymbol "," >> box <$> pSrc_I32 op
-                pComplete [dst] (srcs ++ src3s ++ [src4] ++ src5_opt)
+                pComplete dsts (srcs ++ src3s ++ [src4] ++ src5_opt)
 
           --
           case op of
@@ -1188,18 +1188,19 @@ pInstNoPrefix pc = body
             --   src4 surface shape selector is [63:60]
             --   src5 0x1
             OpTEX -> do
-              dst <- pDstR
+              dst0 <- pDstR
+              dst1 <- pSymbol "," >> pDstR
               src0 <- pSymbol "," >> pSrcR
               src1 <- pSymbol "," >> pSrcR
-              src2 <- pSymbol "," >> pSrcR
-              pTextureOp dst [src0,src1,src2]
+              pTextureOp [dst0,dst1] [src0,src1]
 
             -- TLD.SCR.LZ       RZ, R6, R14, 0x0, 0x66, 1D, 0x3 {!1,Y,+6.W};
             OpTLD -> do
-              dst <- pDstR
+              dst0 <- pDstR
+              dst1 <- pDstR
               src0 <- pSymbol "," >> pSrcR
               src1 <- pSymbol "," >> pSrcR
-              pTextureOp dst [src0,src1]
+              pTextureOp [dst0,dst1] [src0,src1]
 
             --          dst   dst  ...
             -- UFLO.U32  UR4,      UR4 {!6,Y};  // examples/sm_80/libs/cusolver64_10/Program.1728.sm_80.sass:1649

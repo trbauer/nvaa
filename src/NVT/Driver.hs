@@ -348,7 +348,7 @@ runWithOpts os
           --
           if null (oSaveCuBin os) then do
               debugLn os $ cubin_file ++ ": removing"
-              removeFile cubin_file
+              -- removeFile cubin_file
             else do
               debugLn os $
                 cubin_file ++ ": renaming to " ++ output_path_without_ext ++ ".cubin"
