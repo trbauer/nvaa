@@ -112,5 +112,8 @@ struct tstamps {
   }
 };
 
+#define GLOBAL_TIMER_COST_LOOP_TRIPS 64
+
+#define GLOBALTIMER_RES_SAMPLES 32
 
 #endif // TIMERS_HPP

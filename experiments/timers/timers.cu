@@ -73,23 +73,68 @@ extern "C" __global__ void glob_get_times(tstamps *tss)
   tss[get_tid()] = tstamps();
 }
 
-extern "C" __global__ void glob_globaltimer_cost(
-  int *cost, int count, uint64_t *unused)
+extern "C" __global__ void glob_globaltimer_cost(uint32_t *cost_samples)
 {
-  const auto st = clock64();
-  ticks_t sum = 0;
-  for (int i = 0; i < count; i++) {
+  uint32_t samples[GLOBAL_TIMER_COST_LOOP_TRIPS];
+  uint64_t sum = 0;
+  for (int i = 0; i < GLOBAL_TIMER_COST_LOOP_TRIPS; i++) {
+    const auto st = clock64();
     sum += get_globaltimer();
+    const auto en = clock64();
+    samples[i] = (uint32_t)(en - st);
   }
-  const auto en = clock64();
 
-  cost[get_tid()] = (int)(en - st);
-
-  if (get_tid() > 1000000) {
-    unused[0] = sum;
+  for (int i = 0; i < GLOBAL_TIMER_COST_LOOP_TRIPS; i++) {
+    cost_samples[GLOBAL_TIMER_COST_LOOP_TRIPS * get_tid() + i] = samples[i];
+  }
+  if (sum > 0x7FFFFFFFFFFFFFFFull) {
+    cost_samples[0] = 0;
   }
 }
 
+// fetch N delta samples really fast and return a sample set
+extern "C" __global__ void glob_globaltimer_resolution(
+  uint64_t *ticks, int timer_source)
+{
+  auto getSample = [&]() -> uint64_t {
+    if (timer_source == 0) {
+      return get_globaltimer();
+    } else {
+      return clock64();
+    }
+  };
+  uint64_t samples[GLOBALTIMER_RES_SAMPLES];
+  auto prev = getSample();
+  for (int i = 0; i < GLOBALTIMER_RES_SAMPLES; i++) {
+    auto t = getSample();
+    samples[i] = t - prev;
+    prev = t;
+  }
+  for (int i = 0; i < GLOBALTIMER_RES_SAMPLES; i++) {
+    ticks[GLOBALTIMER_RES_SAMPLES * get_tid() + i] = samples[i];
+  }
+}
+
+extern "C" __global__ void glob_globaltimer_resolution2(
+  uint32_t *ticks_g, uint32_t *ticks_l)
+{
+  uint32_t samples_g[GLOBALTIMER_RES_SAMPLES], samples_l[GLOBALTIMER_RES_SAMPLES];
+  uint64_t prev_g = get_globaltimer();
+  uint64_t prev_l = clock64();
+  for (int i = 0; i < GLOBALTIMER_RES_SAMPLES; i++) {
+    uint64_t curr_g = get_globaltimer();
+    samples_g[i] = (uint32_t)(curr_g - prev_g);
+    prev_g = curr_g;
+    //
+    uint64_t curr_l = clock64();
+    samples_l[i] = (uint32_t)(curr_l - prev_l);
+    prev_l = curr_l;
+  }
+  for (int i = 0; i < GLOBALTIMER_RES_SAMPLES; i++) {
+    ticks_g[GLOBALTIMER_RES_SAMPLES * get_tid() + i] = samples_g[i];
+    ticks_l[GLOBALTIMER_RES_SAMPLES * get_tid() + i] = samples_l[i];
+  }
+}
 
 
 /*

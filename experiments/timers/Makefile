@@ -20,7 +20,7 @@ ${WORKLOAD}-${ARCH}.ptx: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu timers.cu
 	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx --source-in-ptx -I ../../tools -arch ${ARCH}
 	mv ${WORKLOAD}.ptx ${WORKLOAD}-${ARCH}.ptx
 
-sass: Makefile ${WORKLOAD}-${ARCH}.sass
+sass: Makefile ${WORKLOAD}-${ARCH}.sass ${WORKLOAD}.exe
 ${WORKLOAD}-${ARCH}.sass: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu timers.cuh
 	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --source-in-ptx -c -o ${WORKLOAD}-${ARCH}.cubin -I ../../tools -cubin -arch ${ARCH}
 	nvdisasm.exe \

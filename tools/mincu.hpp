@@ -2,8 +2,10 @@
 #define MINCU_HPP
 
 #include <cstdint>
+#include <functional>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 // #include <memory>
 #include <random>
 #include <ostream>
@@ -23,6 +25,54 @@ template <typename...Ts>
 static std::string   format(Ts...ts) {
   std::stringstream ss; format_to(ss, ts...); return ss.str();
 }
+struct hex
+{
+  uint64_t value;
+  int columns;
+  template <typename T>
+  hex(T v, int cls = 2 * sizeof(T)) : value((uint64_t)v), columns(cls) { }
+};
+static inline std::ostream &operator <<(std::ostream &os, hex h) {
+  std::stringstream ss;
+  ss << std::setw(h.columns) <<
+    std::setfill('0') << std::hex << std::uppercase << h.value;
+  os << ss.str();
+  return os;
+}
+
+enum class pad {L, R};
+
+template <pad P, typename T>
+struct col
+{
+  const T &value;
+  size_t width;
+  char pad_fill;
+  col(const T &val, size_t wid = 2 * sizeof(T), char f = ' ')
+    : value(val), width(wid), pad_fill(f) { }
+}; // col
+template <typename T>
+using coll = col<pad::R,T>;
+template <typename T>
+using colr = col<pad::L,T>;
+
+template <pad P,typename T>
+static inline std::ostream &operator<< (std::ostream &os, const col<P,T> &p) {
+  auto s = format(p.value);
+  std::stringstream ss;
+  if (P == pad::L) {
+    for (size_t i = s.size(); i < p.width; i++)
+      ss << p.pad_fill;
+  }
+  ss << s;
+  if (P == pad::R) {
+    for (size_t i = s.size(); i < p.width; i++)
+      ss << p.pad_fill;
+  }
+  os << ss.str();
+  return os;
+}
+
 template <typename...Ts>
 static void fatal(Ts...ts) {
   std::cerr << format(ts...) << "\n";
@@ -38,6 +88,50 @@ static void fatal(Ts...ts) {
     }\
   } while(0)
 
+struct random_state {
+    std::mt19937 gen;
+
+    random_state() : gen(std::random_device()()) { }
+    random_state(unsigned seed) : gen(seed) { }
+    random_state(const char *seed) {
+      std::string str = seed;
+      std::seed_seq ss(str.begin(), str.end());
+      gen.seed(ss);
+    }
+
+    // static std::seed_seq get_seq(const char *s) {
+    //  std::string str = s;
+    //  return std::seed_seq(str.begin(), str.end());
+    // }
+}; // random_state
+
+template <typename T,typename R = T>
+static void randomize_integral(
+  random_state &rnd,
+  T *vals,
+  size_t elems,
+  T lo = std::numeric_limits<T>::min(),
+  T hi = std::numeric_limits<T>::max())
+{
+  std::uniform_int_distribution<R> d(lo, hi);
+  for (size_t i = 0; i < elems; i++) {
+    vals[i] = T(d(rnd.gen));
+  }
+}
+
+template <typename T, typename R = T>
+static void randomize_real(
+  random_state &rnd,
+  T *vals,
+  size_t elems,
+  T lo = (T)0.0f,
+  T hi = (T)1.0f)
+{
+  std::uniform_real_distribution<R> d((R)lo,(R)hi);
+  for (size_t i = 0; i < elems; i++) {
+    vals[i] = T(d(rnd.gen));
+  }
+}
 
 /*
 
@@ -100,19 +194,15 @@ INT_INSTANCE(int16_t)
 INT_INSTANCE(int32_t)
 INT_INSTANCE(int64_t)
 
-*/
 
-struct global_state {
-    std::mt19937 gen;
-    global_state() : gen (std::random_device()()) {
-      gen.seed(2019);
-    }
-};
+
+
 static global_state gs;
 static void set_global_seed(unsigned s) {
   gs.gen.seed(s);
 }
 
+/*
 template <typename T, typename R = T>
 static void randomize_real(T *vals, size_t elems, T lo, T hi)
 {
@@ -133,6 +223,7 @@ static void randomize_integral(T *vals, size_t elems, T lo, T hi)
     vals[i] = (T)d(gs.gen);
   }
 }
+*/
 
 // T is the type of the buffer
 // R is the type of the random sequence;
@@ -155,10 +246,11 @@ static void randomize_integral(T *vals, size_t elems, T lo, T hi)
 //   static void randomize(T *vals, size_t elems, float lo, float hi) {
 //     randomize_real<T,float>(vals, elems, lo, hi);
 //   }
+
 #define RANDOMIZE_INSTANCE2(RCAST_TO,RSEQ,DELEGATE)\
   template <typename T>\
-  static void randomize(T *vals, size_t elems, RCAST_TO lo, RCAST_TO hi) {\
-    DELEGATE<T,RSEQ>(vals, elems, lo, hi); \
+  static void randomize(random_state &rs, T *vals, size_t elems, RCAST_TO lo, RCAST_TO hi) {\
+    DELEGATE<T,RSEQ>(rs, vals, elems, lo, hi); \
   }
 #define RANDOMIZE_INSTANCE(R,DELEGATE)\
   RANDOMIZE_INSTANCE2(R,R,DELEGATE)
@@ -174,6 +266,7 @@ RANDOMIZE_INSTANCE2(uint8_t,uint16_t,randomize_integral)
 RANDOMIZE_INSTANCE(uint16_t,randomize_integral)
 RANDOMIZE_INSTANCE(uint32_t,randomize_integral)
 RANDOMIZE_INSTANCE(uint64_t,randomize_integral)
+
 
 /////////////////////////////////////////////////
 // vector instances
@@ -200,16 +293,18 @@ RANDOMIZE_INSTANCE(uint64_t,randomize_integral)
 
 template <typename R>
 struct init {
-  enum class init_type{NONE, CONST, SEQ, RANDOM} type;
+  enum class init_type{NONE, CONST, SEQ, RANDOM, FUNC} type;
   union {
     struct {R const_val;};
-    struct {R seq_init; R seq_delta;};
-    struct {R rnd_lo; R rnd_hi;};
+    struct {R seq_init, seq_delta, seq_mod;};
+    struct {random_state *rndst; R rnd_lo, rnd_hi;};
+    struct {std::function<R(size_t)> *func;};
   };
   init() : type(init_type::NONE) { }
   init(R _const) : type(init_type::CONST), const_val(_const) { }
-  init(R _lo, R _hi) : type(init_type::RANDOM), rnd_lo(_lo), rnd_hi(_hi) { }
-  init(bool, R _init, R _delta) : type(init_type::SEQ), seq_init(_init), seq_delta(_delta) { }
+  init(random_state *rs, R _lo, R _hi) : type(init_type::RANDOM), rndst(rs), rnd_lo(_lo), rnd_hi(_hi) { }
+  init(R _init, R _delta, R mod) : type(init_type::SEQ), seq_init(_init), seq_delta(_delta), seq_mod(mod) { }
+  init(std::function<R(size_t)> *_func) : type(init_type::FUNC), func(_func) { }
 
   template <typename T = R>
   void apply(T *vals, size_t elems) const
@@ -218,18 +313,31 @@ struct init {
     case init_type::NONE:
       return;
     case init_type::CONST:
-      // TODO: use device kernel
+    {
       for (size_t k = 0; k < elems; k++)
-        vals[k] = (T)const_val;
-      return;
+        vals[k] = T(const_val);
+    }
     case init_type::SEQ:
-      for (size_t k = 0; k < elems; k++)
-        vals[k] = seq_init + (R)k * seq_delta;
+    {
+      R val = seq_init;
+      if (seq_mod) {
+        val %= seq_mod;
+      }
+      for (size_t k = 0; k < elems; k++) {
+        vals[k] = val;
+        val += seq_delta;
+        if (seq_mod) {
+          val = val % seq_mod;
+        }
+      }
       return;
+    }
     case init_type::RANDOM:
-      randomize<T>(vals, elems, rnd_lo, rnd_hi);
-      // fatal("handle_init_random: not handled yet");
+      randomize<T>(*rndst, vals, elems, rnd_lo, rnd_hi);
       return;
+    case init_type::FUNC:
+      for (size_t k = 0; k < elems; k++)
+        vals[k] = (*func)(k);
     }
   }
 };
@@ -238,9 +346,21 @@ static init<R> init_none() {return init<R>();}
 template <typename R>
 static init<R> init_const(R _const) {return init<R>(_const);}
 template <typename R>
-static init<R> init_seq(R _init, R _delta = (R)1) {return init<R>(true, _init, _delta);}
+static init<R> init_seq(R _init, R _delta = (R)1, R _mod = 0) {
+  return init<R>(_init, _delta, _mod);
+}
 template <typename R>
-static init<R> init_random(R _rnd_lo, R _rnd_hi) {return init<R>(_rnd_lo,_rnd_hi);}
+static init<R> init_random(
+  random_state &_rs,
+  R _rnd_lo = std::numeric_limits<R>::min(),
+  R _rnd_hi = std::numeric_limits<R>::max())
+{
+    return init<R>(&_rs, _rnd_lo,_rnd_hi);
+}
+template <typename R>
+static init<R> init_random(std::function<R(size_t)> apply) {
+    return init<R>(&apply);
+}
 
 
 template <typename T> static inline const char *type_name() {return "???";}
@@ -413,13 +533,6 @@ class umem // unified memory buffer
   std::shared_ptr<umem_alloc> ptr;
   size_t                      elems;
 
-  E *get_ptr() {
-    return const_cast<E *>(get_cptr());
-  }
-  const E *get_cptr() const {
-    return (const E *)ptr.get()->mem;
-  }
-
 public:
   umem(size_t _elems)
     : elems(_elems)
@@ -444,7 +557,9 @@ public:
 
   size_t size() const {return elems;}
 
-  operator std::vector<E> () const {
+  operator std::vector<E> () const {return to_vector();}
+
+  std::vector<E> to_vector() const {
     std::vector<E> es;
     es.reserve(size());
     for (size_t i = 0; i < size(); i++) {
@@ -475,7 +590,9 @@ public:
 
    // elements
    operator       E *()       {return get_ptr();}
+                  E *get_ptr() {return const_cast<E *>(get_cptr());}
    operator const E *() const {return get_cptr();}
+            const E *get_cptr() const {return (const E *)ptr.get()->mem;}
    //      E &operator[](size_t ix)       {return get_ptr()[ix];}
    //const E &operator[](size_t ix) const {return get_ptr()[ix];}
 
@@ -555,7 +672,7 @@ public:
   }
   std::string str(int elems_per_line = -1, int prec = -1) const {
     std::stringstream ss;
-    formt(os, elems_per_line, prec);
+    str(ss, elems_per_line, prec);
     return ss.str();
   }
 }; // struct umem

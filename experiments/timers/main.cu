@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -15,7 +16,71 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
+
+
+
+template <typename T>
+static void format_histogram_with(
+  std::ostream &os,
+  std::function<void(std::ostream&,const T &)> fmt_key,
+  const std::map<T,size_t> &h,
+  const char *units)
+{
+  size_t n = 0;
+  for (const auto &e : h) {
+    n += e.second;
+  }
+  os << "============= " << n << " samples in " << h.size() << " bins\n";
+  auto fmtPct = [&](size_t k) {
+    std::stringstream ss;
+    double pct = (100.0 * k / n);
+    ss << "%" << std::fixed << std::setprecision(3) << pct;
+    return ss.str();
+  };
+
+  for (const auto &e : h) {
+    std::stringstream ss;
+    fmt_key(ss, e.first);
+    os << "  " << std::setw(12) << ss.str();
+    if (units)
+      os << " " << units;
+    os << "   " << std::setw(12) << e.second <<
+      "   " << std::setw(7) << fmtPct(e.second) << "\n";
+  }
+}
+
+template <typename T>
+std::map<T,size_t> create_histogram(const T *samples, size_t n)
+{
+  std::map<T,size_t> h;
+  for (size_t i = 0; i < n; i++) {
+    h[samples[i]]++;
+  }
+  return h;
+}
+
+template <typename T>
+static void format_histogram(
+  std::ostream &os,
+  std::function<void(std::ostream&,const T &)> fmt_key,
+  const std::vector<T> &samples,
+  const char *units = nullptr)
+{
+  auto h = create_histogram<T>(samples.data(), samples.size());
+  format_histogram_with<T>(os, fmt_key, h, units);
+}
+
+template <typename T>
+static void format_histogram(
+  std::ostream &os,
+  const std::vector<T> &samples,
+  const char *units = nullptr)
+{
+  auto h = create_histogram<T>(samples.data(), samples.size());
+  format_histogram_with<T>(os, [&](std::ostream &os, const T &t) {os << t;}, h, units);
+}
 
 
 using namespace mincu;
@@ -63,11 +128,14 @@ struct statistics {
 
     sm = 0;
     T _mx = oup[0], _mn = oup[0];
-    std::vector<T> ord(n);
+    //
+    std::vector<T> vals;
+    vals.reserve(n);
+    //
     for (size_t i = 0; i < n; i++) {
-      auto e = oup[i];
+      T e = oup[i];
       sm += e;
-      ord.push_back(e);
+      vals.push_back(e);
       _mn = std::min<T>(_mn, e);
       _mx = std::max<T>(_mx, e);
     }
@@ -75,11 +143,13 @@ struct statistics {
     mx = (double)_mx;
     av = (double)sm/n;
 
-    std::sort(ord.begin(), ord.end());
-    if (n % 2) {
-      md = ord[n/2];
+    std::sort(vals.begin(), vals.end());
+    if (n == 0) {
+      md = av;
+    } else if (n % 2) {
+      md = vals[n/2];
     } else {
-      md = (ord[n/2 - 1] + ord[n/2])/2.0;
+      md = (vals[n/2 - 1] + vals[n/2])/2.0;
     }
 
     int64_t dvsm = 0;
@@ -116,6 +186,17 @@ struct statistics {
   double sem() const {return sdv()/sqrt((double)n);}
   // realtive standard error
   double rse() const {return sem()/avg();}
+
+  /////////////////////////////////////
+  void str(std::ostream &os) const {
+    os << "statistics\n";
+    os << " n: " << n << "\n";
+    os << " min: " << min() << "\n";
+    os << " med: " << med() << "\n";
+    os << " avg: " << avg() << "\n";
+    os << " max: " << max() << "\n";
+    os << " rse: " << rse() << "\n";
+  }
 };
 
 
@@ -461,21 +542,104 @@ static void test_print_clocks(int startup_delay)
     "\n";
 }
 
-extern "C" __global__ void glob_globaltimer_cost(int *cost, int count, uint64_t *sum);
+extern "C" __global__ void glob_globaltimer_cost(uint32_t *cost_samples);
 static void test_globaltimer_cost()
 {
   const int WARP_COUNT = 30;
-  const int LOOP_TRIPS = 32;
 
-  umem<uint64_t> dummy(1);
-  umem<int> deltas_buf(WARP_COUNT);
+  umem<uint32_t> samples_buf(WARP_COUNT * GLOBAL_TIMER_COST_LOOP_TRIPS);
 
-  glob_globaltimer_cost<<<WARP_COUNT,1>>>(deltas_buf, LOOP_TRIPS, dummy);
+  glob_globaltimer_cost<<<WARP_COUNT,1>>>(samples_buf);
+  auto e = cudaDeviceSynchronize();
+  if (e != cudaSuccess) {
+    fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error");
+  }
+  format_histogram<uint32_t>(std::cout, samples_buf, "clks.");
+}
 
-  auto st = statistics::construct<int>(deltas_buf);
-  std::cout << "%globaltimer: takes " <<
-    std::fixed << std::setprecision(3) << st.avg() <<
-    " clocks on average\n";
+extern "C" __global__ void glob_globaltimer_resolution(uint64_t *ticks, int source);
+
+static void test_globaltimer_resolution()
+{
+  // launch 1 warp per block and one block per SM so that there's not
+  // likely to be contention over SMs
+  const int TOTAL_BLOCKS = 30;
+
+  umem<uint64_t> res_gt(TOTAL_BLOCKS * GLOBALTIMER_RES_SAMPLES);
+  umem<uint64_t> res_cl(TOTAL_BLOCKS * GLOBALTIMER_RES_SAMPLES);
+
+  // <<<NBLOCKS, BLOCKSIZE, SLM, STREAMINDEX >>>
+  glob_globaltimer_resolution<<<TOTAL_BLOCKS,1>>>(res_gt, 0);
+  auto e0 = cudaDeviceSynchronize();
+  if (e0 != cudaSuccess) {
+    fatal(cudaGetErrorName(e0), " (", cudaGetErrorString(e0), "): unexpected error");
+  }
+  glob_globaltimer_resolution<<<TOTAL_BLOCKS,1>>>(res_cl, 1);
+  auto e1 = cudaDeviceSynchronize();
+  if (e1 != cudaSuccess) {
+    fatal(cudaGetErrorName(e1), " (", cudaGetErrorString(e1), "): unexpected error");
+  }
+
+  auto summarize = [&](const char *timer, const umem<uint64_t> &res, const char *units) {
+    std::cout << "================= " << timer << " =================\n";
+    /*
+    size_t non_zeros = 0, zeros = 0;
+    for (size_t i = 0; i < TOTAL_BLOCKS * GLOBALTIMER_RES_SAMPLES; i++) {
+      if (res[i] != 0) {
+        std::cout << "  " << res[i] << " " << units << "\n";
+        non_zeros++;
+      } else {
+        zeros++;
+      }
+    }
+    */
+    // std::cout << "  zeros: " << zeros << "\n";
+    // std::cout << "  non_zeros: " << non_zeros << "\n";
+    std::cout << "=================\n";
+    auto h = create_histogram<uint64_t>(res, res.size());
+    format_histogram_with<uint64_t>(std::cout, [](std::ostream &os, const uint64_t &t){os << t;}, h, units);
+    std::cout << "=================\n";
+  };
+  summarize("globaltimer", res_gt, "ns");
+  summarize("clock", res_cl, "clks.");
+
+}
+
+static void fmt_tuple(std::ostream &os,const std::tuple<uint32_t,uint32_t> &e)
+{
+  os << std::get<0>(e) << " ns (" << std::get<1>(e) << " clks.)";
+}
+
+// similar test, but pairs the samples (so we can see the clock counter on long 1024 ns cases)
+extern "C" __global__ void glob_globaltimer_resolution2(uint32_t *ticks_g, uint32_t *ticks_l);
+static void test_globaltimer_resolution2()
+{
+  // launch 1 warp per block and one block per SM so that there's not
+  // likely to be contention over SMs
+  const int TOTAL_BLOCKS = 30;
+
+  umem<uint32_t> res_gt(TOTAL_BLOCKS * GLOBALTIMER_RES_SAMPLES);
+  umem<uint32_t> res_cl(TOTAL_BLOCKS * GLOBALTIMER_RES_SAMPLES);
+
+  // <<<NBLOCKS, BLOCKSIZE, SLM, STREAMINDEX >>>
+  glob_globaltimer_resolution2<<<TOTAL_BLOCKS,1>>>(res_gt, res_cl);
+  auto e0 = cudaDeviceSynchronize();
+  if (e0 != cudaSuccess) {
+    fatal(cudaGetErrorName(e0), " (", cudaGetErrorString(e0), "): unexpected error");
+  }
+
+  std::cout << "================= paired timer values =================\n";
+  // for (size_t i = 0; i < res_gt.size(); i++) {
+  //    std::cout << "  " << res_gt[i] << " ns.  (" << res_cl[i] << " clk.)\n";
+  // }
+  // std::cout << "=================\n";
+  // auto h = create_histogram<uint32_t>(res_gt, res_gt.size());
+  // format_histogram_with<uint32_t>(std::cout, [](std::ostream &os, const uint32_t v) {os << v;}, h, "ns");
+  std::cout << "=================\n";
+  std::vector<std::tuple<uint32_t,uint32_t>> zipped;
+  for (size_t i = 0; i < res_gt.size(); i++)
+    zipped.emplace_back(res_gt[i], res_cl[i]);
+  format_histogram<std::tuple<uint32_t,uint32_t>>(std::cout, fmt_tuple, zipped);
 }
 
 // emit JSON
@@ -552,6 +716,8 @@ int main(int argc, const char* argv[])
       "  | delayed-clock64  INT\n"
       "  | dist\n"
       "  | globaltimer-cost\n"
+      "  | globaltimer-res\n"
+      "  | globaltimer-res2\n"
       "  | persist\n"
       "  | print-timers\n"
       ;
@@ -581,6 +747,10 @@ int main(int argc, const char* argv[])
     test_block_dist();
   } else if (test_name == "globaltimer-cost") {
     test_globaltimer_cost();
+  } else if (test_name == "globaltimer-res") {
+    test_globaltimer_resolution();
+  } else if (test_name == "globaltimer-res2") {
+    test_globaltimer_resolution2();
   } else if (test_name == "persist") {
     test_persist_dispatch();
   } else if (test_name == "print-timers") {
