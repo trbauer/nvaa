@@ -20,7 +20,11 @@
 #include <tuple>
 #include <vector>
 
+
 using namespace mincu;
+
+// maps dataLayout => <impl,double>
+using stats = std::map<std::string,std::map<std::string,double>>;
 
 struct opts {
   int verbosity = 0;
@@ -34,6 +38,8 @@ extern "C" static __device__ int get_tid()
   int id = blockDim.x * blockIdx.x + threadIdx.x;
   return id;
 }
+
+#define SHUFFLE_ITRS 4096
 
 ///////////////////////////////////////////////////////////////////////////////
 // similar test, but pairs the samples (so we can see the clock counter on long 1024 ns cases)
@@ -123,29 +129,90 @@ static void test_shuffle_vidx(const opts &os)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-extern "C" __global__ void glob_shuffle_vidx_perf(
+extern "C" __global__ void glob_shuffle_vidx_reg_perf(
   uint32_t *oups,
   uint64_t *oups_time,
   const uint32_t *inps,
   int cluster_width)
 {
-  auto val = get_tid();
-  const auto idx = inps[get_tid()];
+  uint32_t idx = inps[get_tid()];
   auto st = clock64();
   // T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
-  for (int i = 0; i < 128; i++) {
-    val += __shfl_sync(0xFFFFFFFF, val + idx, idx, cluster_width);
+  for (int i = 0; i < SHUFFLE_ITRS; i++) {
+    idx = __shfl_sync(0xFFFFFFFF, idx, idx, cluster_width);
   }
   auto en = clock64();
-  oups[get_tid()] = val;
+  oups[get_tid()] = idx;
   if (threadIdx.x == 0) {
     oups_time[blockIdx.x] = en - st;
   }
 }
 
+extern "C" __global__ void glob_shuffle_vidx_slm_perf(
+  uint32_t *oups,
+  uint64_t *oups_time,
+  const uint32_t *inps,
+  int cluster_width)
+{
+  __shared__ uint32_t slm_val[32];
+  slm_val[threadIdx.x] = get_tid();
+  __syncthreads();
+  auto idx = inps[get_tid()];
+
+  auto st = clock64();
+  for (int i = 0; i < SHUFFLE_ITRS; i++) {
+    idx = slm_val[idx];
+  }
+  auto en = clock64();
+  oups[get_tid()] = idx;
+  if (threadIdx.x == 0) {
+    oups_time[blockIdx.x] = en - st;
+  }
+}
+
+extern "C" __global__ void glob_shuffle_vidx_glb_perf(
+  uint32_t *oups,
+  uint64_t *oups_time,
+  const uint32_t *inps,
+  int cluster_width,
+  uint32_t *glb_buf)
+{
+  glb_buf[get_tid()] = get_tid();
+  auto idx = inps[get_tid()];
+  auto st = clock64();
+  for (int i = 0; i < SHUFFLE_ITRS; i++) {
+    idx = glb_buf[idx];
+  }
+  auto en = clock64();
+  oups[get_tid()] = idx;
+  if (threadIdx.x == 0) {
+    oups_time[blockIdx.x] = en - st;
+  }
+}
+
+extern "C" __global__ void glob_shuffle_vidx_imadw_perf(
+  uint32_t *oups,
+  uint64_t *oups_time,
+  const uint32_t *inps,
+  int cluster_width)
+{
+  uint64_t idx64 = inps[get_tid()];
+  auto st = clock64();
+  for (uint32_t i = 0; i < SHUFFLE_ITRS; i++) {
+    idx64 += 3 * (uint32_t)idx64;
+  }
+  auto en = clock64();
+  oups[get_tid()] = (uint32_t)(idx64 >> 32);
+  if (threadIdx.x == 0) {
+    oups_time[blockIdx.x] = en - st;
+  }
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
 static void emitIndices(const umem<uint32_t> &idxs) {
   for (uint32_t i = 0; i < idxs.size(); i++) {
-    std::cout << '[' << colr<uint32_t>(i, 2, '0') << ']';
+    std::cout << '|' << colr<uint32_t>(i, 2, '0') << '|';
   }
   std::cout << "\n";
   for (uint32_t i = 0; i < idxs.size(); i++) {
@@ -153,88 +220,146 @@ static void emitIndices(const umem<uint32_t> &idxs) {
   }
   std::cout << "\n";
 }
-
-static void test_shuffle_vidx_perf(const opts &os)
+enum class Alg {REG, SLM, GLB, IMAW};
+static const std::array<Alg,4> ALL_ALGS {Alg::REG, Alg::SLM, Alg::GLB, Alg::IMAW};
+static std::string ToKey(Alg a)
 {
+  switch (a) {
+  case Alg::REG: return "reg";
+  case Alg::SLM: return "slm";
+  case Alg::GLB: return "glb";
+  case Alg::IMAW: return "imaw";
+  default: fatal("bad enum");
+  }
+  return "?";
+}
+
+
+static void test_shuffle_vidx_xxx_perf(
+  const opts &os,
+  stats &sts,
+  const Alg alg)
+{
+
   // launch 1 warp per block and one block per SM so that there's not
   // likely to be contention over SMs
-  const uint32_t TOTAL_BLOCKS = 300;
-
-//  idxs[0] = 16;
-//  idxs[1] = 4;
-//  idxs[2] = 4;
-//  idxs[3] = 3;
+//  const uint32_t TOTAL_BLOCKS = 300;
+  const uint32_t TOTAL_BLOCKS = 1;
 
   umem<uint64_t> oup_times(TOTAL_BLOCKS);
   umem<uint32_t> oups(TOTAL_BLOCKS * 32);
+  umem<uint32_t> glb(32);
 
-  auto test = [&](const char *which, const umem<uint32_t> &idxs) {
-    // <<<NBLOCKS, BLOCKSIZE, SLM, STREAMINDEX >>>
-    glob_shuffle_vidx_perf<<<TOTAL_BLOCKS,32>>>(oups, oup_times, idxs, 32);
-    auto e0 = cudaDeviceSynchronize();
-    if (e0 != cudaSuccess) {
-      fatal(cudaGetErrorName(e0), " (", cudaGetErrorString(e0), "): unexpected error");
-    }
-    std::cout << "=============== test_shuffle_vidx_perf<" << which << "> ===============\n";
-    if (os.verbose()) {
-      std::cout << "===\n";
-      emitIndices(idxs);
-      if (os.debug()) {
-        std::cout << "===\n";
-        emitIndices(oups);
+  auto testRun =
+    [&](const char *which_idxs, const umem<uint32_t> &idxs) {
+      // <<<NBLOCKS, BLOCKSIZE, SLM, STREAMINDEX >>>
+      auto which_hw = ToKey(alg);
+      if (os.verbose()) {
+        std::cout << which_idxs << "\n";
+        emitIndices(idxs);
       }
-    }
+      if (os.debug()) {
+        for (size_t i = 0; i < 32; i++) {
+          if (idxs[i] > 31) {
+            fatal(which_idxs, ": ", which_hw, ": has oob index");
+          }
+        }
+      }
 
-    const auto s = statistics::construct(oup_times.to_vector());
-    std::cout << s.str();
-    if (os.verbose())
-      format_histogram(std::cout, oup_times.to_vector());
-  }; // test
+      if (alg == Alg::REG) {
+        glob_shuffle_vidx_reg_perf<<<TOTAL_BLOCKS,32>>>(oups, oup_times, idxs, 32);
+      } else if (alg == Alg::SLM) {
+        glob_shuffle_vidx_slm_perf<<<TOTAL_BLOCKS,32>>>(oups, oup_times, idxs, 32);
+      } else if (alg == Alg::GLB) {
+        glob_shuffle_vidx_glb_perf<<<TOTAL_BLOCKS,32>>>(oups, oup_times, idxs, 32, glb);
+      } else if (alg == Alg::IMAW) {
+        glob_shuffle_vidx_imadw_perf<<<TOTAL_BLOCKS,32>>>(oups, oup_times, idxs, 32);
+      } else {
+        fatal("bad enum");
+      }
+      auto e0 = cudaDeviceSynchronize();
+      if (e0 != cudaSuccess) {
+        fatal(cudaGetErrorName(e0), " (", cudaGetErrorString(e0), "): unexpected error");
+      }
+      std::cout << "=============== test_shuffle_vidx_" << which_hw << "_perf(" << which_idxs << ") ===============\n";
+      if (os.verbose()) {
+        std::cout << "===\n";
+        emitIndices(idxs);
+        if (os.debug()) {
+          std::cout << "===\n";
+          emitIndices(oups);
+        }
+      }
 
+      const auto s = statistics::construct(oup_times.to_vector());
+      std::cout << s.str();
+      if (os.verbose())
+        format_histogram(std::cout, oup_times.to_vector());
+      double val = s.min() / (double)SHUFFLE_ITRS;
+      std::cout << val << " c per (best measured).\n";
+      return val;
+    }; // testRun
+
+  auto testCase =
+    [&](const char *which_idxs, const umem<uint32_t> &idxs) -> void {
+      testRun(which_idxs, idxs); // warm up
+      auto r = testRun(which_idxs, idxs); // real run
+      sts[which_idxs][ToKey(alg)] = r;
+    };
+
+  //////////////////////////////////////////////////////////////////////
   umem<uint32_t> inpsID(32, init_seq<uint32_t>(0));
-  umem<uint32_t> inpsK0(32, init_const<uint32_t>(0));
+  umem<uint32_t> inpsIDM2(32, init_seq<uint32_t>(0, 1, 2));
+  umem<uint32_t> inpsIDM4(32, init_seq<uint32_t>(0, 1, 4));
+  umem<uint32_t> inpsNXT32(32, init_seq<uint32_t>(0, 1, 32));
+  umem<uint32_t> inpsNXT4(32, init_seq<uint32_t>(0, 1, 4));
+  umem<uint32_t> inpsK5(32, init_const<uint32_t>(25));
+  umem<uint32_t> inpsREV(32, init_seq<uint32_t>(31, (uint32_t)-1));
 
-  umem<uint32_t> inpsREV(32);
-  for (uint32_t i = 0; i < 32; i++) {
-      inpsREV[i] = (32 - i);
-  }
-
-  // point to
-  umem<uint32_t> inps0(32);
-  for (uint32_t i = 0; i < 32; i++) {
-    if (i % 2) {
-      inps0[i] = (i + 1) % 32;
-    } else {
-      inps0[i] = (i + 2) % 32;
-    }
-  }
 
   random_state rs(12007);
   umem<uint32_t> inpsRND(32, init_random(rs, 0, 31));
-  emitIndices(inpsRND);
-
-  test("inps0", inps0);
-  test("inps0", inps0);
-
-  test("inpsK0", inpsK0);
-  test("inpsK0", inpsK0);
-
-  test("inpsID", inpsID);
-  test("inpsID", inpsID);
-
-  test("inpsREV", inpsREV);
-  test("inpsREV", inpsREV);
-
-  test("inpsRND", inpsRND);
-  test("inpsRND", inpsRND);
+  //////////////////////////////////////////////////////////////////////
+  testCase("id",  inpsID);
+  testCase("idm2", inpsIDM2);
+  testCase("idm4", inpsIDM4);
+  testCase("const5", inpsK5);
+  testCase("nxt", inpsNXT32);
+  testCase("nxtm4", inpsNXT4);
+  testCase("rev", inpsREV);
+  testCase("rnd", inpsRND);
 }
 
+static void test_shuffle_vidx_reg_perf(const opts &os, stats &sts)
+{
+  test_shuffle_vidx_xxx_perf(os, sts, Alg::REG);
+}
+static void test_shuffle_vidx_slm_perf(const opts &os, stats &sts)
+{
+  test_shuffle_vidx_xxx_perf(os, sts, Alg::SLM);
+}
+static void test_shuffle_vidx_glb_perf(const opts &os, stats &sts)
+{
+  test_shuffle_vidx_xxx_perf(os, sts, Alg::GLB);
+}
+static void test_shuffle_vidx_imadw_perf(const opts &os, stats &sts)
+{
+  test_shuffle_vidx_xxx_perf(os, sts, Alg::GLB);
+}
+static void test_shuffle_vidx_perf(const opts &os, stats &sts)
+{
+  for (auto alg : ALL_ALGS) {
+    test_shuffle_vidx_xxx_perf(os, sts, alg);
+  }
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, const char* argv[])
 {
   opts os;
+  std::vector<std::string> tests;
+
   // test_timer_latency(0, block_counts);
   if ((argc != 2 && argc != 3) || (argc == 1 &&
     (std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help")))
@@ -244,11 +369,14 @@ int main(int argc, const char* argv[])
       "where TESTNAME =\n"
       "    uidx\n"
       "    vidx\n"
-      "    vidx-perf\n"
+      "    vidx-all-perf (runs all cases)\n"
+      "      vidx-reg-perf\n"
+      "      vidx-slm-perf\n"
+      "      vidx-glb-perf\n"
+      "      vidx-imadw-perf\n"
       ;
     return EXIT_FAILURE;
   }
-  std::string test;
   for (int ai = 1; ai < argc; ai++) {
     std::string arg = argv[ai], key = argv[ai], val;
     auto eqIdx = arg.find('=');
@@ -304,31 +432,70 @@ int main(int argc, const char* argv[])
 
     if (key == "-v") {
       os.verbosity = 1;
+    } else if (key == "-v2") {
+      os.verbosity = 2;
     } else if (key == "-v=") {
       os.verbosity = parseSInt(val);
+      std::cout << "verb: " << os.verbosity << "\n";
     } else if (arg.substr(0, 1) == "-") {
       badArg("invalid option");
-    } else if (test.empty()) {
-      test = arg;
-    } else if (!test.empty()) {
-      badArg("test already specified");
+    } else {
+      tests.push_back(arg);
     }
   } // for
 
-  if (test.empty()) {
+  if (tests.empty()) {
     fatal("expected test name");
   }
 
-  std::string test_name = argv[1];
-  if (test_name == "uidx") {
-    test_shuffle_uidx(os);
-  } else if (test_name == "vidx") {
-    test_shuffle_vidx(os);
-  } else if (test_name == "vidx-perf") {
-    test_shuffle_vidx_perf(os);
-  } else {
-    fatal(test_name, ": unsupported test");
+  // test -> <test,val>
+
+  stats sts;
+  for (auto test : tests) {
+    if (test == "uidx") {
+      test_shuffle_uidx(os);
+    } else if (test == "vidx") {
+      test_shuffle_vidx(os);
+    } else if (test == "vidx-all-perf") {
+      test_shuffle_vidx_perf(os, sts);
+    } else if (test == "vidx-reg-perf") {
+      test_shuffle_vidx_reg_perf(os, sts);
+    } else if (test == "vidx-slm-perf") {
+      test_shuffle_vidx_slm_perf(os, sts);
+    } else if (test == "vidx-glb-perf") {
+      test_shuffle_vidx_glb_perf(os, sts);
+    } else if (test == "vidx-imadw-perf") {
+      test_shuffle_vidx_imadw_perf(os, sts);
+    } else {
+      fatal(test, ": unsupported test");
+    }
+  } // tests
+
+  std::stringstream csv;
+  csv << "pattern";
+  for (const auto &a : ALL_ALGS) {
+    csv << "," << ToKey(a);
   }
+  csv << ",loopitrs:" << SHUFFLE_ITRS;
+  csv << "\n";
+
+  for (const auto &me : sts) {
+    csv << me.first;
+    for (auto alg : ALL_ALGS) {
+      auto key = ToKey(alg);
+      csv << ",";
+      auto itr = me.second.find(key);
+      if (itr == me.second.end()) {
+        csv << "?";
+      } else {
+        csv << itr->second;
+      }
+    }
+    csv << "\n";
+  }
+  std::ofstream out("shuffles.csv");
+  out << csv.str();
+  out.flush();
 
   return EXIT_SUCCESS;
 }

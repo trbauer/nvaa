@@ -16,6 +16,10 @@
 
 namespace mincu
 {
+template <typename T>
+static inline T align_up(T n, T a) {
+    return (n + a - 1) - ((n + a - 1) % a);
+}
 
 template <typename...Ts>
 static void format_to(std::stringstream &os) { }
@@ -293,29 +297,29 @@ RANDOMIZE_INSTANCE(uint64_t,randomize_integral)
 
 template <typename R>
 struct init {
-  enum class init_type{NONE, CONST, SEQ, RANDOM, FUNC} type;
+  enum class init_type {NONE, CONST, SEQ, RANDOM} type;
   union {
     struct {R const_val;};
     struct {R seq_init, seq_delta, seq_mod;};
     struct {random_state *rndst; R rnd_lo, rnd_hi;};
-    struct {std::function<R(size_t)> *func;};
   };
   init() : type(init_type::NONE) { }
   init(R _const) : type(init_type::CONST), const_val(_const) { }
   init(random_state *rs, R _lo, R _hi) : type(init_type::RANDOM), rndst(rs), rnd_lo(_lo), rnd_hi(_hi) { }
   init(R _init, R _delta, R mod) : type(init_type::SEQ), seq_init(_init), seq_delta(_delta), seq_mod(mod) { }
-  init(std::function<R(size_t)> *_func) : type(init_type::FUNC), func(_func) { }
 
   template <typename T = R>
   void apply(T *vals, size_t elems) const
   {
     switch (type) {
     case init_type::NONE:
-      return;
+      break;
     case init_type::CONST:
     {
-      for (size_t k = 0; k < elems; k++)
+      for (size_t k = 0; k < elems; k++) {
         vals[k] = T(const_val);
+      }
+      break;
     }
     case init_type::SEQ:
     {
@@ -330,14 +334,11 @@ struct init {
           val = val % seq_mod;
         }
       }
-      return;
+      break;
     }
     case init_type::RANDOM:
       randomize<T>(*rndst, vals, elems, rnd_lo, rnd_hi);
-      return;
-    case init_type::FUNC:
-      for (size_t k = 0; k < elems; k++)
-        vals[k] = (*func)(k);
+      break;
     }
   }
 };
@@ -357,10 +358,14 @@ static init<R> init_random(
 {
     return init<R>(&_rs, _rnd_lo,_rnd_hi);
 }
-template <typename R>
-static init<R> init_random(std::function<R(size_t)> apply) {
-    return init<R>(&apply);
-}
+
+// THIS doesn't work... immediate constructed arguments (temps)
+// fall out of scope before init is called
+//
+// template <typename R>
+// static init<R> init_func(std::function<R(size_t)> apply) {
+//    return init<R>(&apply);
+// }
 
 
 template <typename T> static inline const char *type_name() {return "???";}
@@ -381,12 +386,15 @@ struct umem_alloc {
   size_t mem_size;
 
   umem_alloc(size_t size) : mem_size(size) {
-    // std::cout << "allocating " << size << "B\n";
-    CUDA_API(cudaMallocManaged,(void **)&mem, size);
+    // size = align_up<size_t>(size, 4096);
+    CUDA_API(cudaMallocManaged, (void **)&mem, size);
+    // mem = _aligned_malloc(size, 4096);
   }
   ~umem_alloc() {
+    // std::cout << "~umem_alloc " << mem << "\n";
     if (mem) {
       CUDA_API(cudaFree, mem);
+      // _aligned_free(mem);
       mem = nullptr;
       mem_size = 0x0;
     }
@@ -525,25 +533,17 @@ public:
 };
 #endif // 0
 
-// this could derive
 template <typename E>
 class umem // unified memory buffer
 {
-  // FIXME: we need to reset the value if a dispatch fails
   std::shared_ptr<umem_alloc> ptr;
   size_t                      elems;
 
 public:
   umem(size_t _elems)
-    : elems(_elems)
-    , ptr(std::make_shared<umem_alloc>(_elems*sizeof(E)))
-  {
-  }
+    : elems(_elems), ptr(std::make_shared<umem_alloc>(_elems * sizeof(E))) { }
   umem(std::shared_ptr<umem_alloc> &_ptr, size_t elems)
-    : elems(_elems)
-    , ptr(_ptr)
-  {
-  }
+    : elems(_elems), ptr(_ptr) { }
 
   template <typename R>
   umem(size_t _elems, const init<R> &i)
@@ -574,10 +574,10 @@ public:
   // }
 
   void prefetch_to_device() const {
-    CUDA_API(cudaMemPrefetchAsync, get_cptr(), 0, elems*sizeof(E));
+    CUDA_API(cudaMemPrefetchAsync, get_cptr(), 0, elems * sizeof(E));
   }
   void prefetch_to_host() const {
-    CUDA_API(cudaMemPrefetchAsync, get_cptr(), cudaCpuDeviceId, elems*sizeof(E));
+    CUDA_API(cudaMemPrefetchAsync, get_cptr(), cudaCpuDeviceId, elems * sizeof(E));
   }
 
 
@@ -593,7 +593,7 @@ public:
                   E *get_ptr() {return const_cast<E *>(get_cptr());}
    operator const E *() const {return get_cptr();}
             const E *get_cptr() const {return (const E *)ptr.get()->mem;}
-   //      E &operator[](size_t ix)       {return get_ptr()[ix];}
+   //      E &operator[](size_t ix)       {return get_ptr()[ix];} // TODO: check bounds
    //const E &operator[](size_t ix) const {return get_ptr()[ix];}
 
 

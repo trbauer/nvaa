@@ -1,0 +1,93 @@
+I fiddled around with this some more. The NVidia arbitrary shuffles-by-index instruction consistently runs at sub-SLM latencies (all times clocks).
+
+pattern reg slm glb imaw
+const5  27.0498 22.0498 40.0498 10.3818
+id  27.0503 22.1023 40.05   10.3342
+idm2    27.0513 22.0513 40.0513 10.3354
+idm4    27.05   22.0977 40.0498 10.334
+nxt 27.0503 22.0503 40.0503 10.3345
+nxtm4   27.0513 22.0508 40.051  10.335
+rev 27.0503 22.3328 40.0991 10.384
+rnd 27.0513 22.051  40.051  10.3352
+
+The various patterns are on the left (const5 means broadcast 5).
+id is identity. The "idm2" symbol means id mod 2 (mask out low bit)
+"nxt" is next, "nxt4" next mod 4, "rev" reverse, and rnd is random.
+
+*   (first column) Register shuffles consistently cost around 27c.
+*   (second column) SLM costs about 22c. This is consistent with the fasted measured times from V100 (I have TU106 > V100). So that's believable.
+*   (third column) For fun I did global memory; there's a nasty IMAD.WIDE in the sequence so I timed what that costs separately (fourth column). So global is likely 30c. If memory serves fastest measured was 28c.
+*   This is SHFL.IDX. I Should test the other subfunctions (e.g. UP/DOWN)  to see if they are any better or just map to this same HW (my expectation)
+*   The fact that register shuffles are slower than SLM nicely explains my earlier observation that cuDNN and cuBLAS shamelessly use SLM. (I.e. not SHFL.* in the entire library.)
+
+For completeness the programs compile to the following.
+Reg:
+...
+      SHFL.IDX  PT,     R9,     R11,    R11,    R8       {!4,+1.W,^1};
+      SHFL.IDX  PT,     R9,     R9,     R9,     R8       {!4,+1.W,^1};
+      SHFL.IDX  PT,     R13,    R9,     R9,     R8       {!4,+1.W,^1};
+      SHFL.IDX  PT,     R13,    R13,    R13,    R8       {!4,+1.W,^1};
+      SHFL.IDX  PT,     R15,    R13,    R13,    R8       {!4,+1.W,^1};
+...
+
+SLM:
+...
+      LDS.U     R9,     [R8.X4]                          {!4,+1.W,^1};
+      LDS.U     R9,     [R9.X4]                          {!4,+1.W,^1};
+      LDS.U     R10,    [R9.X4]                          {!4,+1.W,^1};
+      LDS.U     R10,    [R10.X4]                         {!4,+1.W,^1};
+      LDS.U     R12,    [R10.X4]                         {!4,+1.W,^1};
+      LDS.U     R12,    [R12.X4]                         {!4,+1.W,^1};
+...
+
+GLB:
+   ...
+      IMAD.WIDE.U32  R10, R13,  R4,     c0[0x180]        {!8,Y,^6}; << OUCH ==> 32x32 + 64  ~ 10c
+      LDG.E.SYS  R11,   [R10]                            {!2,+3.W};
+      IMAD.WIDE.U32  R12, R11,  R4,     c0[0x180]        {!8,Y,^1,^3};
+      LDG.E.SYS  R13,   [R12]                            {!2,+3.W};
+      IMAD.WIDE.U32  R14, R13,  R4,     c0[0x180]        {!8,Y,^3};
+      LDG.E.SYS  R15,   [R14]                            {!2,+3.W};
+    ...
+
+
+
+
+
+
+
+
+
+From: Bauer, Timothy R
+Sent: Wednesday, March 30, 2022 9:46 PM
+To: Valerio, Jim <jim.valerio@intel.com>
+Subject: RE: Cross Channel Ops Strawman
+
+No problem, and thanks. The extra time will help.
+
+From: Valerio, Jim <jim.valerio@intel.com>
+Sent: Wednesday, March 30, 2022 8:07 PM
+To: Bauer, Timothy R <timothy.r.bauer@intel.com>
+Subject: RE: Cross Channel Ops Strawman
+
+Tim,
+I’m pushing this out to next week because I can’t get my stuff pulled together in time.
+Jim
+
+From: Bauer, Timothy R <timothy.r.bauer@intel.com>
+Sent: Wednesday, March 30, 2022 3:24 PM
+To: Valerio, Jim <jim.valerio@intel.com>
+Subject: RE: Cross Channel Ops Strawman
+
+Gotta run home (my mom is visiting and I am leaving now). I will be back online tonight to check email.
+
+If the slides are a train wreck, then we should defer this. Otherwise, I can tweak super simple things tomorrow morning early. I have a massive spreadsheet (attached) showing all the APIs and their requirements. An AR is to study how everyone implements these to see what we need to do to reach parity or better.
+
+- Tim
+
+From: Bauer, Timothy R
+Sent: Wednesday, March 30, 2022 2:22 PM
+To: Valerio, Jim <jim.valerio@intel.com>
+Subject: Cross Channel Ops Strawman
+
+
