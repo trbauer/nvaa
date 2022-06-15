@@ -124,9 +124,13 @@ dft_fos =
 fmtSpansRawInstWith :: FmtOpts -> RawInst -> [FmtSpan]
 fmtSpansRawInstWith fos ri = fssSimplify $
    op_part_padded ++ maybe_dep_info ++ noFmt ";"
-  where op_part_padded = if null maybe_dep_info then op_part else fssPadR (foColsPerInstBody fos) op_part
+  where op_part_padded
+          | null maybe_dep_info = op_part
+          | otherwise = fssPadR (foColsPerInstBody fos) op_part
         op_part = pred ++ noFmt " " ++ fmtd_tokens
-          where pred = fssPadR (foColsPerPredicate fos) [FmtSpan "p" (riPredication ri)]
+          where pred =
+                  fssPadR (foColsPerPredicate fos)
+                    [FmtSpan "p" (riPredication ri)]
 
         fmtd_tokens :: [FmtSpan]
         fmtd_tokens
@@ -166,7 +170,8 @@ fmtSpansRawInstWith fos ri = fssSimplify $
                         fmt so = [FmtSpan "o" op,FmtSpan "s" ('.':so)]
                 _ -> [FmtSpan "o" (riMnemonic ri)]
           where is_lop :: Bool
-                is_lop = any (`isPrefixOf`riMnemonic ri) ["LOP3","PLOP3","ULOP3","UPLOP3"]
+                is_lop = any (`isPrefixOf`riMnemonic ri)
+                  ["LOP3","PLOP3","ULOP3","UPLOP3"]
 
                 lop :: String
                 lop = takeWhile (/='.') (riMnemonic ri)
@@ -227,15 +232,23 @@ fmtOpnd fos o
 regSpan :: String -> Maybe (String,String)
 regSpan s =
   case s of
+    'R':'Z':sfx | notIdentChar sfx -> Just ("RZ",sfx)
+    'U':'R':'Z':sfx  | notIdentChar sfx -> Just ("URZ",sfx)
+    'P':'T':sfx | notIdentChar sfx -> Just ("PT",sfx)
+    'U':'P':'T':sfx  | notIdentChar sfx -> Just ("UPT",sfx)
     'U':'R':sfx -> tryReg "UR" sfx
     'U':'P':sfx -> tryReg "UP" sfx
     'R':sfx -> tryReg "R" sfx
     'P':sfx -> tryReg "P" sfx
+    'B':sfx -> tryReg "B" sfx
     _ -> Nothing
   where tryReg pfx sfx =
           case span isDigit sfx of
-            (ds@(_:_),sfx) -> Just (pfx ++ ds,sfx)
+            (ds@(_:_),sfx) | notIdentChar sfx -> Just (pfx ++ ds,sfx)
             _ -> Nothing
+        notIdentChar "" = True
+        notIdentChar (c:_) = not (isAlphaNum c || c == '_')
+
 
 fmtSampleInst :: SampleInst -> String
 fmtSampleInst = fmtSampleInstWithOpts dft_fos
