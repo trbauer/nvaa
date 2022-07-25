@@ -2,6 +2,7 @@
 #define MINCU_HPP
 
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -325,13 +326,21 @@ struct init {
     {
       R val = seq_init;
       if (seq_mod) {
-        val %= seq_mod;
+        if constexpr (std::is_floating_point<R>::value && std::is_floating_point<T>::value) {
+          val = std::fmod(val, seq_mod);
+        } else {
+          val %= seq_mod;
+        }
       }
       for (size_t k = 0; k < elems; k++) {
         vals[k] = val;
         val += seq_delta;
         if (seq_mod) {
-          val = val % seq_mod;
+          if constexpr (std::is_floating_point<R>::value && std::is_floating_point<T>::value) {
+            val = std::fmod(val, seq_mod);
+          } else {
+            val %= seq_mod;
+          }
         }
       }
       break;
