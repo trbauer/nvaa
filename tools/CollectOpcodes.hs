@@ -19,7 +19,8 @@ import Text.Printf
 import qualified Data.ByteString as S
 
 sm_ver :: String
-sm_ver = "sm_86"
+sm_ver = "sm_90"
+-- sm_ver = "sm_86"
 -- sm_ver = "sm_80"
 -- sm_ver = "sm_75"
 
@@ -57,13 +58,14 @@ collectOps = body
                 mapM_ processFile lib_root_sass_files
                 return ()
           --
-          let smpls_path = "examples/" ++ sm_ver ++ "/samples"
-          processDir smpls_path
+          let smpls_path = "examples\\" ++ sm_ver ++ "\\samples"
+          smpls_dirs <- concat <$> (getSubPaths smpls_path >>= mapM getSubPaths)
+          mapM_ processDir smpls_dirs
           --
-          let lib_path = "examples/" ++ sm_ver ++ "/libs"
+          let lib_path = "examples\\" ++ sm_ver ++ "\\libs"
           lib_dirs <- getSubPaths lib_path
           mapM_ processDir lib_dirs
-
+          return ()
 
         output_root :: FilePath
         output_root = "examples/" ++ sm_ver ++ "/ops"
@@ -81,7 +83,8 @@ collectOps = body
               Right si -> handle si
                 -- | getField128 0 9 (siBits si) == 0x012 -> handle si
                 -- | otherwise -> return ()
-          where fixSlashes = map (\c -> if c == '\\' then '/' else c) -- so cut and past into literal strings do not need escapes
+          where -- so cut and past into literal strings do not need escapes
+                fixSlashes = map (\c -> if c == '\\' then '/' else c)
                 handle si = do
                   let syntax =
                         printf "%016X`%016X:  " (wHi64 (siBits si)) (wLo64 (siBits si)) ++

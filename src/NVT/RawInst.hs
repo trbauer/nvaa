@@ -612,5 +612,6 @@ disBitsRawBatch os w128s = setup
                             where pad_ln = "*** nvdisasm failed to produce output ***"
 
               -- hope we got past the error and reduce size
-              (filterOutput oup++) <$> decodeChunk temp_file (min (chunk_len*2) (length w128s_sfx)) w128s_sfx
-
+              (filterOutput oup++) <$>
+                decodeChunk
+                  temp_file (min (chunk_len*2) (length w128s_sfx)) w128s_sfx

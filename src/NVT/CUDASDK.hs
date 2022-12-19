@@ -30,8 +30,12 @@ sdks =
   , (11,2)
   , (11,3)
   , (11,4)
-  -- just guessing
+  , (11,5)
+  , (11,6)
   , (12,0)
+  -- guessing
+  , (12,1)
+  , (12,2)
   ]
 
 cuda_env_vars :: [String]
@@ -154,11 +158,14 @@ findVsDir = do
         case mold of
           Nothing -> fatal "cannot find an appropriate Visual Studio directory"
           Just old -> return old
-  where -- VS 2017/2019
+  where -- VS 2017/2019/2022
         findNewVsDir :: IO (Maybe FilePath)
         findNewVsDir =
             srch [
-                "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Enterprise\\VC\\Tools\\MSVC"
+                "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC"
+              , "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\VC\\Tools\\MSVC"
+              , "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC"
+              , "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Enterprise\\VC\\Tools\\MSVC"
               , "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Professional\\VC\\Tools\\MSVC"
               , "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC"
               , "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Enterprise\\VC\\Tools\\MSVC"
