@@ -2,11 +2,12 @@
 module NVT.Driver where
 
 import NVT.CUDASDK
+import NVT.Diagnostic
 import NVT.ElfDecode
 import NVT.FilterAssembly
-import NVT.RawInst
+import NVT.ListingTypes
 import NVT.Opts
-import NVT.Diagnostic
+import NVT.RawInst
 import NVT.Parsers.ListingParser
 import NVT.SASSGraph
 

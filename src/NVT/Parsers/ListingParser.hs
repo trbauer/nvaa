@@ -1,9 +1,11 @@
 module NVT.Parsers.ListingParser where
 
-import NVT.Parsers.NVParser
-import NVT.Parsers.InstParser
-import NVT.IR
 import NVT.Diagnostic
+import NVT.Dataflow
+import NVT.IR
+import NVT.ListingTypes
+import NVT.Parsers.InstParser
+import NVT.Parsers.NVParser
 
 import Control.Monad
 import Data.Char
@@ -31,27 +33,6 @@ pCubinListing = do
     Right tss -> return tss
 -}
 
-data Listing =
-  Listing {
-    lTextSections :: ![TextSection]
-  } deriving (Show,Eq)
-
-data TextSection =
-  TextSection {
-    tsKernelName :: !String
-  , tsRegisters :: !Int
-  , tsBarriers :: !Int
-  , tsAlignment :: !Int -- .align
-  , tsBlocks :: ![Block]
-  } deriving (Show,Eq)
-
-data Block =
-  Block {
-    bId :: !Int
-  , bLoc :: !Loc
-  , bLabels :: ![String]
-  , bInsts :: ![Inst]
-  } deriving (Show,Eq)
 
 -- parses a full cubin listing
 parseListing :: FilePath -> String -> Either Diagnostic Listing
@@ -66,7 +47,31 @@ testInst :: String -> IO ()
 testInst inp =
   case runPI (pWhiteSpace >> pInst 0) "<debug>" inp of
     Left err -> putStrLn $ dFormatWithLines (lines inp) err
-    Right (i,_,_) -> putStrLn $ show i
+    Right (i,_,_) -> do
+      putStrLn $ fmtInstIr i
+      let oup = format i
+      putStrLn $ "  inp: " ++ inp
+      putStrLn $ "  oup: " ++ oup
+      case runPI (pWhiteSpace >> pInst 0) "<debug-reparsed>" oup of
+        Left err -> do
+          putStrLn $ "*** REPARSE FAILED"
+          putStrLn $ dFormatWithLines (lines oup) err
+        Right (i1,_,_) -> do
+          case iDiffs i i1 of
+            [] -> do
+              putStrLn "(reparse succeeded)"
+            (fnm,(v0,v1)):_ -> do
+              putStrLn $ "*** REPARSED IR MISMATCH"
+              putStrLn fnm
+              putStrLn ("  parsed:   " ++ v0)
+              putStrLn ("  reparsed: " ++ v1)
+          case depsInpsOups i of
+            (ins,ous) -> putStrLn $
+              "ins: " ++ fmtRegSet ins ++ "\n" ++
+              "ous: " ++ fmtRegSet ous ++ "\n" ++
+              ""
+
+
 
 --- just parse a bare list of instructions
 -- parseInsts :: FilePath -> String -> Either Diagnostic ([Inst],LabelIndex,[Diagnostic])
@@ -144,7 +149,7 @@ pListingHeader = pLabel "listing header (.headerflags ...)" $ do
           case drop (length "EF_CUDA_SM") sm of
             sm_num
               | sm_num`elem`supported_sms -> return ("sm_"++sm_num)
-              where supported_sms = ["86", "80", "75", "72", "70"]
+              where supported_sms = ["90", "86", "80", "75", "72", "70"]
             _ -> pSemanticError loc (sm ++ ": unsupported sm version")
   pKeyword ".elftype"
   pSymbol "@"
@@ -184,7 +189,7 @@ pTextSectionBody knm prot = do
   -- .sectionflags @"SHF_BARRIERS=1"
   nbars <-
     P.option 0 $ do
-      P.try (pKeyword ".sectionflags")
+      pTryKeyword ".sectionflags"
       pSymbol "@"
       P.char '\"'
       pSymbol "SHF_BARRIERS="
@@ -193,19 +198,27 @@ pTextSectionBody knm prot = do
       pWhiteSpace
       return nbars
   -- .sectioninfo  @"SHI_REGISTERS=39"
-  pKeyword ".sectioninfo"
-  pSymbol "@"
-  P.char '\"'
-  pSymbol "SHI_REGISTERS="
-  nregs <- pInt
-  P.char '\"'
-  pWhiteSpace
+  nregs <-
+    P.option 0 $ do
+      pTryKeyword ".sectioninfo"
+      pSymbol "@"
+      P.char '\"'
+      pSymbol "SHI_REGISTERS="
+      nregs <- pInt
+      P.char '\"'
+      pWhiteSpace
+      return nregs
 
   align <- P.option 0 (P.try pAlign)
   --
   -- .global  _Z19d_renderFastBicubicP6uchar4jjfffffy
-  pKeyword ".global"
-  sym <- pLabelRef
+  -- .text._Z14timedReductionPKfPfPl: // e.g. not a global symbol??
+  let pGlbSym = do
+        pTryKeyword ".global"
+        pLabelRef
+      pLclSym = pLabelDef
+  glb <- pGlbSym <|> pLclSym
+
   -- .type    _Z19d_renderFastBicubicP6uchar4jjfffffy,@function
   pKeyword ".type"
   sym <- pLabelRef
@@ -231,6 +244,9 @@ pTextSectionBody knm prot = do
   let setIds :: [Block] -> [Block]
       setIds = zipWith (\id b -> b {bId = id}) [1 ..]
   bs <- setIds <$> pBlocks 0
+  --
+  -- need to be at EOF or .section
+  P.eof <|> P.lookAhead (pTryKeyword ".section")
   --
   return $
     TextSection {

@@ -68,7 +68,7 @@ pInstNoPrefix pc = body
               pSrcX :: PI Src
               pSrcX
                 | oIsFP op = pSrcRCUF op
-                | otherwise = pSrcRCUI
+                | otherwise = pSrcRCUI pc op
 
               -- used to parse SRC1, SRC2 in ternary
               pSrc_RX_XR :: PI [Src]
@@ -125,40 +125,93 @@ pInstNoPrefix pc = body
                         ("mismatch between inst opt logical option expression and classic-form LUT operand; inst. opt expression evaluates to " ++ printf "0x02X" lop3_opt)
                     return (SrcI8 (fromIntegral lop3_opt))
 
-              --  R (+ UR) (+ IMM)
-              --       UR  (+ IMM)
-              --       IMM (+ UR)
+              ------------------------------
+              -- Prior to SM9.0
+              --  [ R (+ UR) (+ IMM) ]
+              --  [      UR  (+ IMM) ]
+              --  [     IMM  (+ UR)  ]
+              --
+              -- SM9.0:
+              --  desc[UR][ R (+ IMM) ]
+              --  desc[UR][      IMM ]
               --
               -- TODO: support for LDS offsets and the other [91:90] stuff
-              pLDST_Addrs :: Op -> PI (Src,Src,Src)
-              pLDST_Addrs op = do
-                let pBareSrcUR :: PI Src
-                    pBareSrcUR = pLabel "ureg" $ Src_UR msEmpty <$> pSyntax
-                let pR_UR_IMM = do
-                      -- technically LDS/STS don't permit .U32 or .64
-                      src_addr <-
-                        if oIsSLM op
-                          then pSrcR_WithModSuffixes [ModX4,ModX8,ModX16]
-                          else pSrcR_WithModSuffixes [ModU32,Mod64]
-                      (_,src_ur,src_imm) <-
-                        P.option (sRC_RZ,sRC_URZ,sRC_I32_0) $ do
-                          pSymbol "+"
-                          P.try pUR_IMM <|> pIMM_UR
-                      return (src_addr,src_ur,src_imm)
-                    pUR_IMM :: PI (Src,Src,Src)
-                    pUR_IMM = do
-                      ur <- pBareSrcUR
-                      imm <- P.option sRC_I32_0 $ pSymbol "+" >> pSrc_I32 op
-                      return (sRC_RZ,ur,imm)
-                    pIMM_UR :: PI (Src,Src,Src)
-                    pIMM_UR = do
-                      imm <- pSrc_I32 op
-                      ur <- P.option sRC_URZ $ pSymbol "+" >> pBareSrcUR
-                      return (sRC_RZ,ur,imm)
-                pSymbol "["
-                r <- P.try pUR_IMM <|> P.try pIMM_UR <|> pR_UR_IMM
-                pSymbol "]"
-                return r
+              pLDST_Addrs :: Op -> PI Src
+              pLDST_Addrs op = P.try pAddrDesc <|> pAddrOld
+                where pAddrOld = do
+                        pSymbol "["
+                        (r_r_ms,ur,imm) <-
+                          P.try pUR_IMM <|> P.try pIMM_UR <|> pR_UR_IMM
+                        pSymbol "]"
+                        return $ SrcAddr r_r_ms ur imm
+
+                      pAddrDesc = do
+                        pKeyword "desc" >> pSymbol "["
+                        u <- pBareSrcUR
+                        pSymbol "]"
+                        pSymbol "["
+                        ((r,r_ms),i) <- P.try pRZ_IMM <|> pR_IMM
+                        pSymbol "]"
+                        return $ SrcDescAddr u (r,r_ms) i
+
+                      pR_IMM :: PI ((R,ModSet),Int)
+                      pR_IMM = do
+                        r_r_ms <- pR
+                        imm <- P.option 0x0 pImmTerm
+                        return (r_r_ms,imm)
+
+                      pRZ_IMM :: PI ((R,ModSet),Int)
+                      pRZ_IMM = do
+                        imm <- pImmAtom
+                        return ((RZ,msEmpty),imm)
+
+                      --------------------------------------------------
+                      pR :: PI (R,ModSet)
+                      pR = do
+                        r <-
+                          if oIsSLM op
+                            then pSrcR_WithModSuffixes [ModX4,ModX8,ModX16]
+                            else pSrcR_WithModSuffixes [ModU32,Mod64]
+                        case r of
+                          SrcReg ms (RegR r) -> return (r,ms)
+
+                      pR_UR_IMM :: PI ((R,ModSet),UR,Int)
+                      pR_UR_IMM = do
+                        -- technically LDS/STS don't permit .U32 or .64
+                        r_r_ms <- pR
+                        (_,src_ur,src_imm) <-
+                          P.option (error "unreachable",URZ,0x0) $ do
+                            pSymbol "+"
+                            P.try pUR_IMM <|> pIMM_UR
+                        return (r_r_ms,src_ur,src_imm)
+
+                      pUR_IMM :: PI ((R,ModSet),UR,Int)
+                      pUR_IMM = do
+                        ur <- pBareSrcUR
+                        imm <- P.option 0x0 pImmTerm
+                        return ((RZ,msEmpty),ur,imm)
+
+                      pIMM_UR :: PI ((R,ModSet),UR,Int)
+                      pIMM_UR = do
+                        imm <- pImmAtom
+                        ur <- P.option URZ $ pSymbol "+" >> pBareSrcUR
+                        return ((RZ,msEmpty),ur,imm)
+
+                      pBareSrcUR :: PI UR
+                      pBareSrcUR = pLabel "ureg" pSyntax
+
+                      pImmTerm :: PI Int
+                      pImmTerm = do
+                        sgn <-
+                          (pSymbol "+" >> return id) <|>
+                            (pSymbol "-" >> return negate)
+                        sgn . fromIntegral <$> pIntImm32
+
+                      pImmAtom :: PI Int
+                      pImmAtom = P.try $ do
+                        sgn <- P.option id (pSymbol "-" >> return negate)
+                        sgn . fromIntegral <$> pIntImm32
+
 
               -------------------------------------------------------------------
               --
@@ -292,25 +345,25 @@ pInstNoPrefix pc = body
                 dst_p <- if InstOptZD`iosElem`ios then pDstPred else return []
                 dst_r <- pDstR
 
-                (r_addr,ur_off,i_off) <- pSymbol "," >> pLDST_Addrs op
+                src_addr <- pSymbol "," >> pLDST_Addrs op
                 -- TODO: fix the IR list length
-                pComplete (dst_p++[dst_r]) [r_addr,ur_off,i_off]
+                pComplete (dst_p++[dst_r]) [src_addr]
 
               pATX :: PI Inst
               pATX = do
                 dsts <- pDstsP_R
-                (r_addr,ur_off,i_off) <- pSymbol "," >> pLDST_Addrs op
+                src_addr <- pSymbol "," >> pLDST_Addrs op
                 -- src1, src2 are absent depending on how many operands the atomic has
                 -- e.g. CAS has two
                 src1 <- P.option sRC_RZ $ pSymbol "," >> pBareSrcR
                 src2 <- P.option sRC_RZ $ pSymbol "," >> pBareSrcR -- CAS has extra param
-                pComplete dsts [r_addr,ur_off,i_off,src1,src2]
+                pComplete dsts [src_addr,src1,src2]
 
               pSTX :: PI Inst
               pSTX = do
-                (r_addr,ur_off,i_off) <- pLDST_Addrs op
+                src_addr <- pLDST_Addrs op
                 r_data <- pSymbol "," >> pBareSrcR
-                pComplete [] [r_addr,ur_off,i_off,r_data]
+                pComplete [] [src_addr,r_data]
 
               -- TEX, TLD
               --
@@ -342,8 +395,8 @@ pInstNoPrefix pc = body
             OpARRIVES -> do
               -- ARRIVES.LDGSTSBAR.64 [URZ+0x800]
               -- disassembler permits R#
-              (r_addr,ur_off,i_off) <- pLDST_Addrs op
-              pComplete [] [r_addr,ur_off,i_off]
+              src_addr <- pLDST_Addrs op
+              pComplete [] [src_addr]
 
             ld_st_op
               | oIsAT op -> pATX
@@ -871,16 +924,18 @@ pInstNoPrefix pc = body
             --                      ^^^^%%%SSDD....
             -- @P3  LDGSTS.E.BYPASS.128                  [R231+0x880], [R198.64+UR12+0x80] {!1,+5.R}; // examples/sm_80/libs/cusolver64_10/Program.2625.sm_80.sass:88682
             --
+            --   SM90
+            --      LDGSTS.E.BYPASS.128          [R112+0x240], desc[UR10][R8.64] {!2,+2.R};
+            --      LDGSTS.E.BYPASS.LTC128B.128  [R207+0x8080], [R6.64+UR28+0x80], P6 {!1,+2.R};
+            --      LDGSTS.E.BYPASS.LTC128B.128  [R77+0x380], [R14.64+UR14], P1 {!1,+2.R};
+            --
             -- [90:87] is the optional src predicate
             OpLDGSTS -> do
-              pSymbol "["
-              src0 <- pSrcR_WithModSuffixes [] -- I don't think a scale is permitted here
-              imm <- P.option 0 $ fromIntegral <$> pIntTerm
-              pSymbol "]"
+              src0_addr <- pLDST_Addrs op
               pSymbol ","
-              (r_addr,ur_off,i_off) <- pLDST_Addrs op
+              src1_addr <- pLDST_Addrs op
               src_p <- P.option sRC_PT $ pSymbol "," >> pSrcP
-              pComplete [] [src0,SrcI32 imm,r_addr,ur_off,i_off,src_p]
+              pComplete [] [src0_addr,src1_addr,src_p]
 
             -- @P0   LDL.U8           R15, [R4+0x6] {!4,+5.W}; // examples/sm_80/libs/nvjpeg64_11/Program.36.sm_80.sass:39875
             --       LDL.LU           R38, [R1+0x14] {!4,+6.W,+1.R}; // examples/sm_80/libs/cufft64_10/Program.6.sm_80.sass:3108769
@@ -1039,8 +1094,8 @@ pInstNoPrefix pc = body
             -- [84:81]  = dst predicate
             OpQSPC -> do
               dsts <- pDstsP_R
-              (r_addr,ur_off,i_off) <- pSymbol "," >> pLDST_Addrs op
-              pComplete dsts [r_addr,ur_off,i_off]
+              src_addr <- pSymbol "," >> pLDST_Addrs op
+              pComplete dsts [src_addr]
 
             -- @P0  R2P  PR, R167.B1,  0x18 {!2};
             --      R2P  PR, R32,      0x7e {!13,Y}; // examples/sm_80/samples/MonteCarlo_kernel.sass:27677
@@ -1085,11 +1140,11 @@ pInstNoPrefix pc = body
             --  [80] = {.STRONG,.CONSTANT}
             --  [86:84] = {EF, [default], EL, LU, EU, NA, INVALID6, INVALID7}
             --  [89:87] = {ADD, MIN, MAX, INC, DEC, AND, OR, XOR}
-            OpRED -> do
-              (src0_addr,src0_ur_off,src0_i_off) <- pLDST_Addrs op
+            op | op`elem`[OpRED,OpREDG] -> do
+              src0_addr <- pLDST_Addrs op
               pSymbol ","
               src1 <- pSrcR
-              pComplete [] [src0_addr,src0_ur_off,src0_i_off,src1]
+              pComplete [] [src0_addr,src1]
 
             -- REDUX.SUM.S32     UR6, R4 {!2,+1.W};
             -- REDUX.MAX.S32     UR6, R3 {!1,+1.W};
@@ -1173,11 +1228,11 @@ pInstNoPrefix pc = body
             -- SUST.D.BA.2D.STRONG.SM.TRAP [R18], R3, 0x0, 0x58 {!1};
             -- SUST.D.BA.2D.STRONG.SM.TRAP [R18], R3, 0x0, 0x18, 0x1 {!1};
             OpSUST -> do
-              (src0_r_addr,src0_ur_off,src0_i_off) <- pLDST_Addrs op <* pSymbol ","
+              src0_addr <- pLDST_Addrs op <* pSymbol ","
               src1 <- pSrcR <* pSymbol ","
               src2 <- pSrcImmNonBranch32 op
               src3s <- P.option [] $ box <$> (pSymbol "," >> pSrcImmNonBranch32 op)
-              pComplete [] (src0_r_addr:src0_ur_off:src0_i_off:src3s)
+              pComplete [] (src0_addr:src1:src2:src3s)
 
             -- TEX.SCR.LL.NODEP R14, R16, R14, R20, 0x0, 0x5a, 2D      {!1,Y}
             -- TEX.SCR.LL       RZ,  R7,  R6,  R18, 0x0, 0x58, 2D, 0x1 {!3,Y,+6.W};
@@ -1396,6 +1451,9 @@ pInstNoPrefix pc = body
               src2 <- pSymbol "," >> pSrcUR
               pComplete [dst] [src0,src1,src2]
 
+            -- VIMNMX.U32  R12,  R4,     UR14,   PT               {!3,Y};
+            OpVIMNMX -> pSelectOp
+
             --                DST   DST?
             --    VOTE.ANY    R5,   PT,  P1 {!4,Y};
             --    VOTE.ALL    R6,   PT,  PT {!1,^1};
@@ -1405,6 +1463,7 @@ pInstNoPrefix pc = body
               src0 <- pSymbol "," >> pSrcP -- [90:87]
               pComplete [dst,dst_p] [src0]
 
+            --                DST   ??    ..
             --    VOTEU.ANY   UR36, UPT,  PT {!1};   // examples/sm_80/samples/cdpAdvancedQuicksort.sass:3566
             --    VOTEU.ALL   UR4,  UPT,  PT {!1};    // examples/sm_80/samples/globalToShmemAsyncCopy.sass:4529
             --    VOTEU.ANY   UR4,  UPT, !P1 {!12,Y}; // examples/sm_80/samples/reduction_kernel.sass:118610
@@ -1421,12 +1480,18 @@ pInstNoPrefix pc = body
             -- (synthetic)
             --       WARPSYNC           !P4, 0xffffffff
             --
+            -- SM90
+            --       WARPSYNC.COLLECTIVE  R13, `(.L_x_158) {!1};
+            --       WARPSYNC.ALL {!1};
+            --
+            --
             -- [86] .EXCLUSIVE
             -- [90:87] predicate source (default to PT)
             OpWARPSYNC -> do
               src0 <- P.option sRC_PT $ pSrcP <* pSymbol ","
-              src1 <- pSrcX
-              pComplete [] [src0,src1]
+              src1s <- P.option [] $ box <$> pSrcX
+              src2s <- P.option [] $ box <$> pSrcX
+              pComplete [] (src0:(src1s++src2s))
 
             --          YIELD       {!1};
             --          YIELD   !P5 {!1};

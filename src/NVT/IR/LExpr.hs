@@ -57,8 +57,9 @@ data LExpr =
   ---------------------------------------------------------------------
   -- primary expressions
   --
-  -- an immediate
+  -- an immediate value
   | LExprImm !Loc !Int64
+  --
   -- a symbol
   | LExprLabel !Loc !String -- e.g. ".L_15"
   --
@@ -73,6 +74,9 @@ data LExpr =
   -- R_CUDA_FUNC_DESC32_HI_32/R_CUDA_FUNC_DESC32_LO_32
   -- usually (always?) nested in a 32@lo(...)
   | LExprFunFDesc !Loc !LExpr -- fun@fdesc(<LExpr>)
+  --
+  -- expression grouping (our formatter doesn't really need it below)
+  | LExprGrp !Loc !LExpr
   deriving (Show,Eq,Ord)
 
 instance Syntax LExpr where
@@ -91,6 +95,7 @@ instance Syntax LExpr where
         LExprHi32 _ e -> "32@hi(" ++ format e ++ ")"
         LExprSRel _ i e -> format e ++ "@srel"
         LExprFunFDesc _ e -> "fun@fdesc(" ++ format e ++ ")"
+        LExprGrp _ e -> "(" ++ format e ++ ")"
     where fmtMulOp x
             | isLtMul x = ("(" ++ format x ++ ")")
             | otherwise = format x
@@ -105,9 +110,11 @@ instance Syntax LExpr where
               LExprMul _ _ _ -> True
               LExprDiv _ _ _ -> True
               LExprMod _ _ _ -> True
+              _ -> False
           isLtMul le =
             case le of
               LExprAdd _ _ _ -> True
               LExprSub _ _ _ -> True
+              _ -> False
 
 

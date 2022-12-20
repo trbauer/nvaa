@@ -1,7 +1,7 @@
 module NVT.Dataflow where
 
 import NVT.IR
-import NVT.Parsers.ListingParser
+import NVT.ListingTypes
 
 import Data.Char
 import Data.List
@@ -41,6 +41,11 @@ data DUAnalysis =
   , duDead :: ![(Int,Reg)]
   , duLiveOut :: ![(Int,Reg)]
   } deriving (Show,Eq)
+
+fmtRegSet :: RegSet -> String
+fmtRegSet rs
+  | DS.null rs = "{ }"
+  | otherwise = "{" ++ intercalate "," (map format (DS.toList rs)) ++ "}"
 
 
 bsDefUses :: [Block] -> [DU]
@@ -224,25 +229,90 @@ bsPreds bs = itr ps0 bs
 depsInpsOups :: Inst -> (RegSet,RegSet)
 depsInpsOups i = (ins,ous)
   where ins :: RegSet
-        ins = DS.fromList $ pr ++ srcs
+        ins = toRegSet (pr ++ srcs)
 
+        toRegSet :: [Reg] -> RegSet
+        toRegSet = DS.fromList . filter (not .  isZReg)
+
+        isZReg :: Reg -> Bool
+        isZReg xr =
+          case xr of
+            RegR RZ -> True
+            RegUR URZ -> True
+            RegP PT -> True
+            RegUP UPT -> True
+            _ -> False
+
+        pr :: [Reg]
         pr =
           case iPredication i of
             PredP _ PT -> []
             PredUP _ UPT -> []
             PredP _ p -> [RegP p]
-            PredUP _ p -> [RegUP p]
+            PredUP _ up -> [RegUP up]
 
+        srcs :: [Reg]
         srcs = concatMap acc (iSrcs i)
           where acc :: Src -> [Reg]
                 acc s =
                   case s of
-                    SrcReg _ r -> [r]
+                    SrcReg _ r@(RegR _)
+                      | is_st_or_at && iHasInstOpt InstOpt64 i -> regSeq 2 r
+                      | is_st_or_at && iHasInstOpt InstOpt128 i -> regSeq 4 r
+                    SrcReg _ r
+                      | oIsD (iOp i) -> regSeq 2 r
+                      | otherwise -> [r]
+                    SrcAddr (r,r_ms) ur _ -> regSeq nr (RegR r) ++ [RegUR ur]
+                      where nr = if Mod64`msElem`r_ms then 2 else 1
+                    SrcDescAddr ur (r,r_ms) _ ->
+                        regSeq nr (RegR r) ++ regSeq 2 (RegUR ur)
+                      where nr = if Mod64`msElem`r_ms then 2 else 1
                     SrcCon _ (SurfReg ur) _ -> [RegUR ur]
                     _ -> []
 
-        ous = DS.fromList $ concatMap acc (iDsts i)
+        is_st_or_at :: Bool
+        is_st_or_at = oIsAT (iOp i) || oIsST (iOp i)
+        is_ld_or_at :: Bool
+        is_ld_or_at = oIsAT (iOp i) || oIsLD (iOp i)
+
+        ous :: RegSet
+        ous = toRegSet $ concatMap acc (iDsts i)
           where acc :: Dst -> [Reg]
-                acc (Dst _ r) = [r]
+                acc (Dst _ r@(RegR _)) = regSeq nregs r -- data
+                acc (Dst _ r) = regSeq 1 r -- things like predicates
 
+                nregs :: Int
+                nregs
+                  | oIsD (iOp i) = 2
+                  | is_ld_or_at && iHasInstOpt InstOpt64 i = 2
+                  | is_ld_or_at && iHasInstOpt InstOpt128 i = 4
+                  | otherwise = 1
+                  where is_ld = oIsLD (iOp i) || oIsAT (iOp i)
 
+        regSeq :: Int -> Reg -> [Reg]
+        regSeq 0 _ = []
+        regSeq i r =
+            case r of
+              RegR RZ -> []
+              RegR r -> handle RegR r
+              RegP PT -> []
+              RegP pr -> handle RegP pr
+              RegUR URZ -> []
+              RegUR ur -> handle RegUR ur
+              RegUP UPT -> []
+              RegUP up -> handle RegUP up
+              --
+              RegB b -> handle RegB b
+              RegSB sb -> handle RegSB sb
+              RegSR sr -> handle RegSR sr
+          where handle :: (Eq r,Enum r) => (r -> Reg) -> r -> [Reg]
+                handle c xr =
+                  case eMaybeNext xr of
+                    Nothing -> []
+                    Just xr1 -> r : regSeq (i - 1) (c xr1)
+
+eMaybeNext :: (Eq a,Enum a) => a -> Maybe a
+eMaybeNext a
+  | a == lst = Nothing
+  | otherwise = Just (toEnum (fromEnum a + 1))
+  where lst = last [toEnum 0 ..]

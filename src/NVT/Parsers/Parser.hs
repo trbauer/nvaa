@@ -197,6 +197,8 @@ pKeyword s = do
   P.notFollowedBy (P.alphaNum <|> P.oneOf "_")
   pWhiteSpace
   return ()
+pTryKeyword :: Monad m => String -> P m u ()
+pTryKeyword = P.try . pKeyword
 
 pSymbol :: Monad m => String -> P m u String
 pSymbol = P.symbol tokenParser

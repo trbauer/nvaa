@@ -90,6 +90,7 @@ data Op =
   | OpR2P
   | OpR2UR
   | OpRED
+  | OpREDG -- sm_90
   | OpREDUX
   | OpRET
   | OpRTT
@@ -124,6 +125,7 @@ data Op =
   | OpUSHF
   | OpVABSDIFF
   | OpVABSDIFF4
+  | OpVIMNMX
   | OpVOTE
   | OpVOTEU
   | OpWARPSYNC
@@ -194,14 +196,18 @@ oIsH :: Op -> Bool
 oIsH op = op == OpHMMA || oIsH2 op
 oIsH2:: Op -> Bool
 oIsH2 = (`elem`[OpHADD2,OpHFMA2,OpHMUL2,OpHSET2,OpHSETP2])
+
 oIsI :: Op -> Bool
-oIsI = (`elem`[OpI2I,OpI2F,OpIABS,OpIADD3,OpIDP,OpIMAD,OpIMMA,OpIMNMX,OpISETP])
+oIsI = (`elem`[
+  OpI2I,OpI2F,OpIABS,OpIADD3,OpIDP,OpIMAD,
+  OpIMMA,OpIMNMX,OpISETP,
+  OpVIMNMX,OpVABSDIFF,OpVABSDIFF4])
 
 oIsFP :: Op -> Bool
 oIsFP op = any ($ op) [oIsF,oIsH,oIsD]
 
-oIsSetP :: Op -> Bool
-oIsSetP op = op `elem` [OpISETP,OpHSETP2,OpFSETP,OpDSETP]
+oIsSETP :: Op -> Bool
+oIsSETP op = op `elem` [OpISETP,OpHSETP2,OpFSETP,OpDSETP]
 
 
 oIsLD :: Op -> Bool

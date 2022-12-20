@@ -1,7 +1,8 @@
 module NVT.SASSGraph where
 
-import NVT.IR
 import NVT.Dataflow
+import NVT.IR
+import NVT.ListingTypes
 import NVT.Parsers.ListingParser
 
 import Control.Monad

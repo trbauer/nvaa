@@ -39,19 +39,39 @@ pSrcRCUF op = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcFlt32 op
 -- need an FP32 to FP16 conversion routine
 
 -- integral
-pSrcRCUI :: PI Src
-pSrcRCUI = P.try pSrcR <|> P.try pSrcCCX <|> P.try pSrcUR <|> pSrcInt32
+pSrcRCUI :: PC -> Op -> PI Src
+pSrcRCUI pc op =
+    P.try pSrcR <|> P.try pSrcCCX <|>
+      P.try pSrcUR <|> P.try (maybeRemap <$> pSrcLbl pc op) <|> pSrcInt32
+  where maybeRemap :: Src -> Src
+        maybeRemap src =
+          -- we try labels before immediates since
+          -- 32@lo(...) parses wrong otherwise
+          -- ^^ end of SrcImm operand
+          --
+          -- Favor simple immediates for complex expressions such as
+          --   -0x1 ==> imm instead of label
+          -- everything else goes to label
+          --
+          case src of
+            SrcImmExpr _ (LExprImm _ i)
+              | i <= 2^31 - 1 -> SrcI32 (fromIntegral i)
+            SrcImmExpr _ (LExprNeg _ (LExprImm _ i))
+              | i <= 2^31 -> SrcI32 (fromIntegral (negate i))
+            _ -> src
 
 pSrcLbl :: PC -> Op -> PI Src
 pSrcLbl pc = pWithLoc . pSrcLblAt pc
 pSrcLblAt :: PC -> Op -> Loc -> PI Src
-pSrcLblAt pc op loc = pLabel "label expression" $ SrcImmExpr loc <$> pLExpr pc
+pSrcLblAt pc op at =
+  pLabel "label expression" $ SrcImmExpr at <$> pLExpr pc
+
 
 
 -- imm32, but can be a symbol too
 pSrc_I32OrL32 :: PC -> Op -> PI Src
 pSrc_I32OrL32 pc op = pLabel "imm operand" $
-  P.try (pSrc_I32 op) <|> pSrcLbl pc op
+  P.try (pSrcLbl pc op) <|> pSrc_I32 op
 
 
 -- LDC wedges src0 into the src1 expression
@@ -191,6 +211,7 @@ pSrcI8 = pLabel "imm8" $ srcIntern <$> pIt
 
 pSrc_I32 :: Op -> PI Src
 pSrc_I32 op = pLabel "imm32" $ srcIntern <$> pSrcImmNonBranch32 op
+
 pSrcImmNonBranch32 :: Op -> PI Src
 pSrcImmNonBranch32 op = do
     imm <- pVal32
@@ -324,10 +345,10 @@ pLExpr pc = pBitExpr
         pOp sym cons = pWithLoc $ \loc -> pSymbol sym >> return (cons loc)
 
         pUnrExpr = pUnOp "-" LExprNeg <|> pUnOp "~" LExprCompl <|> pPrimExpr
-          where pUnOp sym cons = pWithLoc $ \loc -> do
+          where pUnOp sym cons = pWithLoc $ \at -> do
                   pSymbol sym
                   e <- pUnrExpr
-                  return $ cons loc e
+                  return $ cons at e
         pPrimExpr = pWithLoc pPrimExprBody
         pPrimExprBody loc =
             pTryFunc "fun@fdesc" LExprFunFDesc <|>
@@ -356,7 +377,7 @@ pLExpr pc = pBitExpr
                   pSymbol "("
                   e <- pBitExpr
                   pSymbol ")"
-                  return e
+                  return (LExprGrp loc e)
                 pLit = LExprImm loc <$> (pImmA <* pWhiteSpace)
                 --
                 pTryFunc :: String -> (Loc -> LExpr -> LExpr) -> PI LExpr

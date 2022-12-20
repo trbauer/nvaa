@@ -23,6 +23,7 @@ cPP_FILT :: FilePath
 -- cPP_FILT = "C:\\Program Files\\Haskell Platform\\8.6.5\\mingw\\bin\\c++filt.exe"
 -- cPP_FILT = C:\ProgramData\chocolatey\lib\ghc\tools\ghc-8.10.2\mingw\bin
 cPP_FILT = "c++filt.exe"
+-- "cu++filt"
 
 cUDA_SAMPLES_ROOT :: FilePath
 -- cUDA_SAMPLES_ROOT = "C:\\ProgramData\\NVIDIA Corporation\\CUDA Samples"

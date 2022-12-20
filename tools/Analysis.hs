@@ -47,7 +47,7 @@ probeReserved ix io_ss = io_ss >>= body
         extendFieldMbz s len = do
           -- putStrLn $ "extend field MBZ: " ++ show len
           strs <- disassembleField (ix,len) s
-          if all (==head strs) strs then extendFieldMbz s (len+1)
+          if all (== head strs) strs then extendFieldMbz s (len+1)
             else return (len-1)
 
 probe :: Int -> Sample -> IO ()
@@ -474,7 +474,7 @@ surveyFields fs io_ss = body
                                         | otherwise = " ~ {" ++ intercalate "," (map showFreq vs_dom) ++ "}"
           --
           putStrLn $
-            concatMap (fmtFieldHistogram) (reorderToCols fvs_rows)
+            concatMap fmtFieldHistogram (reorderToCols fvs_rows)
           return ()
 
 -- use natural order (we could maintain appearance order)

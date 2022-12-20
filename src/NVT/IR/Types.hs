@@ -58,8 +58,30 @@ data Inst =
   , iSrcs :: ![Src]
   , iDepInfo :: !DepInfo
   } deriving (Show,Eq)
--- iLogicallyEqual :: Inst -> Inst -> Bool
--- iLogicallyEqual i0 i1 = i0{iLoc=lNONE} == i1{iLoc=lNONE}
+
+iLogicallyEqual :: Inst -> Inst -> Bool
+iLogicallyEqual i0 i1 = null (iDiffs i0 i1)
+
+iDiffs :: Inst -> Inst -> [(String,(String,String))]
+iDiffs i0 i1 =
+    concat
+      [
+        check "iPredication" iPredication
+      , check "iOp" iOp
+      , check "iOptions" iOptions
+      , checkL "iDsts" iDsts
+      , checkL "iSrcs" iSrcs
+      , check "iDepInfo" iDepInfo
+      ]
+  where check :: (Eq a,Show a) => String -> (Inst -> a) -> [(String,(String,String))]
+        check nm f
+          | f i0 == f i1 = []
+          | otherwise = [(nm,(show (f i0),show (f i1)))]
+        checkL :: (Eq a,Show a) => String -> (Inst -> [a]) -> [(String,(String,String))]
+        checkL nm f
+          | f i0 == f i1 = []
+          | length (f i0) /= length (f i1) = [(nm ++ " (length)",(show (f i0),show (f i1)))]
+          | otherwise = [(nm,(show (f i0),show (f i1)))]
 
 
 iHasInstOpt :: InstOpt -> Inst -> Bool
@@ -182,6 +204,8 @@ instance Syntax Dst where
 data Src =
     SrcReg !ModSet !Reg
   | SrcCon !ModSet !Surf !Int
+  | SrcAddr  !(R,ModSet)  !UR !Int -- [R12.64+UR11-0x10]
+  | SrcDescAddr !UR !(R,ModSet)  !Int -- desc[UR14][...]
   | SrcImm !Imm
   | SrcImmExpr !Loc !LExpr
   | SrcTex !TexOp
@@ -190,6 +214,7 @@ pattern SrcRZ :: Src
 pattern SrcRZ  = SrcReg ES.EnumSetEMPTY (RegR RZ)
 pattern SrcR r  = SrcReg ES.EnumSetEMPTY (RegR r)
 pattern SrcURZ = SrcReg ES.EnumSetEMPTY (RegUR URZ)
+pattern SrcUR u = SrcReg ES.EnumSetEMPTY (RegUR u)
 pattern SrcPT  = SrcReg ES.EnumSetEMPTY (RegP PT)
 pattern SrcP p  = SrcReg ES.EnumSetEMPTY (RegP p)
 pattern SrcI32 i = SrcImm (Imm32 i)
@@ -509,6 +534,7 @@ data SB =
   | SB5
   deriving (Show,Eq,Enum,Read,Ord)
 
+
 -- These vary by product.  Some of the commented out registers are from old hardware
 data SR =
     SR_LANEID
@@ -628,6 +654,8 @@ data SR =
   | SR250 | SR251 | SR252 | SR253 | SR254
   --
   | SRZ
+  --
+  | SR_CgaCtaId
   deriving (Eq,Show,Ord,Enum)
 
 data UR =

@@ -85,5 +85,7 @@ testPIF fmt pa inp =
     Left d -> putStrLn $ dFormatWithLines (lines inp) d
 
     Right (a,pis,_) -> do
-      mapM_ print (pisLabelReferences pis)
+      unless (null (pisLabelReferences pis)) $ do
+        putStrLn $ "=== label refs"
+        mapM_ print (pisLabelReferences pis)
       putStrLn (fmt a)

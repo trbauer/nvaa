@@ -86,36 +86,8 @@ fmtInstWithImmFormatter fmt_imm i =
           | otherwise = ""
 
         opnds_str :: String
-        opnds_str
-          | oIsLD (iOp i) = intercalate ":" dsts ++ ", " ++ fmtAddrs (iSrcs i)
-          | oIsST (iOp i) = st_src_addr ++ ", " ++ st_src_data
-          | otherwise = intercalate ", " (dsts ++ srcs)
-          where (st_src_addr,st_src_data) =
-                  case splitAt 3 (iSrcs i) of
-                    (src_addrs,[src_dat]) ->
-                      (fmtAddrs src_addrs,formatSrcWithOpts fmt_imm src_dat)
-                    _ -> ("?","?")
-
-                -- we attempt to copy nvdisasm here (at least for LDG/LDS);
-                -- specifically, we omit default values except when all are default;
-                -- then we emit RZ only
-                fmtAddrs :: [Src] -> String
-                fmtAddrs srcs = "[" ++ intercalate "+" (concatMap fmtSrc srcs) ++ "]"
-                  where opIsDefault :: Src -> Bool
-                        opIsDefault SrcRZ = True
-                        opIsDefault SrcURZ = True
-                        opIsDefault (SrcI32 0) = True
-                        opIsDefault _ = False
-
-                        all_default = all opIsDefault srcs
-
-                        fmtSrc src =
-                          case src of
-                            SrcRZ
-                              | not (opIsDefault src) || all_default -> [formatSrcWithOpts fmt_imm src]
-                            _ -> [formatSrcWithOpts fmt_imm src]
-
-                dsts = map format visible_dsts
+        opnds_str = intercalate ", " (dsts ++ srcs)
+          where dsts = map format visible_dsts
 
                 visible_dsts
                   | iOp i == OpLOP3 =
@@ -160,9 +132,43 @@ instance Syntax Src where
 
 formatSrcWithOpts :: ImmFormatter -> Src -> String
 formatSrcWithOpts fmt_imm src =
-  case src of
-    SrcReg ms r -> msDecorate ms (format r)
-    SrcCon ms six soff -> msDecorate ms (format six ++ printf "[0x%X]" soff)
-    SrcImm i -> fmt_imm i
-    SrcImmExpr _ le -> format le
-    SrcTex to -> format to
+    case src of
+      SrcReg ms r -> msDecorate ms (format r)
+      SrcCon ms six soff -> msDecorate ms (format six ++ printf "[0x%X]" soff)
+      SrcAddr (r,r_ms) ur imm ->
+        case (r,ur,imm) of
+          -- 00{0,1}
+          --
+          -- 010
+          -- 011
+          (RZ,URZ,imm) | msNull r_ms -> fmtImmAtom imm --  [0x0] or [0x10]
+          --
+          (r,ur,imm)
+            | null r_ur ->
+              "[" ++ intercalate "+" r_ur ++
+                (if imm == 0 then "" else fmtImmTerm imm) ++ "]"
+            | otherwise ->
+              "[" ++ intercalate "+" r_ur ++ fmtImmTerm imm ++ "]"
+            where r_ur :: [String]
+                  r_ur = concat $
+                    [
+                      if r == RZ && msNull r_ms
+                        then [] else [msDecorate r_ms (format r)]
+                    , if ur == URZ then [] else [format ur]
+                    ]
+      SrcDescAddr ur (r,r_ms) imm -> "desc[" ++ format ur ++ "][" ++ r_i ++ "]"
+        where r_i =
+                case (r,imm) of
+                  (RZ,imm) | msNull r_ms -> fmtImmAtom imm
+                  (r,0) -> msDecorate r_ms (format r)
+                  (r,imm) -> msDecorate r_ms (format r) ++ fmtImmTerm imm
+      SrcImm i -> fmt_imm i
+      SrcImmExpr _ le -> format le
+      SrcTex to -> format to
+  where fmtImmTerm imm
+          | imm < 0 = printf "-0x%08X" (negate imm)
+          | otherwise = printf "+0x%08X" imm
+        fmtImmAtom imm
+          | imm < 0 = printf "-0x%08X" (negate imm)
+          | otherwise = printf "0x%08X" imm
+
