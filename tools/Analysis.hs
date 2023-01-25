@@ -396,6 +396,80 @@ twiddleFieldsBaseP binary fs s0s = body
 
         -- twiddles :: [([(Field,Word64,Sample)],String)]
 
+-- simple field search takes a single sample
+-- then it runs through flipping bits
+--   for bit IX with LEN 1 if the field doesn't change, IX++
+--     if the decode goes from X -> Y, then we expand LEN = 2
+--     if with LEN = K we see XY..., XY... then we know we have a field (LEN-1 at IX)
+--             IX += LEN - 1
+--     else we have XY...A, XY...B with A /= B ... so we can continue expanding the field
+--     ...
+-- PROBLEM: if we have two fields F1 and F2 adajacent we don't have a way to
+-- distinguishing them without syntax analysis of sorts.
+{-
+testing IX = 85 with LEN = 2
+@!P0 BRA 0x2d0
+@!P0 BRA.INC 0x2e0
+@!P0 BRA.DEC 0x2f0
+@!P0 BRA.INVALID3 0x300
+expanding field
+testing IX = 85 with LEN = 3
+@!P0 BRA P6, 0x2d0
+@!P0 BRA.INC P6, 0x2e0
+@!P0 BRA.DEC P6, 0x2f0
+@!P0 BRA.INVALID3 P6, 0x300
+@!P0 BRA 0x310
+@!P0 BRA.INC 0x320
+@!P0 BRA.DEC 0x330
+@!P0 BRA.INVALID3 0x340
+-}
+--   ==> Could I do something clever with parsing RawInst???
+fieldSearch :: Int -> Int -> IO [Sample] -> IO ()
+fieldSearch from_ix to_ix io_ss
+  | from_ix > to_ix || to_ix >= 128 = error "invalid indices"
+  | otherwise = do
+    ss <- io_ss
+    mapM_ (fieldSearchIn from_ix to_ix) ss
+fieldSearchIn :: Int -> Int -> Sample -> IO ()
+fieldSearchIn from_ix to_ix s = do
+    putStrLn "******************** SEARCHING SAMPLE ********************"
+    searchAtIx from_ix
+  where searchAtIx :: Int -> IO ()
+        searchAtIx ix
+          | ix >= to_ix || ix == 128 = putStrLn "hit end" >> print (ix,to_ix)
+          | otherwise = do
+            putStrLn $ "  testing IX = " ++ show ix
+            searchLen 1
+          where searchLen :: Int -> IO ()
+                searchLen len
+                  | ix + len > to_ix || ix + len >= 128 = do
+                    putStrLn $ "FOUND FIELD REGION " ++ show (ix, len - 1)
+                  | otherwise = do
+                    putStrLn $ "     with LEN = " ++ show len
+                    let all_vals :: [Word64]
+                        all_vals = [0 .. (2^len - 1)]
+                    -- encoding s with each possible value
+                    let ws_vars = map (\v -> putField128 ix len v (sBits s)) all_vals
+                    strs <- disBitsRawBatch dft_analysis_opts ws_vars
+                    mapM_ putStrLn strs
+                    let all_eq = all (== head strs) strs
+                        (fst_hlf,snd_hlf) = splitAt (length strs`div`2) strs
+                    -- The field induces no difference
+                    -- X, X, ...
+                    if all_eq then putStrLn "  no change, advancing IX by LEN" >> searchAtIx (ix + len)
+                      else if fst_hlf == snd_hlf then do
+                         -- XY..,XY... with two both substrings equal ==> we have a field
+                         putStrLn $ "FOUND FIELD REGION " ++ show (ix, len - 1)
+                         searchAtIx (ix + len - 1)
+                      else if len >= 4 then putStrLn "hit max field length" >> searchAtIx (ix + len)
+                      else do
+                        putStrLn "expanding field"
+                        searchLen (len + 1)
+
+
+
+
+
 -- flatten and walk it flat
 --        fields_with_vals :: [(Field,[(Word64,Sample)])]
 --        fields_with_vals =

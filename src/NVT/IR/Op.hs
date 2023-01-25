@@ -22,6 +22,7 @@ data Op =
   | OpBSYNC      -- BSYNC            B1 {!5};
   | OpCALL       -- CALL.ABS.NOINC   `(cudaLaunchDeviceV2)
   | OpCCTL       -- CCTL.IVALL        {!5,Y};
+  | OpCGAERRBAR  -- sm_90
   | OpCS2R
   | OpDADD
   | OpDEPBAR     -- DEPBAR.LE        SB0, 0x0 {!4,Y};
@@ -29,6 +30,7 @@ data Op =
   | OpDMMA
   | OpDMUL
   | OpDSETP
+  | OpENDCOLLECTIVE -- sm_90
   | OpERRBAR
   | OpEXIT
   | OpF2F
@@ -36,6 +38,7 @@ data Op =
   | OpF2I
   | OpFADD
   | OpFCHK
+  | OpFENCE -- sm_90
   | OpFFMA
   | OpFLO
   | OpFMNMX
@@ -106,7 +109,9 @@ data Op =
   | OpSTG
   | OpSTL
   | OpSTS
+  | OpSTSM -- sm_90
   | OpSUST
+  | OpSYNCS -- sm_90
   | OpTEX
   | OpTLD
   | OpUFLO
@@ -211,9 +216,9 @@ oIsSETP op = op `elem` [OpISETP,OpHSETP2,OpFSETP,OpDSETP]
 
 
 oIsLD :: Op -> Bool
-oIsLD = (`elem`[OpLD,OpLDC,OpLDG,OpLDL,OpLDS,OpLDSM])
+oIsLD = (`elem`[OpLD,OpLDC,OpLDG,OpLDL,OpLDS,OpLDSM,OpULDC])
 oIsST :: Op -> Bool
-oIsST = (`elem`[OpST,OpSTG,OpSTL,OpSTS])
+oIsST = (`elem`[OpST,      OpSTG,OpSTL,OpSTS,OpSTSM])
 oIsAT :: Op -> Bool
 oIsAT = (`elem`[OpATOM,OpATOMG,OpATOMS])
 

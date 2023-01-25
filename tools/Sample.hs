@@ -27,11 +27,11 @@ fFormat f
 
 
 dft_analysis_opts :: Opts
-dft_analysis_opts = dft_opts_75
+-- dft_analysis_opts = dft_opts_75
 -- dft_analysis_opts = dft_opts_80
 -- dft_analysis_opts = dft_opts_86
 -- dft_analysis_opts = dft_opts_89
--- dft_analysis_opts = dft_opts_90
+dft_analysis_opts = dft_opts_90
 
 -- 000E280000005800`0004200002097984:        LDS.U R9, [R2.X4+0x420] {!4,+1.W} ;    // examples/sm_75/samples\bitonic.sass:3554
 -- 000E220000009A00`0008000000027984:        LDS.U.64 R2, [R0.X8+0x800] {!1,+1.W} ; // examples/sm_75/samples\bitonic.sass:3652

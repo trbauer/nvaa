@@ -9,6 +9,7 @@ import NVT.Lop3
 import Data.Bits
 import Data.Int
 import Data.List
+import Data.Word
 import Text.Printf
 
 
@@ -23,13 +24,46 @@ defaultImmFormatter op imm =
   case imm of
     Imm8 u8 -> printf "0x%02X" u8
     Imm32 u32
+      -- e.g. DADD will render 0x3FF00000[`00000000 implicit] as "1"
+      | oIsD op -> fp64
+      -- e.g. HFMA2...
+      | oIsH2 op -> "(" ++ fmtH u16_hi ++ "," ++ fmtH u16_lo ++ ")"
       -- e.g. FADD
-      | oIsFP op -> printf "%f" (bitsToFloat u32)
+      | oIsFP op -> fp32
       -- e.g. IMAD
       | oIsI op && s32 < 0 -> printf "-0x%08X" (negate s32)
       -- everything else
       | otherwise -> printf "0x%08X" u32
       where s32 = fromIntegral u32 :: Int32
+            u64 = ((fromIntegral u32 :: Word64) `shiftL` 32)
+
+            fp64
+              | u64 == 0x7FF0000000000000 = "+INF"
+              | u64 == 0xFFF0000000000000 = "-INF"
+              | otherwise = minLenStr f64_10 f64_e
+              where f64_10 = printf "%f" (doubleFromBits u64)
+                    f64_e = printf "%e" (doubleFromBits u64)
+
+            fp32
+              | u32 == 0x7F800000 = "+INF"
+              | u32 == 0xFF800000 = "-INF"
+              | otherwise = minLenStr f32_10 f32_e
+              where f32_10 = printf "%f" (floatFromBits u32)
+                    f32_e = printf "%e" (floatFromBits u32)
+
+            minLenStr :: String -> String -> String
+            minLenStr a b = if length a <= length b then a else b
+
+            (u16_hi,u16_lo) = (toU16 (u32`shiftR`16),toU16 (u32 .&. 0xFFFF))
+            toU16 = fromIntegral :: Word32 -> Word16
+
+            fmtH :: Word16 -> String
+            fmtH u16
+              | u16 == 0x7C00 = "+INF"
+              | u16 == 0xFC00 = "-INF"
+              | otherwise = minLenStr f32_10 f32_e
+              where f32_10 = printf "%f" (halfToFloat (Half u16))
+                    f32_e = printf "%e" (halfToFloat (Half u16))
     Imm49 i64
       | i64 < 0 -> "-" ++ printf "0x%013X" (-i64)
       | otherwise -> printf "0x%013X" i64
@@ -96,12 +130,21 @@ fmtInstWithImmFormatter fmt_imm i =
                       _ -> iDsts i
                   | otherwise = iDsts i
 
-                srcs = map (uncurry fmtSrc) (zip [1..] visible_srcs)
+                srcs :: [String]
+                srcs = fixP2R $ map (uncurry fmtSrc) (zip [0..] visible_srcs)
                   where fmtSrc :: Int -> Src -> String
                         fmtSrc src_ix src =
                           case (src_ix, iOp i,src) of
                             _ -> formatSrcWithOpts fmt_imm src
 
+                        fixP2R strs
+                          | iOp i == OpP2R =
+                            case strs of
+                              [a,b] -> ["PR",a,b]
+                              _ -> strs
+                          | otherwise = strs
+
+                visible_srcs :: [Src]
                 visible_srcs
                   | iOp i == OpIADD3 =
                     case iSrcs i of
@@ -134,7 +177,12 @@ formatSrcWithOpts :: ImmFormatter -> Src -> String
 formatSrcWithOpts fmt_imm src =
     case src of
       SrcReg ms r -> msDecorate ms (format r)
-      SrcCon ms six soff -> msDecorate ms (format six ++ printf "[0x%X]" soff)
+      SrcCon ms six r soff ->
+          msDecorate ms (format six ++ printf "[%s0x%X]" reg soff)
+        where reg
+                | r == RegR RZ = ""
+                | r == RegUR URZ = ""
+                | otherwise = format r ++ "+"
       SrcAddr (r,r_ms) ur imm ->
         case (r,ur,imm) of
           -- 00{0,1}
@@ -148,7 +196,7 @@ formatSrcWithOpts fmt_imm src =
               "[" ++ intercalate "+" r_ur ++
                 (if imm == 0 then "" else fmtImmTerm imm) ++ "]"
             | otherwise ->
-              "[" ++ intercalate "+" r_ur ++ fmtImmTerm imm ++ "]"
+              "[" ++ intercalate "+" r_ur ++ imm_opt ++ "]"
             where r_ur :: [String]
                   r_ur = concat $
                     [
@@ -156,6 +204,11 @@ formatSrcWithOpts fmt_imm src =
                         then [] else [msDecorate r_ms (format r)]
                     , if ur == URZ then [] else [format ur]
                     ]
+                  imm_opt :: String
+                  imm_opt
+                    | imm == 0 = ""
+                    | otherwise = fmtImmTerm imm
+
       SrcDescAddr ur (r,r_ms) imm -> "desc[" ++ format ur ++ "][" ++ r_i ++ "]"
         where r_i =
                 case (r,imm) of
@@ -163,6 +216,9 @@ formatSrcWithOpts fmt_imm src =
                   (r,0) -> msDecorate r_ms (format r)
                   (r,imm) -> msDecorate r_ms (format r) ++ fmtImmTerm imm
       SrcImm i -> fmt_imm i
+      SrcImmH2 imm16_hi imm16_lo -> fmt_imm (Imm32 imm32)
+        where imm32 = (fi imm16_hi`shiftL`16) .|. (fi imm16_lo)
+              fi = fromIntegral :: Word16 -> Word32
       SrcImmExpr _ le -> format le
       SrcTex to -> format to
   where fmtImmTerm imm

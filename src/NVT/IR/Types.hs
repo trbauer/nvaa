@@ -62,6 +62,7 @@ data Inst =
 iLogicallyEqual :: Inst -> Inst -> Bool
 iLogicallyEqual i0 i1 = null (iDiffs i0 i1)
 
+-- returns [(field,(old,new))]
 iDiffs :: Inst -> Inst -> [(String,(String,String))]
 iDiffs i0 i1 =
     concat
@@ -70,18 +71,48 @@ iDiffs i0 i1 =
       , check "iOp" iOp
       , check "iOptions" iOptions
       , checkL "iDsts" iDsts
-      , checkL "iSrcs" iSrcs
+      , checkLG eqSrc "iSrcs" iSrcs
       , check "iDepInfo" iDepInfo
       ]
   where check :: (Eq a,Show a) => String -> (Inst -> a) -> [(String,(String,String))]
         check nm f
           | f i0 == f i1 = []
           | otherwise = [(nm,(show (f i0),show (f i1)))]
+
         checkL :: (Eq a,Show a) => String -> (Inst -> [a]) -> [(String,(String,String))]
-        checkL nm f
-          | f i0 == f i1 = []
-          | length (f i0) /= length (f i1) = [(nm ++ " (length)",(show (f i0),show (f i1)))]
-          | otherwise = [(nm,(show (f i0),show (f i1)))]
+        checkL = checkLG (==)
+
+        checkLG :: (Show a) => (a -> a -> Bool) -> String -> (Inst -> [a]) -> [(String,(String,String))]
+        checkLG eq nm f = loop (0 :: Int) (f i0) (f i1)
+          where loop _  [] [] = []
+                loop ix [] (b:bs) = (nm ++ "[" ++ show ix ++ "]",("<ABSENT>",show b)):loop (ix + 1) [] bs
+                loop ix (a:as) [] = (nm ++ "[" ++ show ix ++ "]",(show a,"<ABSENT>")):loop (ix + 1) as []
+                loop ix (a:as) (b:bs)
+                  | a`eq`b = loop (ix + 1) as bs
+                  | otherwise = (nm ++ "[" ++ show ix ++ "]",(show a,show b)):loop (ix + 1) as bs
+
+        eqSrc :: Src -> Src -> Bool
+        eqSrc sa sb =
+            case (sa,sb) of
+              (SrcImmExpr _ le1,SrcImmExpr _ le2) -> rml le1 == rml le2
+              _ -> sa == sb
+          where rml :: LExpr -> LExpr
+                rml le =
+                  case le of
+                    LExprAdd _ e1 e2 -> LExprAdd lNONE (rml e1) (rml e2)
+                    LExprSub _ e1 e2 -> LExprSub lNONE (rml e1) (rml e2)
+                    LExprMul _ e1 e2 -> LExprMul lNONE (rml e1) (rml e2)
+                    LExprDiv _ e1 e2 -> LExprDiv lNONE (rml e1) (rml e2)
+                    LExprMod _ e1 e2 -> LExprMod lNONE (rml e1) (rml e2)
+                    LExprNeg _ e -> LExprNeg lNONE (rml e)
+                    LExprCompl _ e -> LExprCompl lNONE (rml e)
+                    LExprImm _ i -> LExprImm lNONE i
+                    LExprLabel _ s -> LExprLabel lNONE s
+                    LExprLo32 _ e -> LExprLo32 lNONE (rml e)
+                    LExprHi32 _ e -> LExprHi32 lNONE (rml e)
+                    LExprSRel _ x e -> LExprSRel lNONE x (rml e)
+                    LExprFunFDesc _ e -> LExprFunFDesc lNONE (rml e)
+                    LExprGrp _ e -> LExprGrp lNONE (rml e)
 
 
 iHasInstOpt :: InstOpt -> Inst -> Bool
@@ -98,8 +129,8 @@ fmtInstIr i =
     fS "iPredication" iPredication ++
     fS "iOp" iOp ++
     fS "iOptions" iOptions ++
-    fS "iDsts" iDsts ++
-    ", iSrcs = " ++ src_val ++
+    ", iDsts = " ++ dst_vals ++
+    ", iSrcs = " ++ src_vals ++
     -- fS "iSrcs" iSrcs ++
     fS "iDepInfo" iDepInfo ++
     "}"
@@ -112,8 +143,12 @@ fmtInstIr i =
         r "" = ""
         r (',':sfx) = ' ':sfx
 
-        src_val
-          | length short_str < 64 = short_str ++ "\n"
+        dst_vals :: String
+        dst_vals = "[" ++ intercalate "," (map showD (iDsts i)) ++ "]"
+
+        src_vals :: String
+        src_vals
+          | length short_str < 64 = "[" ++ short_str ++ "]\n"
           | otherwise =
               case iSrcs i of
                 src0:srcs_sfx ->
@@ -123,17 +158,33 @@ fmtInstIr i =
                   "  ]\n"
           where short_str = intercalate "," (map showS (iSrcs i))
 
+        showD :: Dst -> String
+        showD d =
+          case d of
+            DstRZ -> "DstRZ"
+            DstR r -> "DstR " ++ show r
+            DstPT -> "DstPT"
+            DstP p -> "DstP " ++ show p
+            DstURZ -> "DstURZ"
+            DstUR ur -> "DstUR " ++ show ur
+            DstUPT -> "DstUPT"
+            DstUP up -> "DstUP " ++ show up
+            _ -> show d
+
         showS :: Src -> String
         showS s =
           case s of
             SrcRZ -> "SrcRZ"
-            SrcURZ -> "SrcURZ"
-            SrcPT -> "SrcPT"
-            -- SrcPNT -> "SrcPNT" (can't figure otu the pattern)
             SrcR r -> "SrcR " ++ show r
+            SrcURZ -> "SrcURZ"
+            SrcUR ur -> "SrcUR " ++ show ur
+
+            SrcPT -> "SrcPT"
             SrcP p -> "SrcP " ++ show p
+            -- SrcPNT -> "SrcPNT" (can't figure otu the pattern)
             SrcI32 i -> "SrcI32 " ++ show i
             _ -> show s
+
 
 data Pred =
     --     neg.      rgr.
@@ -180,6 +231,15 @@ instance Syntax Reg where
       RegSB r -> format r
       RegSR r -> format r
 
+pattern RegRZ :: Reg
+pattern RegRZ = RegR RZ
+pattern RegURZ :: Reg
+pattern RegURZ = RegUR URZ
+pattern RegPT :: Reg
+pattern RegPT = RegP PT
+pattern RegUPT :: Reg
+pattern RegUPT = RegUP UPT
+
 -- only HSETP2 supports a modifier (.H0_H0)
 data Dst = Dst !ModSet !Reg
   deriving (Show,Eq,Ord)
@@ -191,10 +251,16 @@ pattern DstRZ :: Dst
 pattern DstRZ = DstR RZ
 pattern DstP :: PR -> Dst
 pattern DstP p = Dst ES.EnumSetEMPTY (RegP p)
+pattern DstPT :: Dst
+pattern DstPT = DstP PT
 pattern DstB :: BR -> Dst
 pattern DstB b = Dst ES.EnumSetEMPTY (RegB b)
+pattern DstURZ :: Dst
+pattern DstURZ = DstUR URZ
 pattern DstUR :: UR -> Dst
 pattern DstUR ur = Dst ES.EnumSetEMPTY (RegUR ur)
+pattern DstUPT :: Dst
+pattern DstUPT = DstUP UPT
 pattern DstUP :: UP -> Dst
 pattern DstUP up = Dst ES.EnumSetEMPTY (RegUP up)
 
@@ -203,11 +269,12 @@ instance Syntax Dst where
 
 data Src =
     SrcReg !ModSet !Reg
-  | SrcCon !ModSet !Surf !Int
+  | SrcCon !ModSet !Surf !Reg !Int
   | SrcAddr  !(R,ModSet)  !UR !Int -- [R12.64+UR11-0x10]
   | SrcDescAddr !UR !(R,ModSet)  !Int -- desc[UR14][...]
   | SrcImm !Imm
   | SrcImmExpr !Loc !LExpr
+  | SrcImmH2 !Word16 !Word16 -- e.g. HFMA2 ... (1, 1)
   | SrcTex !TexOp
   deriving (Show,Eq,Ord)
 pattern SrcRZ :: Src
@@ -219,6 +286,9 @@ pattern SrcPT  = SrcReg ES.EnumSetEMPTY (RegP PT)
 pattern SrcP p  = SrcReg ES.EnumSetEMPTY (RegP p)
 pattern SrcI32 i = SrcImm (Imm32 i)
 pattern SrcI8 i = SrcImm (Imm8 i)
+--
+pattern SrcC0RZX i = SrcCon ES.EnumSetEMPTY (SurfImm 0) RegRZ i
+pattern SrcC0URZX i = SrcCon ES.EnumSetEMPTY (SurfImm 0) RegURZ i
 --
 pattern Src_B ms b = SrcReg ms (RegB b)
 pattern Src_P ms p = SrcReg ms (RegP p)
@@ -294,8 +364,6 @@ sRC_I32_1 :: Src
 sRC_I32_1 = SrcI32 1
 sRC_I32_0xF :: Src
 sRC_I32_0xF = SrcI32 0xF
-sRC_C00 :: Src
-sRC_C00 = SrcCon msEmpty (SurfImm 0) 0
 
 srcIntern :: Src -> Src
 srcIntern = internLookup sHARED_SRCS
@@ -340,7 +408,6 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   , SrcI32 0xFFFFFFFF
   , sRC_I32_0
   , sRC_I32_1
-
   , SrcI32 0x02
   , SrcI32 0x04
   , SrcI32 0x08
@@ -363,7 +430,8 @@ sHARED_SRCS = DM.fromList $ map (\x -> (x,x)) $
   , sRC_SR_TID_X
   , sRC_SR_CTAID_X
   --
-  , sRC_C00
+  , SrcC0RZX 0
+  , SrcC0URZX 0
   --
   , sRC_UPF
   , SrcReg msEmpty (RegUP UP0)
@@ -919,6 +987,7 @@ data InstOpt =
   -- BRA.{INC,DEC} (bit [86:85])
   | InstOptINC
   | InstOptDEC
+  | InstOptDIV -- sm_90 (BRA.DIV)
   --
   -- rounding modes in FMP, FSETP, etc...
   | InstOptFTZ -- FSETP, others
@@ -1140,6 +1209,19 @@ data InstOpt =
   --
   -- WARPSYNC
   | InstOptEXCLUSIVE
+  | InstOptCOLLECTIVE -- (SM90)
+  --
+  -- FENCE.* (SM90)
+  | InstOptVIEW
+  --
+  -- SYNC.* (SM90)
+  | InstOptA0T1
+  | InstOptART0
+  | InstOptASYNC
+  | InstOptCCTL
+  | InstOptPHASECHK
+  | InstOptTRANS64
+  | InstOptTRYWAIT
   deriving (Show,Eq,Ord,Enum)
   -- WARNING: this mustn't exceed 128 or we need to change our EnumSet to use a Word256
 

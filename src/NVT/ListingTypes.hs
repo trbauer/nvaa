@@ -9,7 +9,8 @@ data Listing =
 
 data TextSection =
   TextSection {
-    tsKernelName :: !String
+    tsLoc :: !Loc
+  , tsKernelName :: !String
   , tsRegisters :: !Int
   , tsBarriers :: !Int
   , tsAlignment :: !Int -- .align

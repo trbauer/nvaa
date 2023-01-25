@@ -122,6 +122,8 @@ runWithOpts duo = do
                 | otherwise = do
                   z <- processFile sass_fp
                   when (not z && duoFailFast duo) $ exitFailure
+          -- when (null lib_root_sass_files) $
+          --   putStrLn "warning: no matching files found"
           mapM_ processF lib_root_sass_files
           return ()
 
@@ -129,30 +131,44 @@ processFile :: FilePath -> IO Bool
 processFile sass_fp = do
   putStrLn $ "============================ " ++ sass_fp
   sass_inp <- readFile sass_fp
-  let sass_lns = lines sass_inp
-  case D.parseListing sass_fp sass_inp of
-    Left d -> do
-      hPutStrLn stderr (D.dFormatWithLines sass_lns d)
-      return False
-    Right l -> do
-      putStrLn "parsed"
-      let emitB b = do
-            print (b {D.bInsts = []})
-            let fmtI i =
-                  D.fmtInstIr i ++ "\n" ++
-                  "INP:  " ++ (sass_lns !! (D.lLine (D.iLoc i) - 1)) ++ "\n" ++
-                  "FMT:  " ++ D.format i ++ "\n"
-            mapM_ (putStr . fmtI) (D.bInsts b)
-      let emitTs ts = do
-            print $ ts {D.tsBlocks = []}
-            mapM_ emitB (D.tsBlocks ts)
-      mapM_ emitTs (D.lTextSections l)
-      return True
+  (z,kis) <- D.testListing sass_fp sass_inp
+  forM_ kis $ \(knm,blens) -> do
+    putStrLn $ knm ++ ": " ++ show blens
+  return z
 
+
+blaze :: IO ()
+blaze = do
+  -- processFile "toy-files90\\asyncAPI.sass"
+  -- processFile "toy-files90\\bitonic.sass"
+  -- processFile "toy-files90\\bodysystemcuda.sass"
+  -- processFile "toy-files90\\Mandelbrot_cuda.sass"
+  -- processFile "toy-files90\\matrixMul.sass"
+  processFile "toy-files90\\simpleAWBarrier.sass"
+  --
+  -- processFile "toy-files90\\globalToShmemAsyncCopy.sass"
+  -- processFile "toy-files90\\simpleSeparateCompilation.sass"
+  return ()
 
 fixme :: IO ()
 fixme = do
   -- FIXED => D.testInst "IADD3     R14,    R28,    -0x30,  RZ               {!1};"
+--  D.testInst $
+--    "  /*0000*/       ULDC.64       UR1,     cx[UR5][UR10+0x28]                         {!8};  /* 000FF00000000800`00000A00FF017B82 */"
+  D.testInst $
+    -- 000FE200000001FF`00000000FF197435
+    -- "HFMA2.MMA  R25,  -RZ,  RZ,  1,  1  {!1};"
+    -- " /*6800*/ @!P3  FMUL      R24,    R24,    4296                     {!4,Y,^3};  /* 004FC80000400000`458000001818B820 */"
+    -- "/*01D0*/       FENCE.VIEW.ASYNC.S  {!10,+1.W};  /* 000E340000000000`00000000000073C6 */"
+    -- "SYNCS.EXCH.64  UR7, [UR4], UR10 {!2,+1.W,+1.R}; // 000E620008500027`00000010FF1079A7 examples/sm_90/samples/0_Introduction/simpleAWBarrier/simpleAWBarrier.sass:2682"
+    -- "SYNCS.ARRIVE.TRANS64.ART0  R20, [UR39], R16 {!1,+2.W}; // 000E620008500027`00000010FF1079A7 examples/sm_90/samples/0_Introduction/simpleAWBarrier/simpleAWBarrier.sass:2787"
+    -- "BRA.DIV   UR4,  `(.L_x_15)  {!5};  /* 000FEA000B800000`0000001604B07947 */"
+    -- "BRX       R42 -0x7cb0  {!5};"
+    -- "BRX !P6, R12 -0xb50 {!5};"
+    -- "WARPSYNC.COLLECTIVE  R15, `(.L_x_48)  {!1};"
+    -- "BAR.SYNC  R13,    R13   {!6,+2.R};"
+    -- "P2R       R28,    PR,     RZ,     0x1              {!9,Y};"
+    "P2R.B1    R175,   PR,     R172,   0xf              {!2};"
   return ()
 
 

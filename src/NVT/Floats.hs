@@ -15,18 +15,12 @@ doubleToBits :: Double -> Word64
 doubleToBits = unsafeCoerce
 doubleFromBits :: Word64 -> Double
 doubleFromBits = unsafeCoerce
--- TODO: remove
-bitsToDouble :: Word64 -> Double
-bitsToDouble = doubleFromBits
 
-
+-- evil... (.&. needed since high 32b can sometimes confuse things)
 floatToBits :: Float -> Word32
-floatToBits = unsafeCoerce
+floatToBits = (.&. 0xFFFFFFFF) . unsafeCoerce
 floatFromBits :: Word32 -> Float
-floatFromBits = unsafeCoerce
--- TODO: remove it
-bitsToFloat :: Word32 -> Float
-bitsToFloat = floatFromBits
+floatFromBits = unsafeCoerce . (.&. 0xFFFFFFFF)
 
 -- doubleToFloat :: Double -> Float
 -- doubleToFloat = double2Float -- realToFrac
@@ -150,7 +144,7 @@ f64_F16_FIRST_DENORM_U = (f64_bias - f16_bias - f16_mnt_bits)`shiftL`f64_MNT_BIT
 floatToDouble :: Float -> Double
 floatToDouble f32
   | f32 == f32 = float2Double f32
-  | otherwise = bitsToDouble (w64_sign .|. w64_inf_exp .|. w64_qnan .|. w64_payload)
+  | otherwise = doubleFromBits (w64_sign .|. w64_inf_exp .|. w64_qnan .|. w64_payload)
   where w32 = floatToBits f32
         w64_sign = if testBit w32 31 then f64_SIGN_BIT else 0
         w64_qnan = if testBit w32 22 then f64_QNAN_BIT else 0
@@ -162,7 +156,7 @@ floatToDouble f32
 doubleToFloat :: Double -> Float
 doubleToFloat f64
   | f64 == f64 = double2Float f64
-  | otherwise = bitsToFloat (w32_sign .|. w32_exp_inf .|. w32_qnan .|. w32_nan_payload)
+  | otherwise = floatFromBits (w32_sign .|. w32_exp_inf .|. w32_qnan .|. w32_nan_payload)
   where w64 = doubleToBits f64
         w32_sign = if testBit w64 63 then f32_SIGN_BIT else 0
         w32_qnan = if testBit w64 51 then f32_QNAN_BIT else 0
@@ -176,7 +170,7 @@ getBits off len val = ((val `shiftR` off) .&. ((1`shiftL`len) - 1))
 negateDouble :: Double -> Double
 negateDouble d
   | d == d = negate d
-  | otherwise = bitsToDouble w64_negated
+  | otherwise = doubleFromBits w64_negated
   where w64_negated = doubleToBits d `xor` f64_SIGN_BIT
 
 -- http://www.open-std.org/jtc1/sc22/wg14/www/docs/n2016.pdf
@@ -577,7 +571,7 @@ halfToFloat :: Half -> Float
 halfToFloat = halfBitsToFloat . halfToBits
 
 halfBitsToFloat :: Word16 -> Float
-halfBitsToFloat = bitsToFloat . halfBitsToFloatBits
+halfBitsToFloat = floatFromBits . halfBitsToFloatBits
 
 halfBitsToFloatBits :: Word16 -> Word32
 halfBitsToFloatBits w16 = f_bits

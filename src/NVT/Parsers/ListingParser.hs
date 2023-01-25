@@ -11,6 +11,7 @@ import Control.Monad
 import Data.Char
 import Data.List
 import Debug.Trace
+import System.IO
 import Text.Parsec((<|>),(<?>))
 import qualified Text.Parsec           as P
 
@@ -47,30 +48,86 @@ testInst :: String -> IO ()
 testInst inp =
   case runPI (pWhiteSpace >> pInst 0) "<debug>" inp of
     Left err -> putStrLn $ dFormatWithLines (lines inp) err
-    Right (i,_,_) -> do
-      putStrLn $ fmtInstIr i
-      let oup = format i
-      putStrLn $ "  inp: " ++ inp
-      putStrLn $ "  oup: " ++ oup
-      case runPI (pWhiteSpace >> pInst 0) "<debug-reparsed>" oup of
-        Left err -> do
-          putStrLn $ "*** REPARSE FAILED"
-          putStrLn $ dFormatWithLines (lines oup) err
-        Right (i1,_,_) -> do
-          case iDiffs i i1 of
-            [] -> do
-              putStrLn "(reparse succeeded)"
-            (fnm,(v0,v1)):_ -> do
-              putStrLn $ "*** REPARSED IR MISMATCH"
-              putStrLn fnm
-              putStrLn ("  parsed:   " ++ v0)
-              putStrLn ("  reparsed: " ++ v1)
-          case depsInpsOups i of
-            (ins,ous) -> putStrLn $
-              "ins: " ++ fmtRegSet ins ++ "\n" ++
-              "ous: " ++ fmtRegSet ous ++ "\n" ++
-              ""
+    Right (i,_,_) -> testInstReparse True inp i >> return ()
 
+testInstReparse :: Bool -> String -> Inst -> IO Bool
+testInstReparse ff inp i = do
+  let oup = format i
+  when ff $ do
+    putStrLn $ "  inp:    " ++ inp ++ "\n"
+    putStrLn $ indent "  " $ fmtInstIr i
+    putStrLn $ "  fmt(i): " ++ oup
+  case runPI (pWhiteSpace >> pInst 0) "<debug-reparsed>" oup of
+    Left err -> do
+      putStrLn $ "*** REPARSE FAILED"
+      putStrLn $ dFormatWithLines (lines oup) err
+      return False
+    Right (i1,_,_) -> do
+      case iDiffs i i1 of
+        [] -> do
+--          unless ff $
+--            putStrLn $ "(reparse succeeded): " ++ inp
+          case depsInpsOups i of
+            (ins,ous) -> do
+              when ff $
+                putStrLn $
+                  "ins: " ++ fmtRegSet ins ++ "\n" ++
+                  "ous: " ++ fmtRegSet ous ++ "\n" ++
+                  ""
+          return True
+        (fnm,(v0,v1)):_ -> do
+          putStrLn $ "*** REPARSED IR MISMATCH"
+          putStrLn $ "  inp:    " ++ inp
+          putStrLn $ "  fmt(i): " ++ oup
+
+          putStrLn $ "FIELD: " ++ fnm
+          putStrLn ("  parsed:   " ++ v0)
+          putStrLn ("  reparsed: " ++ v1)
+          return False
+
+indent :: String -> String -> String
+indent ind = unlines . map (ind ++) . lines
+
+type KInfo = (String,[Int])
+
+testListing :: FilePath -> String -> IO (Bool,[KInfo])
+testListing sass_fp sass_inp =
+    case parseListing sass_fp sass_inp of
+      Left d -> do
+        hPutStrLn stderr (dFormatWithLines sass_lns d)
+        return (False,[])
+
+      Right l -> testTss [] (lTextSections l)
+
+  where sass_lns :: [String]
+        sass_lns = lines sass_inp
+
+        testTss :: [KInfo] -> [TextSection] -> IO (Bool,[KInfo])
+        testTss rkis [] = return (True,reverse rkis)
+        testTss rkis (ts:tss) = do
+          let testBs :: [Block] -> IO Bool
+              testBs [] = return True
+              testBs (b:bs) = do
+                -- let lbl = case bLabels b of {x:_ -> x; _->"???";}
+                -- putStrLn $ lbl ++ ": // " ++ show (length (bInsts b)) ++ ": " ++ show (bLoc b)
+                let testIs :: [Inst] -> IO Bool
+                    testIs [] = return True
+                    testIs (i:is) = do
+                      let ln = sass_lns !! ((lLine (iLoc i)) - 1)
+                      z <- testInstReparse False ln i
+                      if z then testIs is else do
+                        -- putStrLn ""
+                        -- print (ts {tsBlocks = []})
+                        -- print (b {bInsts = []})
+                        testInstReparse True ln i
+                        return False
+                z <- testIs (bInsts b)
+                if z then testBs bs else return False
+          z <- testBs (tsBlocks ts)
+          let blens = map (length . bInsts) (tsBlocks ts)
+          sum blens`seq`return ()
+          let rkis1 = (tsKernelName ts,blens):rkis
+          if z then testTss rkis1 tss else return (False,reverse rkis1)
 
 
 --- just parse a bare list of instructions
@@ -83,56 +140,103 @@ testInst inp =
 pListing :: PI [TextSection]
 pListing = do
   sm_ver <- pListingHeader
-  concat <$> P.many pSection
+  tss <- concat <$> P.many pSection
+  P.eof
+  return tss
 
 pSection :: PI [TextSection]
-pSection = pTS <|> pOS
+pSection = do
+    -- pTraceLAK 64 "pSection>"
+    pTS <|> pOS
   where pTS :: PI [TextSection]
         pTS = do
+          -- pTraceLAK 32 "pTS>"
           (knm,prot) <- P.try pTextSectionHeader
+          -- pTraceLAK 32 $ "pTS< " ++ knm
           txs <- pTextSectionBody knm prot
           return [txs]
         pOS = do
-          P.try pOtherSectionHeader
+          -- pTraceLAK 32 "pOS>"
+          sh <- P.try pOtherSectionHeader
+          -- pTraceLAK 32 $ "pOS< " ++ sh
           pOtherSectionBody
+          pCheckEofOrLookingAtNextSection
           return []
 
 -- e.g.
 -- .section  .nv.rel.action,"",@"SHT_CUDA_RELOCINFO"
-pOtherSectionHeader :: PI ()
+pOtherSectionHeader :: PI String
 pOtherSectionHeader = do
-  pKeyword ".section"
+  pTryKeyword ".section"
   lbl <- pLabelRef
   when (".text"`isPrefixOf`lbl) $ do
-    fail "text section"
+    fail "text section" -- should be unreachable since pTS comes first
     return ()
   pSymbol ","
   slit <- pStringLiteral
   pSymbol ","
-  P.try (pKeyword "@progbits") <|>
-    do {P.char '@'; pStringLiteral; return ()} -- e.g. @"SHT_CUDA_RELOCINFO"
+  let pProgBits = pTryKeyword "@progbits" >> return "@progbits"
+  let pNoBits = pTryKeyword "@nobits" >> return "@nobits"
+  let pAt = do {P.char '@'; s <- pStringLiteral; return ("@" ++ s)} -- e.g. @"SHT_CUDA_RELOCINFO"
+  sfx <- pProgBits <|> pNoBits <|> pAt
+  return (".section  " ++ lbl ++ ", " ++ show slit ++ ", " ++ sfx)
 pOtherSectionBody :: PI ()
 pOtherSectionBody = do
   a <- P.option 0 (P.try pAlign)
   sent_size <- P.option 0 (P.try (pKeyword ".sectionentsize" >> pInt))
-  P.many pOtherSectionLine
+  lbls <- P.many pOtherSectionLine
   return ()
-pOtherSectionLine :: PI ()
-pOtherSectionLine =
-    P.try (pLabelDef >> return ()) <|>
-    P.try pShortLine <|>
-    P.try pWordLine <|>
-    P.try pDwordLine <|>
-    P.try pZeroLine <|>
-    P.try pAlgn <|>
-    pOther
-  where pOther = pByteLine <|> pDwordLine
-        pByteLine = P.try (pSymbol ".byte") >> P.many (P.noneOf "\n\r") >> pWhiteSpace
-        pShortLine = P.try (pSymbol ".short") >> P.many (P.noneOf "\n\r") >> pWhiteSpace
-        pWordLine = P.try (pSymbol ".word") >> P.many (P.noneOf "\n\r") >> pWhiteSpace
-        pDwordLine = P.try (pSymbol ".dword") >> P.many (P.noneOf "\n\r") >> pWhiteSpace
-        pZeroLine = P.try (pSymbol ".zero") >> P.many (P.noneOf "\n\r") >> pWhiteSpace
-        pAlgn = pAlign >> return ()
+pOtherSectionLine :: PI String
+pOtherSectionLine = do
+    -- pTraceLA "pOtherSectionLine>"
+    l <- pLine
+    -- pTraceLA "pOtherSectionLine<"
+    return l
+  where pLine =
+          pByteLine <|> pShortLine <|> pWordLine <|> pDwordLine <|>
+          pZeroLine <|> pTypeLine <|> pSizeLine <|>
+          pAlgn <|> pLbl
+
+        pLbl = do
+          lbl <- P.try pLabelDef -- needs to reject .section prefix
+          return (lbl ++ ":")
+        pByteLine = pMiscLine ".byte"
+        pShortLine = pMiscLine ".short"
+        pWordLine = pMiscLine ".word"
+        pDwordLine = pMiscLine ".dword"
+
+        -- .zero   4
+        -- .type softeningSquared,@object
+        -- .size softeningSquared_fp64,(.L_1 - softeningSquared_fp64)
+        pZeroLine = pMiscLine ".zero"
+        pTypeLine = pMiscLine ".type"
+        pSizeLine = pMiscLine ".size"
+
+        pAlgn = do {a <- pAlign; return (".align " ++ show a)}
+
+-- 	 .section  .nv.constant3,"a",@progbits
+-- 	 .align  8
+-- 	 .type   softeningSquared,@object
+--   .size   softeningSquared,(.L_0 - softeningSquared)
+-- softeningSquared:
+--   .nv.constant3:
+--   .zero  4
+-- .L_0:
+--   .zero  4
+--   .type  softeningSquared_fp64,@object
+--   .size  softeningSquared_fp64,(.L_1 - softeningSquared_fp64)
+-- softeningSquared_fp64:
+--   .zero  8
+-- .L_1:
+
+        pMiscLine :: String -> PI String
+        pMiscLine pfx = do
+          pTryKeyword pfx
+          sfx <- pLineSfx
+          return (pfx ++ " " ++ sfx)
+
+        pLineSfx :: PI String
+        pLineSfx = P.many (P.noneOf "\n\r") <* pWhiteSpace
 
 
 --	.headerflags	@"EF_CUDA_TEXMODE_UNIFIED EF_CUDA_64BIT_ADDRESS EF_CUDA_SM80 EF_CUDA_VIRTUAL_SM(EF_CUDA_SM80)"
@@ -170,12 +274,12 @@ pAnyLine = pLabel "any line" $ do
         pEndLineOrEOF = pEndLine <|> P.eof
 
 pAlign :: PI Int
-pAlign = pKeyword ".align" >> pInt
+pAlign = pTryKeyword ".align" >> pInt
 
 pTextSectionHeader :: PI (String,String)
 pTextSectionHeader = do
   -- .section .text._Z14d_renderCatRomP6uchar4jjfffffy,"ax",@progbits
-  pKeyword ".section"
+  pTryKeyword ".section"
   knm <- pSymbol ".text." >> pIdentifier
   pSymbol ","
   prot <- pStringLiteral -- e.g. "ax" ...
@@ -184,7 +288,7 @@ pTextSectionHeader = do
   return (knm,prot)
 
 pTextSectionBody :: String -> String -> PI TextSection
-pTextSectionBody knm prot = do
+pTextSectionBody knm prot = pWithLoc $ \ts_loc -> do
   --
   -- .sectionflags @"SHF_BARRIERS=1"
   nbars <-
@@ -246,16 +350,22 @@ pTextSectionBody knm prot = do
   bs <- setIds <$> pBlocks 0
   --
   -- need to be at EOF or .section
-  P.eof <|> P.lookAhead (pTryKeyword ".section")
+  pCheckEofOrLookingAtNextSection
   --
   return $
     TextSection {
-      tsKernelName = knm
+      tsLoc = ts_loc
+    , tsKernelName = knm
     , tsRegisters = nregs
     , tsBarriers = nbars
     , tsAlignment = align
     , tsBlocks = bs
     }
+
+pCheckEofOrLookingAtNextSection :: PI ()
+pCheckEofOrLookingAtNextSection = do
+  P.eof <|> P.lookAhead (pTryKeyword ".section")
+
 
 pBlocks :: PC -> PI [Block]
 pBlocks pc = pB <|> return []
@@ -274,15 +384,15 @@ pBlocks pc = pB <|> return []
 pBlock :: PC -> PI Block
 pBlock pc = pWithLoc $ \loc -> do
   P.option () $ do
-    P.try (pSymbol ".weak")
+    pTryKeyword ".weak"
     pLabelRef
     --
-    pSymbol ".type"
+    pKeyword ".type"
     pLabelRef
     pSymbol ","
     pKeyword "@function"
     --
-    pSymbol ".size"
+    pKeyword ".size"
     pLabelRef
     pSymbol ","
     pSymbol "("

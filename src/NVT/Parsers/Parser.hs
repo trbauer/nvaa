@@ -206,6 +206,9 @@ pSymbol = P.symbol tokenParser
 pSymbol_ :: Monad m => String -> P m u ()
 pSymbol_ str = pSymbol str >> return ()
 
+pTrySymbol :: Monad m => String -> P m u String
+pTrySymbol = P.try . pSymbol
+
 pFloating :: Monad m => P m u Double
 pFloating = P.float tokenParser
 

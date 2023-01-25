@@ -257,8 +257,13 @@ depsInpsOups i = (ins,ous)
                 acc s =
                   case s of
                     SrcReg _ r@(RegR _)
+                      | iOp i `elem` [OpCALL,OpRET] -> regSeq 2 r
+                      | iOp i == OpBRX -> regSeq 2 r
                       | is_st_or_at && iHasInstOpt InstOpt64 i -> regSeq 2 r
+                      | iOp i == OpSYNCS && iHasInstOpt InstOptEXCH i && iHasInstOpt InstOpt64 i -> regSeq 2 r -- syncs.exch.64
                       | is_st_or_at && iHasInstOpt InstOpt128 i -> regSeq 4 r
+                    SrcReg _ ur@(RegUR _)
+                      | iOp i == OpSYNCS && iHasInstOpt InstOptEXCH i && iHasInstOpt InstOpt64 i -> regSeq 2 ur -- syncs.exch.64
                     SrcReg _ r
                       | oIsD (iOp i) -> regSeq 2 r
                       | otherwise -> [r]
@@ -267,7 +272,8 @@ depsInpsOups i = (ins,ous)
                     SrcDescAddr ur (r,r_ms) _ ->
                         regSeq nr (RegR r) ++ regSeq 2 (RegUR ur)
                       where nr = if Mod64`msElem`r_ms then 2 else 1
-                    SrcCon _ (SurfReg ur) _ -> [RegUR ur]
+                    SrcCon _ (SurfReg ur) r _ -> [r, RegUR ur]
+                    SrcCon _ _ r _ -> [r]
                     _ -> []
 
         is_st_or_at :: Bool
@@ -278,6 +284,7 @@ depsInpsOups i = (ins,ous)
         ous :: RegSet
         ous = toRegSet $ concatMap acc (iDsts i)
           where acc :: Dst -> [Reg]
+                acc (Dst _ r@(RegUR _)) = regSeq nregs r -- data
                 acc (Dst _ r@(RegR _)) = regSeq nregs r -- data
                 acc (Dst _ r) = regSeq 1 r -- things like predicates
 
@@ -285,6 +292,7 @@ depsInpsOups i = (ins,ous)
                 nregs
                   | oIsD (iOp i) = 2
                   | is_ld_or_at && iHasInstOpt InstOpt64 i = 2
+                  | iOp i == OpSYNCS && iHasInstOpt InstOptEXCH i && iHasInstOpt InstOpt64 i = 2 -- syncs.exch.64
                   | is_ld_or_at && iHasInstOpt InstOpt128 i = 4
                   | otherwise = 1
                   where is_ld = oIsLD (iOp i) || oIsAT (iOp i)

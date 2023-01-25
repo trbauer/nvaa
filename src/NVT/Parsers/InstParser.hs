@@ -212,7 +212,6 @@ pInstNoPrefix pc = body
                         sgn <- P.option id (pSymbol "-" >> return negate)
                         sgn . fromIntegral <$> pIntImm32
 
-
               -------------------------------------------------------------------
               --
 
@@ -425,17 +424,25 @@ pInstNoPrefix pc = body
             --       BAR.ARV                      0x0,      0x0         {!6}
             --       BAR.SYNCALL.DEFER_BLOCKING                         {!6}
             --       BAR.RED.AND.DEFER_BLOCKING   0x0,      0x1,    P0  {!6}
+            --
+            -- SM90:
+            --       BAR.RED.AND.DEFER_BLOCKING   0x0,         P2 {!6};      // 000FEC0001014400`0000000000007B1D
+            --       BAR.SYNC.DEFER_BLOCKING      0x0             {!6};      // 000FEC0000010000`0000000000007B1D
+            --       BAR.SYNC    R13,    R13                      {!6,+2.R}; // 0003EC0000000000`0000000D0000731D
+            -- @P6   BAR.SYNC.DEFER_BLOCKING  R4, 0x100           {!1,+4.R}  // 0007E20000010000`000400040000651D
+            --       BAR.ARV     R4,     0x100                    {!6,+3.R}; // 0005EC0000002000`000400040000751D
             OpBAR -> do
-              let pIIX = do
-                    src0 <- pSrcInt32
-                    src1 <- pSymbol "," >> pSrcInt32
-                    src2 <- P.option sRC_PT $ pSymbol "," >> pSrcP
-                    return [src0,src1,src2]
+              let pOptP = P.option [] $ pSymbol "," >> (box <$> pSrcP)
+              let pXIP = do
+                    src0 <- pSrcInt32 <|> pSrcR
+                    src1 <- pSymbol "," >> (pSrcInt32 <|> pSrcR)
+                    src2 <- pOptP
+                    return $ [src0,src1] ++ src2
                   pIX = do
                     src0 <- pSrcInt32
-                    src2 <- P.option sRC_PT $ pSymbol "," >> pSrcP
-                    return [src0,sRC_I32_0,src2]
-              srcs <- P.option [sRC_I32_0,sRC_I32_0,sRC_PT] $ P.try pIIX <|> pIX
+                    src2 <- pOptP
+                    return (src0:src2)
+              srcs <- P.option [] $ P.try pXIP <|> pIX
               pComplete [] srcs
 
             -- Move Convergence Barrier State
@@ -475,13 +482,28 @@ pInstNoPrefix pc = body
             --
             -- label [81:64]:[63:32]
             -- also
-            --   [90:87] = the predicate source
+            --   [90:87] = a predicate source
             --   [86:85] = {[default], .INC, .DEC, .INVALID3}
             --
+            -- SM90:
+            --   [90:87] = a predicate source
+            --   [86:85] = {[default], .INC, .DEC, .INVALID3}
+            --
+            --   @P1 BRA             `(.L_x_16) {!5}; // 000FEA0003800000`0000000000041947 examples/sm_90/samples/0_Introduction/simpleAWBarrier/simpleAWBarrier.sass:2944
+            --       BRA.DIV   UR4, `(.L_x_15)  {!5}; // 000FEA000B800000`0000001604B07947 examples/sm_90/samples/0_Introduction/simpleAWBarrier/simpleAWBarrier.sass:2892
+            --   @P0 BRA       P1,  `(.L_x_44)  {!5}; // 000FEA0000800000`0000000000200947 examples/sm_90/samples/0_Introduction/simpleAWBarrier/simpleAWBarrier.sass:3388
+            --
             OpBRA -> do
-              maybe_src_pr <- P.option [] $ box <$> (pSrcP <* pSymbol ",")
-              src0 <- pSrcLbl pc op
-              pComplete [] (maybe_src_pr ++ [src0])
+              let pSM80 = do
+                    maybe_src_pr <- P.option [] $ box <$> (pSrcP <* pSymbol ",")
+                    src0 <- pSrcLbl pc op
+                    pComplete [] (maybe_src_pr ++ [src0])
+              let pSM90 = do
+                    maybe_src_pr <- P.option [] $ box <$> (pSrcP <* pSymbol ",")
+                    maybe_src_pr <- P.option [] $ box <$> (pSrcUR <* pSymbol ",")
+                    src0 <- pSrcLbl pc op
+                    pComplete [] (maybe_src_pr ++ [src0])
+              pSM90
 
             -- @!P1  BREAK            !P2, B1 {!1};
             -- src predicate is [90:87] and PT 0b0111 is the default
@@ -493,21 +515,23 @@ pInstNoPrefix pc = body
             -- BRX      R8  -0x1a50 {!5};
             -- BRX !P6, R12 -0xb50 {!5};
             OpBRX -> do
-              src_pr <- P.option sRC_PT $ (pSrcP <* pSymbol ",")
+              src_pr <- P.option [] $ ((\c -> [c]) <$> pSrcP) <* pSymbol ","
               src0 <- pSrcR
-              -- no comma
-              src1 <- pSrc_I32 op
-              pComplete [] [src_pr, src0, src1]
+              -- no comma unless predicate (or our formatting)
+              P.option () (pSymbol "," >> return ())
+              src1 <- pSrcI49 op
+              pComplete [] (src_pr ++ [src0, src1])
 
             -- BRXU         UR4 -0x1840 {!5,Y};
             -- BRXU     P6, UR4 -0x1840 {!5,Y};
             -- []
             OpBRXU -> do
-              src_pr <- P.option sRC_PT $ (pSrcP <* pSymbol ",")
+              src_pr <- P.option [] $ (((\c -> [c]) <$> pSrcP) <* pSymbol ",")
               src0 <- pSrcUR
-              -- no comma
-              src1 <- pSrc_I32 op
-              pComplete [] [src_pr,src0, src1]
+              -- no comma unless predicate (or our formatting)
+              P.option () (pSymbol "," >> return ())
+              src1 <- pSrcI49 op
+              pComplete [] (src_pr ++ [src0, src1])
 
             -- BSSY             B0, `(.L_31) {!12,Y};
             OpBSSY -> do
@@ -532,12 +556,26 @@ pInstNoPrefix pc = body
             -- [regfile] enables UR and R0
             --
             -- CALL.ABS is opcode 0x143, CALL.REL uses opcode 0x144
+            --
+            -- SM90:
+            --   CALL.ABS.NOINC  R2 `(__UFT_OFFSET) {!5,^1,^2,^3,^6}; // 027FEA0003C00000`0000000002007343 examples/sm_90/samples/0_Introduction/simpleSeparateCompilation/simpleSeparateCompilation.sass:364
+            --   CALL.ABS.NOINC  `(vprintf)  {!5,^1};
+            --   CALL.REL.NOINC  `($_Z16shiftPitchLinearPfiiiiiy$__cuda_sm3x_div_rn_noftz_f32_slowpath) {!5,^1};
             OpCALL -> do
-              src0_p <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
-              src1_ru <- P.option sRC_RZ $ pSrcR <|> pSrcUR
-              src2 <- pSrcLbl pc op
-              pComplete [] [src0_p,src1_ru,src2]
-
+              let pSm80 = do
+                    src0_p <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
+                    src1_ru <- P.option sRC_RZ $ pSrcR <|> pSrcUR
+                    src2 <- pSrcLbl pc op
+                    pComplete [] [src0_p,src1_ru,src2]
+              let pSm90 = do
+                    let box c = [c]
+                    src_rc <- P.option [] $
+                      box <$> (P.try pSrcR <|> P.try (pSrcCCX op))
+                    src_lbl <- P.option [] $ do
+                      P.option "" (pSymbol ",")
+                      box <$> pSrcLbl pc op
+                    pComplete [] (src_rc ++ src_lbl)
+              pSm90
             --   CCTL.IVALL        {!5,Y};
             --   CCTL.U.IVALL      {!5,Y};
             --   CCTL.RS      [RZ] {!5,Y};
@@ -565,6 +603,11 @@ pInstNoPrefix pc = body
                   pSymbol "]"
                   return [src0,src1_imm]
               pComplete [] srcs
+
+            -- @P1   CGAERRBAR // 000FEC0000000000`00000000000015AB
+            OpCGAERRBAR -> do
+              pComplete [] []
+
 
             --      CS2R     R6, SRZ {!1};
             --      CS2R.32  R5, SR_CLOCKLO {!7,Y,^2};
@@ -621,6 +664,9 @@ pInstNoPrefix pc = body
             -- SRC2 = [90:87]
             OpDSETP -> pSETP
 
+            -- ENDCOLLECTIVE
+            OpENDCOLLECTIVE -> pNullaryOp
+
             -- ERRBAR            {Y,^1};
             OpERRBAR -> pNullaryOp
 
@@ -654,6 +700,12 @@ pInstNoPrefix pc = body
             --       FADD             R3,  R0.reuse, R9.reuse {!1};
             --       FADD.FTZ         R5, -RZ,       -UR4 {!4,Y};
             OpFADD -> pBinaryOp
+
+            -- FENCE.VIEW.ASYNC.S  {!2,+6.W}; // 000F640000000000`00000000000073C6 examples/sm_90/libs/cublasLt64_12/Elf-1510.sm_90.sass:93510
+            --
+            -- FENCE.VIEW.ASYNC.S  ?PM1 {!10,+1.W};  000E344000000000`00000000000073C6
+            -- [103:102] ... ?PM1, ?PM2, ?PM3
+            OpFENCE -> pComplete [] []
 
             --                 DST  SRC0  SRC1
             -- FCHK             P0, R5,    R0            {!2,+1.W};
@@ -704,6 +756,10 @@ pInstNoPrefix pc = body
             OpHADD2 -> pBinaryOpH2
 
             -- HFMA2            R25, R35.reuse.H0_H0, R2.reuse, R25 {!2,^2};
+            --
+            -- SM90:
+            --   HFMA2.MMA  R25,   -RZ,    RZ,  0,  0  {!1};  /* 000FE200000001FF`00000000FF197435
+            --                                  ^^^^^^ fp16x2
             OpHFMA2 -> pTernaryOpH2
 
             -- HMMA.16816.F32.BF16 R12, R4, R8, R12 {!7,+6.W,+6.R,^3}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:7223
@@ -757,9 +813,9 @@ pInstNoPrefix pc = body
               dst <- pDstR
               let byte_selectors = [ModB1,ModB2,ModB3] -- only if .U8
               let pSrcCCX_WithSfx = do
-                    SrcCon ms s o <- pSrcCCX
+                    SrcCon ms s r o <- pSrcCCX op
                     ms_sfx <- pAddModRegSuffixesFrom byte_selectors
-                    return (SrcCon (ms`msUnion`ms_sfx) s o)
+                    return (SrcCon (ms`msUnion`ms_sfx) s r o)
               pSymbol ","
               src <-
                 pSrcR_WithModSuffixes byte_selectors <|>
@@ -907,8 +963,8 @@ pInstNoPrefix pc = body
             -- [75:73] = {U8, S8, U16, S16, [.32], .64, INVALID6, INVALID7}
             OpLDC -> do
               dst <- pDstR <* pSymbol ","
-              srcs <- pXLdcSrcs pSrcR SrcRZ
-              pComplete [dst] srcs
+              src <- pXLdcSrcs (RegR <$> pSyntax) RegRZ
+              pComplete [dst] [src]
 
             -- LDG.E       R7,   [R4.64] {!4,+3.W}; // examples/sm_80/samples/alignedTypes.sass:3280
             -- LDG.E.128   R128, [R114.64+0x50000] {!4,+4.W,^1}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:10134
@@ -1158,16 +1214,29 @@ pInstNoPrefix pc = body
 
             -- RET.ABS.NODEC    R20 0x0 {!5,^1};
             -- RET.REL.NODEC    R2 `(_Z27compute_bf16gemm_async_copyPK13__nv_bfloat16S1_PKfPfff) {!5}; // examples/sm_80/samples/bf16TensorCoreGemm.sass:9638
-            --
+            --             --
             -- [85] = {.REL, .ABS}
             -- [86] = {[default], .NODEC}
             -- [90:87] = optional predicate source
+            --
+            -- SM90:
+            --   RET.REL.NODEC  R14 `(_Z15integrateBodiesIdEvPN4vec4IT_E4TypeES4_S4_jjffi) {!5}
             OpRET -> do
-              src0 <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
-              src1 <- pSrcR
-              -- no comma
-              src2 <- pSrcLbl pc op
-              pComplete [] [src0,src1,src2]
+              let pSm80 = do
+                    src0 <- P.option sRC_PT $ P.try $ pSrcP <* pSymbol ","
+                    src1 <- pSrcR
+                    -- no comma
+                    src2 <- pSrcLbl pc op
+                    pComplete [] [src0,src1,src2]
+              let pSm90 = do
+                    let box c = [c]
+                    src_rc <- P.option [] $
+                      box <$> (P.try pSrcR <|> P.try (pSrcCCX op))
+                    src_lbl <- P.option [] $ do
+                      P.option "" (pSymbol ",")
+                      box <$> pSrcLbl pc op
+                    pComplete [] (src_rc ++ src_lbl)
+              pSm90
 
             --       S2R  R3, SR_TID.X {!2,+1.W}; // examples/sm_80/samples/alignedTypes.sass:3463
             OpS2R -> pS2XROp pDstR
@@ -1233,6 +1302,68 @@ pInstNoPrefix pc = body
               src2 <- pSrcImmNonBranch32 op
               src3s <- P.option [] $ box <$> (pSymbol "," >> pSrcImmNonBranch32 op)
               pComplete [] (src0_addr:src1:src2:src3s)
+
+
+            -- SM90:
+            --     SYNCS.EXCH.64                   URZ, [UR4+0x18], UR8  {!1,+2.W,+2.R}; // 0002620008000100`00001808043F75B2 examples/sm_90/libs/cublasLt64_12/Elf-1510.sm_90.sass:91502
+            -- [73:72] {0,.EXCH,1,2}
+            --
+            --      SYNCS.PHASECHK.TRANS64.TRYWAIT  P0, [UR32+0x28],  RZ   {!2,+2.W}; // 000E640008000160`000028FFFF0075A7 examples/sm_90/libs/cublasLt64_12/Elf-1510.sm_90.sass:91569
+            --      SYNCS.PHASECHK.TRANS64.TRYWAIT  P0, [R2+URZ],     R29  {!2,+4.W}; // 000EE4000800017F`0000001D020075A7 examples/sm_90/samples/3_CUDA_Features/globalToShmemAsyncCopy/globalToShmemAsyncCopy.sass:8646
+            --
+            --      SYNCS.CCTL.IV                       [R8+URZ+0x10]      {!8,+1.W,^1}; // 001E30000800003F`00001000080079B1 examples/sm_90/samples/3_CUDA_Features/globalToShmemAsyncCopy/globalToShmemAsyncCopy.sass:8393
+            --
+            --      SYNCS.ARRIVE.TRANS64.A1T0       RZ, [UR30],       RZ   {!2,^3};   // 004FE4000810001E`000000FFFFFF79A7 examples/sm_90/libs/cublasLt64_12/Elf-1510.sm_90.sass:91581
+            --      SYNCS.ARRIVE.TRANS64.ART0       RZ, [R16+URZ],    R3   {!1,+1.R}; // 0001E2000850003F`0000000310FF79A7 examples/sm_90/samples/3_CUDA_Features/globalToShmemAsyncCopy/globalToShmemAsyncCopy.sass:8284
+            -- @P6  SYNCS.ARRIVE.TRANS64.RED.A1T0   RZ, [R0+URZ],     RZ   {!3,+2.R}; // 0003E6000810043F`000000FF00FF69A7 examples/sm_90/libs/cublasLt64_12/Elf-1510.sm_90.sass:105826
+            -- @!P0 SYNCS.ARRIVE.TRANS64.RED.A0T1   RZ, [UR4], RZ          {!1};      // 000FE20008200404`000000FFFFFF89A7 examples/sm_90/samples/3_CUDA_Features/globalToShmemAsyncCopy/globalToShmemAsyncCopy.sass:8268
+            OpSYNCS -> do
+              let pImmTerm :: PI Int
+                  pImmTerm = do
+                      sgn <-
+                        (pSymbol "+" >> return id) <|>
+                          (pSymbol "-" >> return negate)
+                      sgn . fromIntegral <$> pIntImm32
+
+              let pExch64 = do
+                    dst <- pDstUR <* pSymbol ","
+                    --
+                    pSymbol "["
+                    base <- pLabel "ureg" pSyntax :: PI UR
+                    immoff <- P.option 0 pImmTerm
+                    let src_addr = SrcAddr (RZ,msEmpty) base immoff
+                    pSymbol "]" >> pSymbol ","
+                    --
+                    src_data <- pSrcUR
+                    --
+                    pComplete [dst] [src_addr,src_data]
+
+              let pArrv = do
+                    -- SYNCS.ARRIVE.TRANS64.A1T0  RZ, [UR30], RZ  {!2,^3};
+                    dst <- pDstR <* pSymbol ","
+                    src_addr <- pLDST_Addrs op <* pSymbol ","
+                    src_data <- pSrcR
+                    pComplete [dst] [src_addr,src_data]
+
+              let pPhaseChk = do
+                    -- SYNCS.PHASECHK.TRANS64.TRYWAIT  P0, [UR32+0x28], RZ   {!2,+2.W};
+                    dst <- pDstP <* pSymbol ","
+                    src_addr <- pLDST_Addrs op <* pSymbol ","
+                    src_data <- pSrcR
+                    pComplete [dst] [src_addr,src_data]
+
+              let pCctl = do
+                    -- SYNCS.CCTL.IV [R8+URZ+0x10] {!8,+1.W,^1};
+                    src_addr <- pLDST_Addrs op
+                    pComplete [] [src_addr]
+
+              if InstOptEXCH`iosElem`ios then pExch64
+                else if InstOptARRIVE`iosElem`ios then pArrv
+                else if InstOptPHASECHK`iosElem`ios then pPhaseChk
+                else if InstOptCCTL`iosElem`ios then pCctl
+                else pSemanticError loc "unsupported SYNCS... op"
+
+
 
             -- TEX.SCR.LL.NODEP R14, R16, R14, R20, 0x0, 0x5a, 2D      {!1,Y}
             -- TEX.SCR.LL       RZ,  R7,  R6,  R18, 0x0, 0x58, 2D, 0x1 {!3,Y,+6.W};
@@ -1344,8 +1475,8 @@ pInstNoPrefix pc = body
             -- ULDC.64    UR4, c0[0x118]
             OpULDC -> do
               dst <- pDstUR
-              srcs <- pSymbol "," >> pXLdcSrcs pSrcUR SrcURZ
-              pComplete [dst] srcs
+              src <- pSymbol "," >> pXLdcSrcs (RegUR <$> pSyntax) RegURZ
+              pComplete [dst] [src]
 
             --                  DST  CO   SRC0  SRC1       SRC2  shift CI
             -- ULEA             UR15,     UR16, UR10,            0x3       {!4,Y,^1};
@@ -1354,7 +1485,6 @@ pInstNoPrefix pc = body
             -- ULEA.HI          UR4,      UR4,  0x7fffffff, URZ, 0x1f      {!2};
             -- ULEA             UR5,      UR8,  0xfffffffc,      0x2       {!1};
             -- ULEA.HI.SX32     UR6,      UR6,  0xfffffffc,      0x1b      {!1};
-            --
             OpULEA -> do
               dst <- pDst
               --
@@ -1481,17 +1611,29 @@ pInstNoPrefix pc = body
             --       WARPSYNC           !P4, 0xffffffff
             --
             -- SM90
+            --       WARPSYNC.ALL  {!1}; // 000FE20003800000`0000000000007948 examples/sm_90/samples/0_Introduction/mergeSort/bitonic.sass:3562
             --       WARPSYNC.COLLECTIVE  R13, `(.L_x_158) {!1};
-            --       WARPSYNC.ALL {!1};
-            --
+            --       WARPSYNC.COLLECTIVE.ALL  `(.L_x_59)                {!1}; // examples/sm_90/samples/0_Introduction/simpleAWBarrier/simpleAWBarrier.sass:3545 000FE20003C00000`0000000000147948
             --
             -- [86] .EXCLUSIVE
             -- [90:87] predicate source (default to PT)
             OpWARPSYNC -> do
-              src0 <- P.option sRC_PT $ pSrcP <* pSymbol ","
-              src1s <- P.option [] $ box <$> pSrcX
-              src2s <- P.option [] $ box <$> pSrcX
-              pComplete [] (src0:(src1s++src2s))
+              let pSm80 = do
+                    src0 <- P.option sRC_PT $ pSrcP <* pSymbol ","
+                    src1s <- P.option [] $ box <$> pSrcX
+                    src2s <- P.option [] $ box <$> pSrcX
+                    pComplete [] (src0:(src1s++src2s))
+              let pSm90 = do
+                    src_reg <-
+                      P.option [] $ do
+                        r <- pSrcR <* pSymbol ","
+                        return [r]
+                    src_lbl <-
+                      P.option [] $ do
+                        lbl <- pSrcLbl pc op
+                        return [lbl]
+                    pComplete [] (src_reg ++ src_lbl)
+              pSm90
 
             --          YIELD       {!1};
             --          YIELD   !P5 {!1};
