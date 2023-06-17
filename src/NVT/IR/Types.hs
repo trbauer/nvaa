@@ -1222,6 +1222,10 @@ data InstOpt =
   | InstOptPHASECHK
   | InstOptTRANS64
   | InstOptTRYWAIT
+  --
+  -- ARRIVES.* for SM90
+  | InstOptTRANSCNT
+  | InstOptARVCNT
   deriving (Show,Eq,Ord,Enum)
   -- WARNING: this mustn't exceed 128 or we need to change our EnumSet to use a Word256
 

@@ -259,8 +259,9 @@ depsInpsOups i = (ins,ous)
                     SrcReg _ r@(RegR _)
                       | iOp i `elem` [OpCALL,OpRET] -> regSeq 2 r
                       | iOp i == OpBRX -> regSeq 2 r
-                      | is_st_or_at && iHasInstOpt InstOpt64 i -> regSeq 2 r
+                      | iOp i == OpMATCH && iHasInstOpt InstOpt64 i -> regSeq 2 r
                       | iOp i == OpSYNCS && iHasInstOpt InstOptEXCH i && iHasInstOpt InstOpt64 i -> regSeq 2 r -- syncs.exch.64
+                      | is_st_or_at && iHasInstOpt InstOpt64 i -> regSeq 2 r
                       | is_st_or_at && iHasInstOpt InstOpt128 i -> regSeq 4 r
                     SrcReg _ ur@(RegUR _)
                       | iOp i == OpSYNCS && iHasInstOpt InstOptEXCH i && iHasInstOpt InstOpt64 i -> regSeq 2 ur -- syncs.exch.64

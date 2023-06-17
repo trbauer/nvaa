@@ -21,192 +21,22 @@
 
 
 
-template <typename T>
-static void format_histogram_with(
-  std::ostream &os,
-  std::function<void(std::ostream&,const T &)> fmt_key,
-  const std::map<T,size_t> &h,
-  const char *units)
-{
-  size_t n = 0;
-  for (const auto &e : h) {
-    n += e.second;
-  }
-  os << "============= " << n << " samples in " << h.size() << " bins\n";
-  auto fmtPct = [&](size_t k) {
-    std::stringstream ss;
-    double pct = (100.0 * k / n);
-    ss << "%" << std::fixed << std::setprecision(3) << pct;
-    return ss.str();
-  };
-
-  for (const auto &e : h) {
-    std::stringstream ss;
-    fmt_key(ss, e.first);
-    os << "  " << std::setw(12) << ss.str();
-    if (units)
-      os << " " << units;
-    os << "   " << std::setw(12) << e.second <<
-      "   " << std::setw(7) << fmtPct(e.second) << "\n";
-  }
-}
-
-template <typename T>
-std::map<T,size_t> create_histogram(const T *samples, size_t n)
-{
-  std::map<T,size_t> h;
-  for (size_t i = 0; i < n; i++) {
-    h[samples[i]]++;
-  }
-  return h;
-}
-
-template <typename T>
-static void format_histogram(
-  std::ostream &os,
-  std::function<void(std::ostream&,const T &)> fmt_key,
-  const std::vector<T> &samples,
-  const char *units = nullptr)
-{
-  auto h = create_histogram<T>(samples.data(), samples.size());
-  format_histogram_with<T>(os, fmt_key, h, units);
-}
-
-template <typename T>
-static void format_histogram(
-  std::ostream &os,
-  const std::vector<T> &samples,
-  const char *units = nullptr)
-{
-  auto h = create_histogram<T>(samples.data(), samples.size());
-  format_histogram_with<T>(os, [&](std::ostream &os, const T &t) {os << t;}, h, units);
-}
-
-
 using namespace mincu;
 
-/*
-static std::string fmtSmid(smid_t smid) {
-  return "@" + std::to_string(smid);
-}
-template <typename T>
-static std::string fmtKey(T t) {
-    std::stringstream ss;
-    ss << t << ":";
-    return ss.str();
-}
-*/
-
-
-
-struct statistics {
-  int64_t n = 0;
-  int64_t sm = 0;
-  double av = 0.0;
-  double md = 0.0;
-  double mn = 0.0, mx = 0.0;
-  double va = 0.0;
-
-  template <typename T>
-  static statistics construct(const umem<T> &oup)
-  {
-    return construct<T>(oup, oup.size());
-  }
-  template <typename T>
-  static statistics construct(const T *oup, size_t _n)
-  {
-    statistics s;
-    s.add_all(oup, _n);
-    return s;
-  }
-
-  template <typename T>
-  void add_all(const T *oup, size_t _n) {
-    n = _n;
-    if (n == 0)
-      return;
-
-    sm = 0;
-    T _mx = oup[0], _mn = oup[0];
-    //
-    std::vector<T> vals;
-    vals.reserve(n);
-    //
-    for (size_t i = 0; i < n; i++) {
-      T e = oup[i];
-      sm += e;
-      vals.push_back(e);
-      _mn = std::min<T>(_mn, e);
-      _mx = std::max<T>(_mx, e);
-    }
-    mn = (double)_mn;
-    mx = (double)_mx;
-    av = (double)sm/n;
-
-    std::sort(vals.begin(), vals.end());
-    if (n == 0) {
-      md = av;
-    } else if (n % 2) {
-      md = vals[n/2];
-    } else {
-      md = (vals[n/2 - 1] + vals[n/2])/2.0;
-    }
-
-    int64_t dvsm = 0;
-    for (size_t i = 0; i < n; i++) {
-      auto e = oup[i];
-      dvsm += (e - av)*(e - av);
-    }
-    va = (double)dvsm/n;
-  }
-
-  /////////////////////////////////////
-  // average
-  double avg() const {return av;}
-  // sum
-  int64_t sum() const {return sm;}
-
-  /////////////////////////////////////
-  // ordering
-  //
-  // minimum
-  double min() const {return mn;}
-  // median
-  double med() const {return md;}
-  // maximum
-  double max() const {return mx;}
-
-  /////////////////////////////////////
-  // spread
-  // variance
-  double var() const {return va;}
-  // standard deviation
-  double sdv() const {return sqrt(var());}
-  // standard error of the mean
-  double sem() const {return sdv()/sqrt((double)n);}
-  // realtive standard error
-  double rse() const {return sem()/avg();}
-
-  /////////////////////////////////////
-  void str(std::ostream &os) const {
-    os << "statistics\n";
-    os << " n: " << n << "\n";
-    os << " min: " << min() << "\n";
-    os << " med: " << med() << "\n";
-    os << " avg: " << avg() << "\n";
-    os << " max: " << max() << "\n";
-    os << " rse: " << rse() << "\n";
-  }
-};
-
+static bool check = false;
 static int verbosity = 0;
+static bool failed = false;
 
 extern "C" static __device__ int get_tid()
 {
   int id = blockDim.x * blockIdx.x + threadIdx.x;
   return id;
 }
-static const int LOADS_PER_THREAD = 256;
+// at least 64 times for 512k buffer
+static const int LOADS_PER_THREAD = 64 * (512*1024 / 4);
+
+///////////////////////////////////////////////////////
+// latency
 
 template <size_t B>
 __global__ void test_stack_lat_device(int32_t *oup, uint64_t *times)
@@ -214,39 +44,21 @@ __global__ void test_stack_lat_device(int32_t *oup, uint64_t *times)
   static const size_t N = B / 4;
   static_assert(B % 4 == 0, "B must be multiple of 4");
 
+  const auto tid = get_tid();
   int32_t stack[N];
 
   for (int i = 0; i < N; i++) {
-    stack[i] = i + threadIdx.x;
+    stack[i] = (threadIdx.x + i) % N;
   }
   int idx = threadIdx.x;
   auto st = clock64();
   for (int i = 0; i < LOADS_PER_THREAD; i++) {
-    idx = stack[idx % N];
+    idx = stack[idx];
   }
   auto en = clock64();
 
-  oup[get_tid()] = idx;
+  oup[tid] = idx;
   times[get_tid()] = en - st;
-}
-
-template <size_t B>
-__global__ void test_stack_tpt_device(int32_t *oup)
-{
-  static const size_t N = B / 4;
-  static_assert(B % 4 == 0, "B must be multiple of 4");
-
-  int32_t stack[N];
-
-  for (int i = 0; i < N; i++) {
-    stack[i] = i + threadIdx.x;
-  }
-  int32_t sum = 0.0;
-  for (int i = 0; i < LOADS_PER_THREAD; i++) {
-    sum += stack[(threadIdx.x + i) % N];
-  }
-
-  oup[get_tid()] = sum;
 }
 
 template <size_t B>
@@ -259,7 +71,8 @@ static uint64_t test_stack_lat()
   size_t limit = 0;
   auto e = cudaThreadGetLimit(&limit, cudaLimitStackSize);
   if (e != cudaSuccess) {
-    fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error in cudaThreadGetLimit");
+    fatal(cudaGetErrorName(e),
+          " (", cudaGetErrorString(e), "): unexpected error in cudaThreadGetLimit");
   }
 //  std::cout << "cudaLimitStackSize: " << limit << "\n";
 
@@ -281,25 +94,67 @@ static uint64_t test_stack_lat()
   return times[0];
 }
 
+///////////////////////////////////////////////////////
+// throughput
+
+// PROBLEMS:
+//   - setup cost affects results
+template <size_t B>
+__global__ void test_stack_tpt_device(int32_t *oup, int zero)
+{
+  static const size_t N = B / 4;
+  static_assert(B % 4 == 0, "B must be multiple of 4");
+
+  //   sum prv(N) = tid * N + N/2
+  int32_t prv[N];
+
+  // alternating sum (negative evens):
+  //   -0 + 1 -2 + 3 ... -(N-2)+(N+1)
+  //     factor out tid (which is tid * N)
+  //     group pairs off even/odd which produce 1 each
+  //       (-0 + 1) + (-2 + 3) + ...
+  //     so sequence of N is (N/2 + tid * N)
+  //     let altSum2 t n = t * n + n`div`2 [ FOR EVEN N ]
+  //   test with:
+  //     let altSum t n = [if even i then t - i else t + i | i<-[0..n-1]]
+  for (int i = 0; i < N; i += 2) {
+    prv[i + 0] = threadIdx.x - (i + 0);
+    prv[i + 1] = threadIdx.x + (i + 1);
+  }
+  int32_t sum = 0;
+  int var_zero = min(zero, threadIdx.x); // force non-uniform index
+  for (int i = 0; i < LOADS_PER_THREAD; i++) {
+    sum += prv[(var_zero + i) % N];
+  }
+
+  oup[get_tid()] = sum;
+}
+
+// https://versus.com/en/nvidia-geforce-rtx-2060-vs-nvidia-geforce-rtx-2060-super/max-mem-bandwidth
+// 336 gb/s (192b memory bus)
+// 1920 shading units (30 SM)
+
 // return GB/s
 template <size_t B>
 static double test_stack_tpt()
 {
+  static const auto N = B / 4;
   static_assert(B % 4 == 0, "B must be multiple of 4");
-  umem<int32_t> mem(1);
+  static_assert(LOADS_PER_THREAD >= N, "B/4 must be greater than");
 
-  static const auto NBLOCKS = 1024;
+  static const auto NBLOCKS = 10*30; // 10 full waves
   static const auto BLOCKSIZE = 32;
+  umem<int32_t> oup(NBLOCKS * BLOCKSIZE);
 
   // warm up
-  test_stack_tpt_device<B><<<NBLOCKS,BLOCKSIZE>>>(mem);
+  test_stack_tpt_device<B><<<NBLOCKS,BLOCKSIZE>>>(oup, 0);
   auto e = cudaDeviceSynchronize();
   if (e != cudaSuccess) {
     fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error");
   }
     // <<<NBLOCKS, BLOCKSIZE, SLM, STREAMINDEX >>>
   auto st = std::chrono::steady_clock::now();
-  test_stack_tpt_device<B><<<NBLOCKS,BLOCKSIZE>>>(mem);
+  test_stack_tpt_device<B><<<NBLOCKS,BLOCKSIZE>>>(oup, 0);
   e = cudaDeviceSynchronize();
   auto ed = std::chrono::steady_clock::now();
   if (e != cudaSuccess) {
@@ -307,13 +162,34 @@ static double test_stack_tpt()
   }
 
   // return std::chrono::duration_cast<std::chrono::microseconds>(ed - st).count();
-  uint64_t total_bytes_accessed = BLOCKSIZE * NBLOCKS *
-    ((uint64_t)4 * LOADS_PER_THREAD + B);
+  uint64_t total_bytes_read = BLOCKSIZE * NBLOCKS *
+    ((uint64_t)4 * LOADS_PER_THREAD); // doesn't count setup cost
   double elapsed = std::chrono::duration<double>(ed - st).count();
   // double elapsed = std::chrono::duration_cast<std::chrono::seconds>(ed - st).count();
   if (verbosity >= 1)
     std::cout << "elapsed: " << elapsed << "\n";
-  return (total_bytes_accessed / elapsed) / 1024.0 / 1024.0 / 1024.0;
+
+  if (check) {
+    for (size_t i = 0 ; i < NBLOCKS * BLOCKSIZE; i++) {
+      uint32_t oup_i = oup[i];
+      uint32_t tid = i % 32u;
+
+      // let altSum2 t n = t * n + n`div`2 [ FOR EVEN N ]
+      auto alt_sum = [tid](uint32_t n) {return tid * n + n / 2;};
+      //
+      uint32_t full_prv_sums = (LOADS_PER_THREAD / N);
+      uint32_t leftovers = LOADS_PER_THREAD % N;
+      auto oup_expected = full_prv_sums * alt_sum(N) + alt_sum(leftovers);
+      if (oup_i != oup_expected) {
+        std::cerr << "test_stack_tpt<" << B << ">: mismatch on oup[" << i << "]\n"
+          "expected " << oup_expected << "; got " << oup_i << "\n";
+        failed = true;
+        break;
+      }
+    }
+  }
+
+  return (total_bytes_read / elapsed) / 1024.0 / 1024.0 / 1024.0;
 }
 
 static void test_stack_emit_header()
@@ -323,7 +199,7 @@ static void test_stack_emit_header()
     " " <<
     std::setw(24) << "latency (c/read)"
     " " <<
-    std::setw(24) << "tpt (GB/s)" <<
+    std::setw(24) << "throughput (GB/s)" <<
     "\n";
 }
 static void test_stack_emit_row(size_t B, uint64_t lat, double tpt)
@@ -334,7 +210,7 @@ static void test_stack_emit_row(size_t B, uint64_t lat, double tpt)
     " " <<
     std::setw(24) << std::fixed << std::setprecision(1) << (lat / (double)LOADS_PER_THREAD) <<
     " " <<
-    std::setw(24) << std::fixed << std::setprecision(1) << tpt <<
+    std::setw(24) << std::fixed << std::setprecision(3) << tpt <<
     "\n";
   std::cout << ss.str();
 }
@@ -409,31 +285,33 @@ int main(int argc, const char* argv[])
     ss_cs << "  case" << ss_sz.str() << "\n";
   }
 
-  // test_timer_latency(0, block_counts);
-  if ((argc != 2 && argc != 3) || (argc == 1 &&
-    (std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help")))
-  {
-    std::cerr <<
-      "usage: stack.exe [-v|-v2] TESTNAME\n"
-      "where TESTNAME =\n"
-      "  all - runs all tests\n"
-      "  -- or --\n" <<
-      ss_cs.str();
-    return EXIT_FAILURE;
+  std::string test_name;
+  for (int i = 1; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "-h" || arg == "--help") {
+      std::cerr <<
+        "usage: stack.exe [-v|-v2] TESTNAME\n"
+        "where TESTNAME =\n"
+        "  all - runs all tests\n"
+        "  -- or --\n" <<
+        ss_cs.str();
+      return EXIT_FAILURE;
+    } else if (arg == "-c" || arg == "--check") {
+      check = true;
+    } else if (arg == "-v") {
+      verbosity = 1;
+    } else if (arg == "-v2") {
+      verbosity = 2;
+    } else if (!test_name.empty()) {
+      fatal("test already specified");
+    } else {
+      test_name = arg;
+    }
   }
-  int arg_ix = 1;
-  if (std::string(argv[1]) == "-v") {
-    verbosity = 1;
-    arg_ix = 2;
-  } else if (std::string(argv[1]) == "-v2") {
-    verbosity = 2;
-    arg_ix = 2;
+  if (test_name.empty()) {
+    fatal("expected test name (use -h)");
   }
 
-  if (arg_ix >= argc) {
-    fatal("usage: stack [-v|-v2|-h] TESTNAME\n");
-  }
-  std::string test_name = argv[arg_ix];
   if (test_name == "all") {
     test_stack_all();
   } else if ((test_name.substr(0, 4) == "case") &&
@@ -470,7 +348,7 @@ int main(int argc, const char* argv[])
     fatal(test_name, ": unsupported test");
   }
 
-  return EXIT_SUCCESS;
+  return failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 

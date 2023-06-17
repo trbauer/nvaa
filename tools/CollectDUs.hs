@@ -144,9 +144,9 @@ blaze = do
   -- processFile "toy-files90\\bodysystemcuda.sass"
   -- processFile "toy-files90\\Mandelbrot_cuda.sass"
   -- processFile "toy-files90\\matrixMul.sass"
-  processFile "toy-files90\\simpleAWBarrier.sass"
+  -- processFile "toy-files90\\simpleAWBarrier.sass"
   --
-  -- processFile "toy-files90\\globalToShmemAsyncCopy.sass"
+  processFile "toy-files90\\globalToShmemAsyncCopy.sass"
   -- processFile "toy-files90\\simpleSeparateCompilation.sass"
   return ()
 
@@ -168,7 +168,10 @@ fixme = do
     -- "WARPSYNC.COLLECTIVE  R15, `(.L_x_48)  {!1};"
     -- "BAR.SYNC  R13,    R13   {!6,+2.R};"
     -- "P2R       R28,    PR,     RZ,     0x1              {!9,Y};"
-    "P2R.B1    R175,   PR,     R172,   0xf              {!2};"
+    -- "P2R.B1    R175,   PR,     R172,   0xf              {!2};"
+    -- "MATCH.ANY.U64  R14, R12  {!1,+3.W,+3.R};"
+    -- "@!PT  LDS       RZ,     [0x4];"
+    "DEPBAR.LE  SB0,   0x1  {!4,Y};"
   return ()
 
 

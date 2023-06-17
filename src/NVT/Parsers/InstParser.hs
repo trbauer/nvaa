@@ -392,8 +392,12 @@ pInstNoPrefix pc = body
           --
           case op of
             OpARRIVES -> do
+              --
               -- ARRIVES.LDGSTSBAR.64 [URZ+0x800]
               -- disassembler permits R#
+              --
+              -- SM90:
+              --  @!P0  ARRIVES.LDGSTSBAR.64.TRANSCNT  [UR4]  {!1}; // 000FE20008000A84`00000000FF0089B0
               src_addr <- pLDST_Addrs op
               pComplete [] [src_addr]
 
@@ -622,23 +626,23 @@ pInstNoPrefix pc = body
             OpDADD -> pBinaryOp
 
             --   DEPBAR.LE  SB0, 0x0 {!4,Y}; (bit [44] is sb, [43:38] is imm val)
-            --   DEPBAR.LE  SB0, 0x7, {5,4,3,2,1,0}
+            --   DEPBAR.LE  SB0, 0x7, {5,4,3,2,1,0} ...
             --   DEPBAR (unsupported)
             --
             -- [37:32] = activates the bit set
             OpDEPBAR -> do
               src0 <- pSrcSB <* pSymbol ","
               src1 <- pSrcImmNonBranch32 op
-              src2 <-
-                P.option sRC_I32_0 $ do
+              src2s_opt <-
+                P.option [] $ do
                   pSymbol ","
                   let pBitIx = pInt <* pWhiteSpace
                   pSymbol "{"
                   b0 <- pBitIx
                   bs <- P.many $ pSymbol "," >> pBitIx
                   pSymbol "}"
-                  return (SrcI32 (foldl' setBit 0 (b0:bs)))
-              pComplete [] [src0, src1, src2]
+                  return [SrcI32 (foldl' setBit 0 (b0:bs))]
+              pComplete [] ([src0, src1] ++ src2s_opt)
 
             -- DFMA        R8,   R36, R36, R8  {!6,Y,+1.W,^1};
             -- DFMA        R10,  R6,  R10, 0.5 {!4,Y,^1};
@@ -1057,7 +1061,7 @@ pInstNoPrefix pc = body
             -- MATCH.ALL     PT, R18, R34
             OpMATCH -> do
               dsts <- pDstsP_R
-              src <- pSrcR
+              src <- pSymbol "," >> pSrcR
               pComplete dsts [src]
 
             --       MEMBAR.ALL.GPU    {!6};   // examples/sm_80/samples/conjugateGradientMultiBlockCG.sass:2811
@@ -1431,7 +1435,7 @@ pInstNoPrefix pc = body
                   return [src_ci1,src_ci2]
               pComplete (dst:dst_cos) (src0:src1:src2:src_cis)
 
-            --                  DST  CO1    SRC0  SRC1          SRC2   CI1
+            --                  DST  CO0    SRC0  SRC1          SRC2   CI0
             -- UIMAD            UR6,        UR6,  0xc0,         URZ          {!2};
             -- UIMAD.WIDE.U32   UR6, UP0,   UR8,  0x24924924,   UR4          {!2};
             -- UIMAD.WIDE.U32.X UR4,        UR10, 0x24924924,   UR8,   UP0   {!4,Y};
@@ -1444,7 +1448,7 @@ pInstNoPrefix pc = body
               --
               src0 <- pSymbol "," >> pSrcUR
               src1 <- pSymbol "," >> pSrcURI
-              src2 <- pSymbol "," >> pSrcUR
+              src2 <- pSymbol "," >> pSrcURI -- can be UIU or UUI
               src_ci <-
                 P.option sRC_UPF $ do
                   pSymbol "," >> pSrcUP
@@ -1626,8 +1630,9 @@ pInstNoPrefix pc = body
               let pSm90 = do
                     src_reg <-
                       P.option [] $ do
-                        r <- pSrcR <* pSymbol ","
+                        r <- pSrcR
                         return [r]
+                    P.option () $ pSymbol "," >> return ()
                     src_lbl <-
                       P.option [] $ do
                         lbl <- pSrcLbl pc op

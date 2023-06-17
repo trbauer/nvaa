@@ -189,7 +189,8 @@ formatSrcWithOpts fmt_imm src =
           --
           -- 010
           -- 011
-          (RZ,URZ,imm) | msNull r_ms -> fmtImmAtom imm --  [0x0] or [0x10]
+          (RZ,URZ,0x0) | msNull r_ms -> "[RZ]" --  [RZ]
+          (RZ,URZ,imm) | msNull r_ms -> "[" ++ fmtImmAtom imm ++ "]" --  [0x0] or [0x10]
           --
           (r,ur,imm)
             | null r_ur ->
@@ -212,6 +213,7 @@ formatSrcWithOpts fmt_imm src =
       SrcDescAddr ur (r,r_ms) imm -> "desc[" ++ format ur ++ "][" ++ r_i ++ "]"
         where r_i =
                 case (r,imm) of
+                  (RZ,0x0) | msNull r_ms -> "RZ"
                   (RZ,imm) | msNull r_ms -> fmtImmAtom imm
                   (r,0) -> msDecorate r_ms (format r)
                   (r,imm) -> msDecorate r_ms (format r) ++ fmtImmTerm imm
