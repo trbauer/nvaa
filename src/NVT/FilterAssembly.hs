@@ -124,12 +124,21 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                       lookupMapping dict = do
                         case file `lookup` dict of
                           Nothing -> do
-                            src_lns <- lines <$> readFile file
-                            let arr = listArray (1,length src_lns) src_lns :: Array Int String
-                            lookupMapping ((file,arr):dict)
+                            z <- doesFileExist file
+                            if not z then do
+                                putStrLn $ file ++ ": FILE NOT FOUND (line mappings unavailable)"
+                                let arr = listArray (0,0) [] :: Array Int String
+                                lookupMapping ((file,arr):dict)
+                              else do
+                                src_lns <- lines <$> readFile file
+                                let arr = listArray (1,length src_lns) src_lns :: Array Int String
+                                lookupMapping ((file,arr):dict)
                           Just arr -> do
                             let src_loc = takeFileName file ++ ":" ++ show lno
-                            let src_line = "  // " ++ padR 32 (src_loc ++ ": ") ++ (arr ! lno)
+                            let src_line = "  // " ++ padR 32 (src_loc ++ ": ") ++ ln_str
+                                  where ln_str
+                                          | lno <= snd (bounds arr) = arr ! lno
+                                          | otherwise = ": ???"
                             emitStyle fos h_out "c" src_line
                             emitLn ""
                             -- emitLn $ lnstr ++ "\n" ++ src_line
