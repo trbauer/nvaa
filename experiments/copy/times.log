@@ -1,0 +1,9 @@
+               algorithm        throughput (GB/s)
+               coalesced                   85.899
+              coalesced4                   92.160
+                  scalar                   12.045
+                 scalar4                   24.971
+       coalesced noalias                   92.917
+      coalesced4 noalias                   84.402
+          scalar noalias                   29.226
+         scalar4 noalias                   77.903
