@@ -19,7 +19,7 @@
 #include <tuple>
 #include <vector>
 
-
+// C.f. https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
 using namespace mincu;
 

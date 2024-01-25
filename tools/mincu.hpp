@@ -94,20 +94,20 @@ static void fatal(Ts...ts) {
   } while(0)
 
 struct random_state {
-    std::mt19937 gen;
+  std::mt19937 gen;
 
-    random_state() : gen(std::random_device()()) { }
-    random_state(unsigned seed) : gen(seed) { }
-    random_state(const char *seed) {
-      std::string str = seed;
-      std::seed_seq ss(str.begin(), str.end());
-      gen.seed(ss);
-    }
+  random_state() : gen(std::random_device()()) { }
+  random_state(unsigned seed) : gen(seed) { }
+  random_state(const char *seed) {
+    std::string str = seed;
+    std::seed_seq ss(str.begin(), str.end());
+    gen.seed(ss);
+  }
 
-    // static std::seed_seq get_seq(const char *s) {
-    //  std::string str = s;
-    //  return std::seed_seq(str.begin(), str.end());
-    // }
+  // static std::seed_seq get_seq(const char *s) {
+  //  std::string str = s;
+  //  return std::seed_seq(str.begin(), str.end());
+  // }
 }; // random_state
 
 template <typename T,typename R = T>
@@ -260,17 +260,17 @@ static void randomize_integral(T *vals, size_t elems, T lo, T hi)
 #define RANDOMIZE_INSTANCE(R,DELEGATE)\
   RANDOMIZE_INSTANCE2(R,R,DELEGATE)
 
-RANDOMIZE_INSTANCE(float,randomize_real)
-RANDOMIZE_INSTANCE(double,randomize_real)
+RANDOMIZE_INSTANCE(float, randomize_real)
+RANDOMIZE_INSTANCE(double, randomize_real)
 
-RANDOMIZE_INSTANCE2(int8_t,int16_t,randomize_integral)
-RANDOMIZE_INSTANCE(int16_t,randomize_integral)
-RANDOMIZE_INSTANCE(int32_t,randomize_integral)
-RANDOMIZE_INSTANCE(int64_t,randomize_integral)
-RANDOMIZE_INSTANCE2(uint8_t,uint16_t,randomize_integral)
-RANDOMIZE_INSTANCE(uint16_t,randomize_integral)
-RANDOMIZE_INSTANCE(uint32_t,randomize_integral)
-RANDOMIZE_INSTANCE(uint64_t,randomize_integral)
+RANDOMIZE_INSTANCE2(int8_t, int16_t, randomize_integral)
+RANDOMIZE_INSTANCE(int16_t, randomize_integral)
+RANDOMIZE_INSTANCE(int32_t, randomize_integral)
+RANDOMIZE_INSTANCE(int64_t, randomize_integral)
+RANDOMIZE_INSTANCE2(uint8_t, uint16_t, randomize_integral)
+RANDOMIZE_INSTANCE(uint16_t, randomize_integral)
+RANDOMIZE_INSTANCE(uint32_t, randomize_integral)
+RANDOMIZE_INSTANCE(uint64_t, randomize_integral)
 
 
 /////////////////////////////////////////////////
@@ -294,6 +294,119 @@ RANDOMIZE_INSTANCE(uint64_t,randomize_integral)
 //
 // float2
 // RANDOMIZE_VECTOR_INSTANCE(float,2,randomize_real)
+
+/*
+static inline bool operator==(float2 a, float2 b) {
+  return a.x == b.x && a.y == b.y;
+}
+static inline bool operator!=(float2 a, float2 b) {
+  return !(a == b);
+}
+static inline bool operator!=(float2 a, float b) {
+  return a.x != b || a.y != b;
+}
+*/
+// broadcast conversion
+// static inline operator float2(float x) const { return make_float2(x, x); }
+struct frac {
+  const int prec;
+  union {
+    uint16_t f16;
+    uint16_t f16x2[2];
+    uint16_t bf16;
+    uint16_t bf16x2[2];
+    float    f32;
+    float2   f32x2;
+    double   f64;
+    double2  f64x2;
+  } v;
+  const enum frac_tag {F16,F16x2,BF16,BF16x2,F32,F32x2,F64,F64x2} tag;
+
+  frac(float f, int _prec = -1) : tag(F32), prec(_prec) {
+    v.f32 = f;
+  }
+  frac(float2 f, int _prec = -1) : tag(F32x2), prec(_prec) {
+    v.f32x2 = f;
+  }
+  frac(double f, int _prec = -1) : tag(F64), prec(_prec) {
+    v.f64 = f;
+  }
+  frac(double2 f, int _prec = -1) : tag(F64x2), prec(_prec) {
+    v.f64x2 = f;
+  }
+  /*
+  static inline frac bf16(uint16_t fb, int _prec = -1) {
+    frac f {frac::BF16, prec};
+    f.v.bf16 = fb;
+    return f;
+  }
+  static inline frac bf16x2(uint32_t fb, int _prec = -1) {
+    frac f {frac::BF16x2, prec};
+    f.v.bf16x2[0] = fb & 0xFFFF;
+    f.v.bf16x2[1] = fb >> 16;
+    return f;
+  }
+  static inline frac f16(uint16_t fb, int _prec = -1) {
+    frac f {frac::F16, prec};
+    f.v.f16 = fb;
+    return f;
+  }
+  static inline frac f16x2(uint32_t fb, int _prec = -1) {
+    frac f {frac::F16x2, prec};
+    f.v.f16x2[0] = fb & 0xFFFF;
+    f.v.f16x2[1] = fb >> 16;
+    return f;
+  }
+  */
+private:
+  frac(frac_tag t, int _prec) : tag(t), prec(_prec) { }
+
+}; // frac
+
+static inline float hf_to_f(uint16_t u16);
+static inline float bf_to_f(uint16_t u16) {
+  union {float f; uint32_t i;} u;
+  u.i = (uint32_t)u16 << 16;
+  return u.f;
+}
+static inline std::ostream &operator <<(std::ostream &os, frac v) {
+  std::stringstream ss;
+  if (v.prec >= 0)
+    ss << std::setprecision(v.prec);
+  switch (v.tag) {
+  case frac::F16:
+    ss << hf_to_f(v.v.f16);
+    break;
+  case frac::F16x2:
+    ss << "{" << hf_to_f(v.v.f16x2[0]) << ", " << hf_to_f(v.v.f16x2[1]) << "}";
+    break;
+  case frac::BF16:
+    ss << bf_to_f(v.v.bf16);
+    break;
+  case frac::BF16x2:
+    ss << "{" << bf_to_f(v.v.bf16x2[0]) << ", " << bf_to_f(v.v.bf16x2[1]) << "}";
+    break;
+  case frac::F32:
+    ss << v.v.f32;
+    break;
+  case frac::F32x2:
+    ss << "{" << v.v.f32x2.x << ", " << v.v.f32x2.y << "}";
+    break;
+  case frac::F64:
+    ss << v.v.f64;
+    break;
+  case frac::F64x2:
+    ss << "{" << v.v.f64x2.x << ", " << v.v.f64x2.y << "}";
+    break;
+
+  default:
+    fatal("mincu: << not defined for this tag\n");
+  }
+  os << ss.str();
+  return os;
+}
+
+
 
 
 template <typename R>
@@ -325,7 +438,7 @@ struct init {
     case init_type::SEQ:
     {
       R val = seq_init;
-      if (seq_mod) {
+      if (seq_mod != T(0)) {
         if constexpr (std::is_floating_point<R>::value && std::is_floating_point<T>::value) {
           val = std::fmod(val, seq_mod);
         } else {
@@ -687,7 +800,85 @@ public:
 }; // struct umem
 
 
+static const int F32_BITS = 32;
+static const int F32_MNT_BITS = 23;
+static const int F32_EXP_BITS = F32_BITS - 1 - F32_MNT_BITS; // 23
+static const int F32_BIAS = (1 << (F32_EXP_BITS - 1)) - 1; // 127
+static const uint32_t F32_SIGN_BIT  = 1u << (F32_BITS - 1); // 0x80000000
+static const uint32_t F32_EXP_MASK =
+  ((1 << F32_EXP_BITS) - 1) << F32_MNT_BITS;
+static const uint32_t F32_MANT_MASK = (1u << F32_MNT_BITS) - 1; // 0x007FFFFF
+static const uint32_t F32_QNAN_BIT = (F32_MANT_MASK + 1) >> 1; // 0x00400000
 
+static const int F16_BITS = 16;
+static const int F16_MNT_BITS = 10;
+static const int F16_EXP_BITS = F16_BITS - F16_MNT_BITS - 1;
+static const int F16_BIAS = (1 << (F16_EXP_BITS - 1)) - 1; // 15
+static const uint16_t F16_SIGN_BIT = 1 << (F16_BITS - 1); // 0x8000
+static const uint16_t F16_EXP_MASK =
+  ((1 << F16_EXP_BITS) - 1) << F16_MNT_BITS; // 0x7C00
+static const uint16_t F16_MANT_MASK = (1 << F16_MNT_BITS) - 1; // 0x03FF
+static const uint16_t F16_QNAN_BIT = (F16_MANT_MASK + 1) >> 1; // 0x0200
+
+static const int F32_F16_BIAS_DIFF = F32_BIAS - F16_BIAS;
+
+static const int F32_F16_MNT_DIFF = 23 - 10;
+
+constexpr static inline uint32_t float_to_bits(float f) {
+  union{float f; uint32_t i;} u{f};
+  return u.i;
+}
+
+constexpr static inline float float_from_bits(uint32_t f) {
+  union{uint32_t i; float f;} u{f};
+  return u.f;
+}
+
+static inline float half_bits_to_float_impl(uint16_t u16, bool set_qnan)
+{
+  uint16_t u16_u = u16 & 0x7FFF;
+  uint32_t s32 = ((uint32_t)u16 & F16_SIGN_BIT) << 16;
+  uint32_t m16 = u16 & F16_MANT_MASK;
+  if (u16_u > F16_EXP_MASK) {
+    // preserve qNaN bit disposition
+    // initially match whatever the fp16 qNaN bit was
+    uint32_t m32 =
+      (u16 & F16_QNAN_BIT) << F32_F16_MNT_DIFF;
+    if (set_qnan) {
+      m32 |= F32_QNAN_BIT; // ensure it's set irrespective of input
+    }
+    if (m32 == 0) {
+      m32 = 1; // ensure still NaN
+    }
+    return float_from_bits(s32 | F32_EXP_MASK | m32);
+  }
+  uint32_t e16 = (u16 & F16_EXP_MASK) >> F16_MNT_BITS;
+  uint32_t e32, m32;
+  if (u16_u == F16_EXP_MASK) {
+    // +-infinity
+    e32 = F32_EXP_MASK >> F32_MNT_BITS;
+    m32 = 0;
+  } else if (e16 != 0 && e16 < 0x1F) {
+    //  normal number
+    e32 = e16 + F32_F16_BIAS_DIFF; // bias difference; // 0x70
+    m32 = m16 << F32_F16_MNT_DIFF; // (23 - 10);
+  } else if (e16 == 0 && m16 != 0) {
+    // denorm/subnorm number (e16 == 0) => renormalize it
+    // shift the mantissa left until the hidden one gets set
+    for (e32 = F32_F16_BIAS_DIFF + 1;
+      (m16 & (F16_MANT_MASK + 1)) == 0;
+      m16 <<= 1, e32--)
+      ;
+    m32 = (m16 << F32_F16_MNT_DIFF) & F32_MANT_MASK;
+  } else { // if (e16 == 0) // +/- 0.0
+    e32 = 0;
+    m32 = 0;
+  }
+  return float_from_bits(s32 | (e32 << F32_MNT_BITS) | m32);
+}
+static inline float hf_to_f(uint16_t u16) {
+  return half_bits_to_float_impl(u16, true);
+}
 
 
 /*
@@ -726,4 +917,4 @@ OPERATORS(int)
 
 } // namespace mincu::
 
-#endif
+#endif //
