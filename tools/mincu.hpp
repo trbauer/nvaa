@@ -317,16 +317,20 @@ struct frac {
     uint16_t bf16x2[2];
     float    f32;
     float2   f32x2;
+    float4   f32x4;
     double   f64;
     double2  f64x2;
   } v;
-  const enum frac_tag {F16,F16x2,BF16,BF16x2,F32,F32x2,F64,F64x2} tag;
+  const enum frac_tag {F16,F16x2,BF16,BF16x2,F32,F32x2,F32x4,F64,F64x2} tag;
 
   frac(float f, int _prec = -1) : tag(F32), prec(_prec) {
     v.f32 = f;
   }
   frac(float2 f, int _prec = -1) : tag(F32x2), prec(_prec) {
     v.f32x2 = f;
+  }
+  frac(float4 f, int _prec = -1) : tag(F32x4), prec(_prec) {
+    v.f32x4 = f;
   }
   frac(double f, int _prec = -1) : tag(F64), prec(_prec) {
     v.f64 = f;
@@ -373,6 +377,7 @@ static inline std::ostream &operator <<(std::ostream &os, frac v) {
   std::stringstream ss;
   if (v.prec >= 0)
     ss << std::setprecision(v.prec);
+  ss << std::fixed;
   switch (v.tag) {
   case frac::F16:
     ss << hf_to_f(v.v.f16);
@@ -391,6 +396,9 @@ static inline std::ostream &operator <<(std::ostream &os, frac v) {
     break;
   case frac::F32x2:
     ss << "{" << v.v.f32x2.x << ", " << v.v.f32x2.y << "}";
+    break;
+  case frac::F32x4:
+    ss << "{" << v.v.f32x4.x << ", " << v.v.f32x4.y << ", " << v.v.f32x4.z << ", " << v.v.f32x4.w << "}";
     break;
   case frac::F64:
     ss << v.v.f64;
@@ -500,7 +508,11 @@ template <> static inline const char *type_name<uint16_t>() {return "uint16_t";}
 template <> static inline const char *type_name<uint32_t>() {return "uint32_t";}
 template <> static inline const char *type_name<uint64_t>() {return "uint64_t";}
 template <> static inline const char *type_name<float>() {return "float";}
+template <> static inline const char *type_name<float2>() {return "float2";}
+template <> static inline const char *type_name<float4>() {return "float4";}
 template <> static inline const char *type_name<double>() {return "double";}
+template <> static inline const char *type_name<double2>() {return "double2";}
+template <> static inline const char *type_name<double4>() {return "double4";}
 
 
 struct umem_alloc {
@@ -607,6 +619,10 @@ public:
   static void format_elem(std::ostream &os, int64_t t, int prec) {
     os << fmtDec(t);
   }
+  template <>
+  static void format_elem(std::ostream &os, float2 t, int prec) {
+    os << frac(t, prec);
+  }
 
   template <typename T>
   static std::string fmtHexDigits(T t, int cw = -1) {
@@ -625,7 +641,7 @@ public:
   }
 
   void str(
-    std::ostream &os = std::cout,
+    std::ostream &os,
     int elems_per_line = -1, int prec = -1) const
   {
     os << type_name<E>() << "[" << elems << "]: " <<
@@ -662,9 +678,9 @@ class umem // unified memory buffer
   size_t                      elems;
 
 public:
-  umem(size_t _elems)
+  explicit umem(size_t _elems)
     : elems(_elems), ptr(std::make_shared<umem_alloc>(_elems * sizeof(E))) { }
-  umem(std::shared_ptr<umem_alloc> &_ptr, size_t elems)
+  explicit umem(std::shared_ptr<umem_alloc> &_ptr, size_t elems)
     : elems(_elems), ptr(_ptr) { }
 
   template <typename R>
@@ -720,12 +736,15 @@ public:
 
 
   template <typename T>
-  static void format_elem(std::ostream &os, T t, int prec) {
+  static void format_elem(std::ostream &os, T t, int prec);
+  /*
+  {
     if (prec >= 0)
       os << std::fixed  << std::setprecision(prec) << t;
     else
       os << t;
   }
+  */
 
   template <>
   static void format_elem(std::ostream &os, uint16_t t, int prec) {
@@ -750,6 +769,18 @@ public:
   template <>
   static void format_elem(std::ostream &os, int64_t t, int prec) {
     os << fmtDec(t);
+  }
+  template <>
+  static void format_elem(std::ostream &os, float t, int prec) {
+    os << frac(t, prec);
+  }
+  template <>
+  static void format_elem(std::ostream &os, float2 t, int prec) {
+    os << frac(t, prec);
+  }
+  template <>
+  static void format_elem(std::ostream &os, float4 t, int prec) {
+    os << frac(t, prec);
   }
 
 

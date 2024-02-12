@@ -57,14 +57,14 @@ runP pma u file inp = body
   where body =
           case runExceptT (P.runParserT pma_with_warnings (initPSt u) file inp) of
             mea -> do
-            ea <- mea
-            case ea of
-              -- semantic error (throwSemanticError)
-              Left err -> return $ Left err
-              -- parse error
-              Right (Left err) -> return $ Left (errToDiag err)
-              -- success
-              Right (Right (a,u,ws)) -> return (Right (a,u,reverse ws))
+              ea <- mea
+              case ea of
+                -- semantic error (throwSemanticError)
+                Left err -> return $ Left err
+                -- parse error
+                Right (Left err) -> return $ Left (errToDiag err)
+                -- success
+                Right (Right (a,u,ws)) -> return (Right (a,u,reverse ws))
 
         pma_with_warnings = do
           a <- pma
