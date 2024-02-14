@@ -680,7 +680,7 @@ class umem // unified memory buffer
 public:
   explicit umem(size_t _elems)
     : elems(_elems), ptr(std::make_shared<umem_alloc>(_elems * sizeof(E))) { }
-  explicit umem(std::shared_ptr<umem_alloc> &_ptr, size_t elems)
+  explicit umem(std::shared_ptr<umem_alloc> &_ptr, size_t _elems)
     : elems(_elems), ptr(_ptr) { }
 
   template <typename R>
@@ -737,14 +737,6 @@ public:
 
   template <typename T>
   static void format_elem(std::ostream &os, T t, int prec);
-  /*
-  {
-    if (prec >= 0)
-      os << std::fixed  << std::setprecision(prec) << t;
-    else
-      os << t;
-  }
-  */
 
   template <>
   static void format_elem(std::ostream &os, uint16_t t, int prec) {

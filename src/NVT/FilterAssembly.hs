@@ -22,20 +22,37 @@ type SrcDict = [(FilePath,Array Int String)]
 
 
 -- "//## File "D:\\dev\\nvaa\\cuda-tests/cf.cu", line 62"
+-- rejects inline
+-- "//## File "D:\\dev\\nvaa\\cuda-tests/cf.cu", line 62 inlined at ..." << rejects
+-- Typically we want the top-level only location only; that comes last without an "inlined at" part
 tryParseLineMapping :: String -> Maybe (FilePath,Int)
-tryParseLineMapping ln
+tryParseLineMapping ln =
+  case tryParseLineMappingWithSfx ln of
+    Just (fp,lno,"") -> return (fp,lno)
+    _ -> Nothing
+
+
+-- Will allow for the above
+tryParseLineMappingWithSfx :: String -> Maybe (FilePath,Int,String)
+tryParseLineMappingWithSfx ln
   | lno_pfx `isPrefixOf` (dropWhile isSpace ln) =
     case reads sfx_file :: [(String,String)] of
       [(file,sfx)] ->
         case reads (dropWhile (not . isDigit) sfx) :: [(Int,String)] of
-          [(lno,"")] -> Just (file,lno)
+          [(lno,sfx)] -> Just (file,lno,sfx)
           _ -> Nothing
       _ -> Nothing
   | otherwise = Nothing
   where lno_pfx = "//## File "
         sfx_file = dropWhile (/='"') ln
 
+
 -- lm_test = "//## File \"D:\\\\dev\\\\nvaa\\\\cuda-tests/cf.cu\", line 62"
+
+-- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 458 inlined at "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 471
+-- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 471 inlined at "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 396
+-- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 396 inlined at "E:\\dev\\nvaa\\experiments\\asynccopy/micro.cu", line 57
+-- //## File "E:\\dev\\nvaa\\experiments\\asynccopy/micro.cu", line 57
 
 
 -- maxwell =
@@ -114,12 +131,13 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
           | isLabelLine lnstr && foColor fos = do
               emitStyle fos h_out "n" lnstr >> emitLn "" >> cont dict0 lns
           | otherwise =
-            case tryParseLineMapping lnstr of
+            case tryParseLineMappingWithSfx lnstr of
               Nothing
                 | isCommentLine lnstr && foColor fos ->
                     emitStyle fos h_out "c" lnstr >> hPutStr h_out "\n" >> cont dict0 lns
                 | otherwise -> emitLn lnstr >> cont dict0 lns
-              Just (file,lno) -> lookupMapping dict0
+              -- //## File "E:\\dev\\nvaa\\experiments\\asynccopy/micro.cu", line 57
+              Just (file,lno,"") -> lookupMapping dict0
                 where lookupMapping :: SrcDict -> IO ()
                       lookupMapping dict = do
                         case file `lookup` dict of
@@ -143,6 +161,9 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                             emitLn ""
                             -- emitLn $ lnstr ++ "\n" ++ src_line
                             cont dict lns
+              -- inlined at line source line
+              -- -- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 458 inlined at "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 471
+              Just (_,_,_) -> cont dict0 lns
           where {-
                 global_demangled =
                   -- .global _Z5add64PyPKyy

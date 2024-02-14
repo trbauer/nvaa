@@ -280,7 +280,7 @@ int main(int argc, const char* argv[])
     } else if (arg == "scalar4_noalias") {
       run_scalar4_noalias = true;
     } else {
-      fatal(arg, ": inavlid argument");
+      fatal(arg, ": invalid argument");
     }
   }
   if (!run_coalesced && !run_scalar && !run_scalar4) {

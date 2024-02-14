@@ -147,7 +147,8 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.7"
+nvt_version = "1.1.8" -- using -print-line-info-inline
+-- nvt_version = "1.1.7"
 
 
 run :: [String] -> IO ()
@@ -443,7 +444,8 @@ runWithOpts os
                 warningLn os "nvdisasm: failed trying with*out* --print-line-info"
                 runCudaTool os "nvdisasm" nvdis_args_no_lines
           --
-          nvdis_out <- runCudaTool os "nvdisasm" (["--print-line-info"] ++ nvdis_args_no_lines)
+          let args_lines = ["--print-line-info","--print-line-info-inline"]
+          nvdis_out <- runCudaTool os "nvdisasm" (args_lines ++ nvdis_args_no_lines)
             `catch` tryNvdisasmWithoutLineNumbers
           processSassToOutput maybe_ptx nvdis_out
           --
