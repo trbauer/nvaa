@@ -158,7 +158,45 @@ predicate destination.  The predicate output appears to be a non-zero flag.
 
 [ what're the extra arguments? Output non-zero or zero?? ]
 
+## PRMT
 
+Permutes A pair of 32 values and does a byte select on them.
+An example would be a misaligned DWord load that needs to assemble 4 bytes into a 32b value.
+
+See: https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-prmt
+
+
+We have the following:
+
+     // barrier:592:                            memcpy(__destination, __source, __total_size);
+      LDG.E.U8.SYS  R6, [R2+0x1]                         {!4,+3.W,+1.R};
+      LDG.E.U8.SYS  R7, [R2]                             {!4,+3.W,+1.R};
+      LDG.E.U8.SYS  R5, [R2+0x2]                         {!4,+4.W,+1.R};
+      LDG.E.U8.SYS  R4, [R2+0x3]
+
+This is loading bytes `B[3,2,1,0] = {R4,R5,R6,R7}`.  The `PRMT` assembles these into a single 32b value.
+
+      // barrier:592:                            memcpy(__destination, __source, __total_size);
+      PRMT      R6,     R6,     0x7604, R7               {!4,Y,^3};
+      PRMT      R5,     R5,     0x7054, R6               {!4,Y,^4};
+      PRMT      R6,     R4,     0x654,  R5               {!2,^5};
+
+
+The general form of `PRMT` is to byte select from the 8 bytes of `((SRC2<<32)|SRC0)`.
+There are some throw-away values in the high selectors that should have no effect.
+Then this really is selecting.
+
+      PRMT      R6,     R6,     0xXX04, R7               {!4,Y,^3};
+      // R6 = XXB[1]B[0]
+      PRMT      R5,     R5,     0xX054, R6               {!4,Y,^4};
+      // R5 = XB[2]B[1]B[0]
+      PRMT      R6,     R4,     0x0654, R5               {!2,^5};
+      // R6 = B[3]B[2]B[1]B[0]
+
+The above was a `cuda::memcpy_async` on a part that made it synchronous,
+but had to honor byte alignment for some reason (my fault?).
+
+https://nvidia.github.io/cccl/libcudacxx/extended_api/asynchronous_operations/memcpy_async.html
 
 ## Sampler Messages
 
@@ -198,3 +236,4 @@ Able to prove that:
  `R3` holds `float4::s1`
  `R4` holds `float4::s2`
  `R5` holds `float4::s3`
+
