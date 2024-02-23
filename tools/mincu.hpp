@@ -1,17 +1,22 @@
 #ifndef MINCU_HPP
 #define MINCU_HPP
 
-#include <cstdint>
+// #if __cplusplus < 201703L
+// #error "Need -std=c++17"
+// #endif
+
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
-// #include <memory>
-#include <random>
+#include <limits>
 #include <ostream>
+#include <random>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include <cuda_runtime_api.h>
 
@@ -27,7 +32,7 @@ static void format_to(std::stringstream &os) { }
 template <typename T, typename...Ts>
 static void format_to(std::stringstream &os, T t, Ts...ts) {os << t; format_to(os, ts...);}
 template <typename...Ts>
-static std::string   format(Ts...ts) {
+static std::string format(Ts...ts) {
   std::stringstream ss; format_to(ss, ts...); return ss.str();
 }
 struct hex
@@ -569,7 +574,7 @@ public:
 
   void prefetch_to_device() const {
     CUDA_API(cudaMemPrefetchAsync,
-      get_cptr(),               0, size()*sizeof(E));
+      get_cptr(), 0, size()*sizeof(E));
   }
   void prefetch_to_host() const {
     CUDA_API(cudaMemPrefetchAsync,
@@ -712,10 +717,11 @@ public:
   // }
 
   void prefetch_to_device() const {
-    CUDA_API(cudaMemPrefetchAsync, get_cptr(), 0, elems * sizeof(E));
+    // fails on Windows: https://stackoverflow.com/questions/50717306/invalid-device-ordinal-on-cudamemprefetchasync
+    CUDA_API(cudaMemPrefetchAsync, get_cptr(), elems * sizeof(E), 0);
   }
   void prefetch_to_host() const {
-    CUDA_API(cudaMemPrefetchAsync, get_cptr(), cudaCpuDeviceId, elems * sizeof(E));
+    CUDA_API(cudaMemPrefetchAsync, get_cptr(), elems * sizeof(E), cudaCpuDeviceId);
   }
 
 
@@ -901,6 +907,276 @@ static inline float half_bits_to_float_impl(uint16_t u16, bool set_qnan)
 }
 static inline float hf_to_f(uint16_t u16) {
   return half_bits_to_float_impl(u16, true);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// integer parsing
+template <typename T>
+static T parse_uintT(
+  const std::string &s,
+  bool allow_suffix,
+  const char *what)
+{
+  try {
+    if (s.size() >= 1 && s[0] == '-')
+      mincu::fatal(s,": must be positive ", what);
+
+    const char *str = s.c_str();
+
+    T sign = 1;
+    if (std::is_signed<T>::value) {
+      if (s.size() > 0 && s[0] == '-') {
+        str++;
+        sign = T(-1);
+      }
+    }
+    T val = 0;
+
+    // std::strtoull saturates at max value; so we do our own parsing here
+    if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+      str += 2;
+      int nds = 0;
+      while (isxdigit(*str)) {
+        nds++;
+        T d =
+          *str >= 'A' && *str <= 'F' ? *str - 'A' + 10 :
+          *str >= 'a' && *str <= 'f' ? *str - 'a' + 10 :
+          *str - '0';
+        T new_val = 16 * val + d;
+        if (new_val < val) {
+          mincu::fatal(s, ": overflows ", what);
+        }
+        val = new_val;
+        str++;
+      }
+      if (nds == 0) {
+        mincu::fatal(s, ": malformed ", what);
+      }
+    } else {
+      int nds = 0;
+      while (isdigit(*str)) {
+        nds++;
+        T new_val = 16 * val + *str - '0';
+        if (new_val < val) {
+          mincu::fatal(s, ": overflows ", what);
+        }
+        val = new_val;
+        str++;
+      }
+      if (nds == 0) {
+        mincu::fatal(s, ": malformed ", what);
+      }
+    }
+    while (*str == ' ')
+      str++;
+    if (allow_suffix && *str) {
+      T scale = 1;
+      if (*str == 'K' || *str == 'k')
+        scale = 1024;
+      else if (*str == 'M' || *str == 'm')
+        scale = 1024*1024;
+      else if (*str == 'G' || *str == 'g')
+        scale = 1024*1024*1024;
+      else
+        mincu::fatal(s, ": malformed ", what, " suffix (expected K, M, or G)");
+      str++;
+
+      T new_val = val * scale;
+      if (new_val < val) {
+        fatal(s, ": value overflows type size");
+      }
+      val = new_val;
+    }
+    if (*str)
+      mincu::fatal(s, ": malformed ", what);
+    if (val == std::numeric_limits<T>::min() && sign == T(-1))
+      mincu::fatal(s, ": negation of min value has no effect");
+
+    return sign * val;
+  } catch (...) {
+    mincu::fatal(s, ": malformed ", what);
+    return T(-1);
+  }
+}
+static uint64_t parse_uint64(
+  const std::string &s,
+  bool allow_suffix = false,
+  const char *what = "uint64")
+{
+  return parse_uintT<uint64_t>(s, allow_suffix, what);
+}
+static uint64_t parse_positive_uint64(
+  const std::string &s,
+  bool allow_suffix = false,
+  const char *what = "uint64")
+{
+  auto x = parse_uint64(s, allow_suffix, what);
+  if (x == 0) {
+    mincu::fatal(s, ": ", what, " must be positive");
+  }
+  return x;
+}
+static int64_t parse_int64(
+  const std::string &s,
+  bool allow_suffix = false,
+  const char *what = "int64")
+{
+  return parse_uintT<int64_t>(s, allow_suffix, what);
+}
+
+static std::string cudaErrorSymbol(enum cudaError e)
+{
+#define MINCU_MKCASE(E) case E: return #E
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g3f51e3575c2178246db0a94a430e0038
+  switch(e) {
+  MINCU_MKCASE(cudaSuccess);
+  MINCU_MKCASE(cudaErrorInvalidValue);
+  MINCU_MKCASE(cudaErrorMemoryAllocation);
+  MINCU_MKCASE(cudaErrorInitializationError);
+  MINCU_MKCASE(cudaErrorCudartUnloading);
+  MINCU_MKCASE(cudaErrorProfilerDisabled);
+  MINCU_MKCASE(cudaErrorProfilerNotInitialized);
+  MINCU_MKCASE(cudaErrorProfilerAlreadyStarted);
+  MINCU_MKCASE(cudaErrorProfilerAlreadyStopped);
+  MINCU_MKCASE(cudaErrorInvalidConfiguration);
+  MINCU_MKCASE(cudaErrorInvalidPitchValue);
+  MINCU_MKCASE(cudaErrorInvalidSymbol);
+  MINCU_MKCASE(cudaErrorInvalidHostPointer);
+  MINCU_MKCASE(cudaErrorInvalidDevicePointer);
+  MINCU_MKCASE(cudaErrorInvalidTexture);
+  MINCU_MKCASE(cudaErrorInvalidTextureBinding);
+  MINCU_MKCASE(cudaErrorInvalidChannelDescriptor);
+  MINCU_MKCASE(cudaErrorInvalidMemcpyDirection);
+  MINCU_MKCASE(cudaErrorAddressOfConstant);
+  MINCU_MKCASE(cudaErrorTextureFetchFailed);
+  MINCU_MKCASE(cudaErrorTextureNotBound);
+  MINCU_MKCASE(cudaErrorSynchronizationError);
+  MINCU_MKCASE(cudaErrorInvalidFilterSetting);
+  MINCU_MKCASE(cudaErrorInvalidNormSetting);
+  MINCU_MKCASE(cudaErrorMixedDeviceExecution);
+  MINCU_MKCASE(cudaErrorNotYetImplemented);
+  MINCU_MKCASE(cudaErrorMemoryValueTooLarge);
+  MINCU_MKCASE(cudaErrorStubLibrary);
+  MINCU_MKCASE(cudaErrorInsufficientDriver);
+  MINCU_MKCASE(cudaErrorCallRequiresNewerDriver);
+  MINCU_MKCASE(cudaErrorInvalidSurface);
+  MINCU_MKCASE(cudaErrorDuplicateVariableName);
+  MINCU_MKCASE(cudaErrorDuplicateTextureName);
+  MINCU_MKCASE(cudaErrorDuplicateSurfaceName);
+  MINCU_MKCASE(cudaErrorDevicesUnavailable);
+  MINCU_MKCASE(cudaErrorIncompatibleDriverContext);
+  MINCU_MKCASE(cudaErrorMissingConfiguration);
+  MINCU_MKCASE(cudaErrorPriorLaunchFailure);
+  MINCU_MKCASE(cudaErrorLaunchMaxDepthExceeded);
+  MINCU_MKCASE(cudaErrorLaunchFileScopedTex);
+  MINCU_MKCASE(cudaErrorLaunchFileScopedSurf);
+  MINCU_MKCASE(cudaErrorSyncDepthExceeded);
+  MINCU_MKCASE(cudaErrorLaunchPendingCountExceeded);
+  MINCU_MKCASE(cudaErrorInvalidDeviceFunction);
+  MINCU_MKCASE(cudaErrorNoDevice);
+  MINCU_MKCASE(cudaErrorInvalidDevice);
+  MINCU_MKCASE(cudaErrorDeviceNotLicensed);
+  MINCU_MKCASE(cudaErrorSoftwareValidityNotEstablished);
+  MINCU_MKCASE(cudaErrorStartupFailure);
+  MINCU_MKCASE(cudaErrorInvalidKernelImage);
+  MINCU_MKCASE(cudaErrorDeviceUninitialized);
+  MINCU_MKCASE(cudaErrorMapBufferObjectFailed);
+  MINCU_MKCASE(cudaErrorUnmapBufferObjectFailed);
+  MINCU_MKCASE(cudaErrorArrayIsMapped);
+  MINCU_MKCASE(cudaErrorNoKernelImageForDevice);
+  MINCU_MKCASE(cudaErrorAlreadyAcquired);
+  MINCU_MKCASE(cudaErrorNotMapped);
+  MINCU_MKCASE(cudaErrorNotMappedAsArray);
+  MINCU_MKCASE(cudaErrorNotMappedAsPointer);
+  MINCU_MKCASE(cudaErrorECCUncorrectable);
+  MINCU_MKCASE(cudaErrorUnsupportedLimit);
+  MINCU_MKCASE(cudaErrorDeviceAlreadyInUse);
+  MINCU_MKCASE(cudaErrorPeerAccessUnsupported);
+  MINCU_MKCASE(cudaErrorInvalidPtx);
+  MINCU_MKCASE(cudaErrorInvalidGraphicsContext);
+  MINCU_MKCASE(cudaErrorNvlinkUncorrectable);
+  MINCU_MKCASE(cudaErrorJitCompilerNotFound);
+  MINCU_MKCASE(cudaErrorUnsupportedPtxVersion);
+  MINCU_MKCASE(cudaErrorJitCompilationDisabled);
+  MINCU_MKCASE(cudaErrorUnsupportedExecAffinity);
+  // MINCU_MKCASE(cudaErrorUnsupportedDevSideSync);
+  MINCU_MKCASE(cudaErrorInvalidSource);
+  MINCU_MKCASE(cudaErrorFileNotFound);
+  MINCU_MKCASE(cudaErrorSharedObjectSymbolNotFound);
+  MINCU_MKCASE(cudaErrorSharedObjectInitFailed);
+  MINCU_MKCASE(cudaErrorOperatingSystem);
+  MINCU_MKCASE(cudaErrorInvalidResourceHandle);
+  MINCU_MKCASE(cudaErrorIllegalState);
+  // MINCU_MKCASE(cudaErrorLossyQuery);
+  MINCU_MKCASE(cudaErrorSymbolNotFound);
+  MINCU_MKCASE(cudaErrorNotReady);
+  MINCU_MKCASE(cudaErrorIllegalAddress);
+  MINCU_MKCASE(cudaErrorLaunchOutOfResources);
+  MINCU_MKCASE(cudaErrorLaunchTimeout);
+  MINCU_MKCASE(cudaErrorLaunchIncompatibleTexturing);
+  MINCU_MKCASE(cudaErrorPeerAccessAlreadyEnabled);
+  MINCU_MKCASE(cudaErrorPeerAccessNotEnabled);
+  MINCU_MKCASE(cudaErrorSetOnActiveProcess);
+  MINCU_MKCASE(cudaErrorContextIsDestroyed);
+  MINCU_MKCASE(cudaErrorAssert);
+  MINCU_MKCASE(cudaErrorTooManyPeers);
+  MINCU_MKCASE(cudaErrorHostMemoryAlreadyRegistered);
+  MINCU_MKCASE(cudaErrorHostMemoryNotRegistered);
+  MINCU_MKCASE(cudaErrorHardwareStackError);
+  MINCU_MKCASE(cudaErrorIllegalInstruction);
+  MINCU_MKCASE(cudaErrorMisalignedAddress);
+  MINCU_MKCASE(cudaErrorInvalidAddressSpace);
+  MINCU_MKCASE(cudaErrorInvalidPc);
+  MINCU_MKCASE(cudaErrorLaunchFailure);
+  MINCU_MKCASE(cudaErrorCooperativeLaunchTooLarge);
+  MINCU_MKCASE(cudaErrorNotPermitted);
+  MINCU_MKCASE(cudaErrorNotSupported);
+  MINCU_MKCASE(cudaErrorSystemNotReady);
+  MINCU_MKCASE(cudaErrorSystemDriverMismatch);
+  MINCU_MKCASE(cudaErrorCompatNotSupportedOnDevice);
+  MINCU_MKCASE(cudaErrorMpsConnectionFailed);
+  MINCU_MKCASE(cudaErrorMpsRpcFailure);
+  MINCU_MKCASE(cudaErrorMpsServerNotReady);
+  MINCU_MKCASE(cudaErrorMpsMaxClientsReached);
+  MINCU_MKCASE(cudaErrorMpsMaxConnectionsReached);
+  MINCU_MKCASE(cudaErrorMpsClientTerminated);
+  MINCU_MKCASE(cudaErrorCdpNotSupported);
+  MINCU_MKCASE(cudaErrorCdpVersionMismatch);
+  MINCU_MKCASE(cudaErrorStreamCaptureUnsupported);
+  MINCU_MKCASE(cudaErrorStreamCaptureInvalidated);
+  MINCU_MKCASE(cudaErrorStreamCaptureMerge);
+  MINCU_MKCASE(cudaErrorStreamCaptureUnmatched);
+  MINCU_MKCASE(cudaErrorStreamCaptureUnjoined);
+  MINCU_MKCASE(cudaErrorStreamCaptureIsolation);
+  MINCU_MKCASE(cudaErrorStreamCaptureImplicit);
+  MINCU_MKCASE(cudaErrorCapturedEvent);
+  MINCU_MKCASE(cudaErrorStreamCaptureWrongThread);
+  MINCU_MKCASE(cudaErrorTimeout);
+  MINCU_MKCASE(cudaErrorGraphExecUpdateFailure);
+  MINCU_MKCASE(cudaErrorExternalDevice);
+  MINCU_MKCASE(cudaErrorInvalidClusterSize);
+  MINCU_MKCASE(cudaErrorUnknown);
+  MINCU_MKCASE(cudaErrorApiFailureBase);
+  default:
+    return mincu::format("cudaError(0x", hex((int)e), ")");
+  }
+#undef MINCU_MKCASE
+}
+
+static float time_dispatch_ms(std::function<void()> func)
+{
+  cudaEvent_t start, stop;
+  CUDA_API(cudaEventCreate, &start);
+  CUDA_API(cudaEventCreate, &stop);
+  CUDA_API(cudaEventRecord, start);
+  func();
+  CUDA_API(cudaEventRecord, stop);
+  CUDA_API(cudaEventSynchronize, stop);
+  float time = 0.0f;
+  CUDA_API(cudaEventElapsedTime, &time, start, stop);
+  CUDA_API(cudaEventDestroy, start);
+  CUDA_API(cudaEventDestroy, stop);
+  return time;
 }
 
 
