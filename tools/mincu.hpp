@@ -602,27 +602,27 @@ public:
 
   template <>
   static void format_elem(std::ostream &os, uint16_t t, int prec) {
-    os << "0x" << fmtHexDigits(t);
+    os << "0x" << fmt_hex_digits(t);
   }
   template <>
   static void format_elem(std::ostream &os, uint32_t t, int prec) {
-    os << "0x" << fmtHexDigits(t);
+    os << "0x" << fmt_hex_digits(t);
   }
   template <>
   static void format_elem(std::ostream &os, uint64_t t, int prec) {
-    os << "0x" << fmtHexDigits(t);
+    os << "0x" << fmt_hex_digits(t);
   }
   template <>
   static void format_elem(std::ostream &os, int16_t t, int prec) {
-    os << fmtDec(t);
+    os << fmt_dec(t);
   }
   template <>
   static void format_elem(std::ostream &os, int32_t t, int prec) {
-    os << fmtDec(t);
+    os << fmt_dec(t);
   }
   template <>
   static void format_elem(std::ostream &os, int64_t t, int prec) {
-    os << fmtDec(t);
+    os << fmt_dec(t);
   }
   template <>
   static void format_elem(std::ostream &os, float2 t, int prec) {
@@ -630,7 +630,7 @@ public:
   }
 
   template <typename T>
-  static std::string fmtHexDigits(T t, int cw = -1) {
+  static std::string fmt_hex_digits(T t, int cw = -1) {
     cw = cw <= 0 ? 2*sizeof(t) : cw;
     std::stringstream ss;
     ss << std::setw(cw) << std::uppercase << std::setfill('0')
@@ -638,7 +638,7 @@ public:
     return ss.str();
   }
   template <typename T>
-  static std::string fmtDec(T t, int cw = -1) {
+  static std::string fmt_dec(T t, int cw = -1) {
     cw = cw <= 0 ? 2*sizeof(t) : cw;
     std::stringstream ss;
     ss << std::setw(cw) << std::dec << t;
@@ -650,7 +650,7 @@ public:
     int elems_per_line = -1, int prec = -1) const
   {
     os << type_name<E>() << "[" << elems << "]: " <<
-      "0x" << fmtHexDigits<uint64_t>((uintptr_t)get_cptr()) << ":\n";
+      "0x" << fmt_hex_digits<uint64_t>((uintptr_t)get_cptr()) << ":\n";
     elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
     prec = prec < 0 ? 3 : prec;
     int addr_size =
@@ -659,7 +659,7 @@ public:
       -1;
     size_t i = 0;
     while (i < elems) {
-      os << fmtHexDigits<uint64_t>(i, addr_size) << ": ";
+      os << fmt_hex_digits<uint64_t>(i, addr_size) << ": ";
       for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
         os << "  ";
         format_elem(os, get_cptr()[i], prec);
@@ -676,6 +676,103 @@ public:
 };
 #endif // 0
 
+template <typename T>
+static std::string fmt_hex_digits(T t, int cw = -1) {
+  cw = cw <= 0 ? 2*sizeof(t) : cw;
+  std::stringstream ss;
+  ss << std::setw(cw) << std::uppercase << std::setfill('0')
+    << std::hex << t;
+  return ss.str();
+}
+template <typename T>
+static std::string fmt_dec(T t, int cw = -1) {
+  cw = cw <= 0 ? 2*sizeof(t) : cw;
+  std::stringstream ss;
+  ss << std::setw(cw) << std::dec << t;
+  return ss.str();
+}
+
+template <typename T>
+static void format_elem(std::ostream &os, T t, int prec);
+
+template <>
+static void format_elem(std::ostream &os, uint16_t t, int prec) {
+  os << "0x" << fmt_hex_digits(t);
+}
+template <>
+static void format_elem(std::ostream &os, uint32_t t, int prec) {
+  os << "0x" << fmt_hex_digits(t);
+}
+template <>
+static void format_elem(std::ostream &os, uint64_t t, int prec) {
+  os << "0x" << fmt_hex_digits(t);
+}
+template <>
+static void format_elem(std::ostream &os, int16_t t, int prec) {
+  os << fmt_dec(t);
+}
+template <>
+static void format_elem(std::ostream &os, int32_t t, int prec) {
+  os << fmt_dec(t);
+}
+template <>
+static void format_elem(std::ostream &os, int64_t t, int prec) {
+  os << fmt_dec(t);
+}
+template <>
+static void format_elem(std::ostream &os, float t, int prec) {
+  os << frac(t, prec);
+}
+template <>
+static void format_elem(std::ostream &os, float2 t, int prec) {
+  os << frac(t, prec);
+}
+template <>
+static void format_elem(std::ostream &os, float4 t, int prec) {
+  os << frac(t, prec);
+}
+
+template <typename T>
+static void format_buffer(
+    std::ostream &os,
+    const T *ptr,
+    size_t elems,
+    int elems_per_line,
+    std::function<void(std::ostream&,const T&)> fmt_elem,
+    std::function<void(std::ostream&,size_t)> fmt_addr)
+{
+  os << type_name<T>() << "[" << elems << "]: " <<
+    "0x" << fmt_hex_digits<uint64_t>((uintptr_t)ptr) << ":\n";
+  elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
+  size_t i = 0;
+  while (i < elems) {
+    fmt_addr(os, i);
+    os << ": ";
+    for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
+      os << "  ";
+      fmt_elem(os, ptr[i]);
+    }
+    os << "\n";
+  }
+}
+
+template <typename T>
+static void format_buffer(
+    std::ostream &os,
+    const T *ptr,
+    size_t elems,
+    int elems_per_line,
+    std::function<void(std::ostream&,const T&)> fmt_elem)
+{
+  const int addr_size =
+    sizeof(T) * elems <= 0xFFFFull ? 4 :
+    sizeof(T) * elems <= 0xFFFFFFFFull ? 8 : -1;
+  format_buffer<T>(os, ptr, elems, elems_per_line, fmt_elem,
+      [&](std::ostream &os, size_t ix) {
+        os << fmt_hex_digits<uint64_t>(sizeof(T) * ix, addr_size);
+      });
+}
+
 template <typename E>
 class umem // unified memory buffer
 {
@@ -689,10 +786,15 @@ public:
     : elems(_elems), ptr(_ptr) { }
 
   template <typename R>
-  umem(size_t _elems, const init<R> &i)
+  explicit umem(size_t _elems, const init<R> &i)
     : umem<E>(_elems)
   {
     apply<R>(i);
+  }
+  explicit umem(size_t _elems, std::function<E(size_t)> init)
+    : umem<E>(_elems)
+  {
+    apply(init);
   }
   ~umem() {
     // destructs ptr, which deallocs umem_alloc, if it's the last ref
@@ -728,9 +830,12 @@ public:
   template <typename R>
   void apply(const init<R> &i) {
     i.apply<E>(get_ptr(), size());
-    // prefetch_to_device();
   }
-
+  void apply(std::function<E(size_t)> init) {
+    for (size_t i = 0; i < size(); i++) {
+      get_ptr()[i] = init[i];
+    }
+  }
 
    // elements
    operator       E *()       {return get_ptr();}
@@ -741,85 +846,22 @@ public:
    //const E &operator[](size_t ix) const {return get_ptr()[ix];}
 
 
-  template <typename T>
-  static void format_elem(std::ostream &os, T t, int prec);
-
-  template <>
-  static void format_elem(std::ostream &os, uint16_t t, int prec) {
-    os << "0x" << fmtHexDigits(t);
+  void str(
+    std::function<void(std::ostream&,const E&)> fmt_elem,
+    std::ostream &os = std::cout,
+    int elems_per_line = -1,
+    int prec = -1) const
+  {
+    format_buffer(os, get_cptr(), size(), elems_per_line, fmt_elem);
   }
-  template <>
-  static void format_elem(std::ostream &os, uint32_t t, int prec) {
-    os << "0x" << fmtHexDigits(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, uint64_t t, int prec) {
-    os << "0x" << fmtHexDigits(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, int16_t t, int prec) {
-    os << fmtDec(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, int32_t t, int prec) {
-    os << fmtDec(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, int64_t t, int prec) {
-    os << fmtDec(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, float t, int prec) {
-    os << frac(t, prec);
-  }
-  template <>
-  static void format_elem(std::ostream &os, float2 t, int prec) {
-    os << frac(t, prec);
-  }
-  template <>
-  static void format_elem(std::ostream &os, float4 t, int prec) {
-    os << frac(t, prec);
-  }
-
-
-  template <typename T>
-  static std::string fmtHexDigits(T t, int cw = -1) {
-    cw = cw <= 0 ? 2*sizeof(t) : cw;
-    std::stringstream ss;
-    ss << std::setw(cw) << std::uppercase << std::setfill('0')
-      << std::hex << t;
-    return ss.str();
-  }
-  template <typename T>
-  static std::string fmtDec(T t, int cw = -1) {
-    cw = cw <= 0 ? 2*sizeof(t) : cw;
-    std::stringstream ss;
-    ss << std::setw(cw) << std::dec << t;
-    return ss.str();
-  }
-
   void str(
     std::ostream &os = std::cout,
-    int elems_per_line = -1, int prec = -1) const
+    int elems_per_line = -1,
+    int prec = -1) const
   {
-    os << type_name<E>() << "[" << elems << "]: " <<
-      "0x" << fmtHexDigits<uint64_t>((uintptr_t)get_cptr()) << ":\n";
-    elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
-    prec = prec < 0 ? 3 : prec;
-    int addr_size =
-      sizeof(E)*elems <= 0xFFFFull ? 4 :
-      sizeof(E)*elems <= 0xFFFFFFFFull ? 8 :
-      -1;
-    size_t i = 0;
-    while (i < elems) {
-      os << fmtHexDigits<uint64_t>(i, addr_size) << ": ";
-      for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
-        os << "  ";
-        format_elem(os, get_cptr()[i], prec);
-        os.flush();
-      }
-      os << "\n";
-    }
+    std::function<void(std::ostream&,const E&)> fmt =
+        [&](std::ostream &os, const E &e){format_elem<E>(os, e, prec);};
+    str(fmt, os, elems_per_line, prec);
   }
   std::string str(int elems_per_line = -1, int prec = -1) const {
     std::stringstream ss;
@@ -827,6 +869,8 @@ public:
     return ss.str();
   }
 }; // struct umem
+
+
 
 
 static const int F32_BITS = 32;
@@ -956,7 +1000,7 @@ static T parse_uintT(
       int nds = 0;
       while (isdigit(*str)) {
         nds++;
-        T new_val = 16 * val + *str - '0';
+        T new_val = 10 * val + *str - '0';
         if (new_val < val) {
           mincu::fatal(s, ": overflows ", what);
         }
@@ -1177,6 +1221,9 @@ static float time_dispatch_ms(std::function<void()> func)
   CUDA_API(cudaEventDestroy, start);
   CUDA_API(cudaEventDestroy, stop);
   return time;
+}
+static float time_dispatch_s(std::function<void()> func) {
+  return time_dispatch_ms(func) / 1000.0f;
 }
 
 
