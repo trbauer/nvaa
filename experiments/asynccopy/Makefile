@@ -1,7 +1,7 @@
 ARCH=sm_90
 WORKLOAD=asynccopy
 
-default: ${WORKLOAD}-raw-${ARCH}.sass
+# default: ${WORKLOAD}-raw-${ARCH}.sass
 
 help:
 	@echo make clean
@@ -95,18 +95,21 @@ ngt_tile.exe: ${NGT_FILES} Makefile ../../tools/mincu.hpp
 	nvcc  count_gt_main.cu count_gt_sync.cu count_gt_async.cu \
 		--generate-line-info -std=c++20 \
 		-I ../../tools \
-		-arch sm_75 -o ngt_tile.exe
+		-arch sm_86 -o ngt_tile.exe
 
-ngt_tile.sass: ${NGT_FILES} Makefile ../../tools/mincu.hpp
+CTGTSM=sm_86
+
+ngt_tile_asm: ngt_tile-${CTGTSM}.sass
+ngt_tile-${CTGTSM}.sass: ${NGT_FILES} Makefile ../../tools/mincu.hpp
 	nvcc  count_gt_sync.cu -cubin \
 		--generate-line-info -std=c++20 \
 		-I ../../tools \
-		-arch sm_90 -o count_gt_sync.cubin
-	nva count_gt_sync.cubin -text --arch sm_90 \
-		> count_gt_sync.sass
+		-arch ${CTGTSM} -o count_gt_sync-${CTGTSM}.cubin
+	nva count_gt_sync-${CTGTSM}.cubin -text --arch ${CTGTSM} \
+		> count_gt_sync-${CTGTSM}.sass
 	nvcc  count_gt_async.cu -cubin \
 		--generate-line-info -std=c++20 \
 		-I ../../tools \
-		-arch sm_90 -o count_gt_async.cubin
-	nva count_gt_async.cubin -text --arch sm_90 \
-		> count_gt_async.sass
+		-arch ${CTGTSM} -o count_gt_async-${CTGTSM}.cubin
+	nva count_gt_async-${CTGTSM}.cubin -text --arch ${CTGTSM} \
+		> count_gt_async-${CTGTSM}.sass
