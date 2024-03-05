@@ -27,6 +27,8 @@ static inline T align_up(T n, T a) {
     return (n + a - 1) - ((n + a - 1) % a);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// text formatting
 template <typename...Ts>
 static void format_to(std::stringstream &os) { }
 template <typename T, typename...Ts>
@@ -67,7 +69,7 @@ template <typename T>
 using colr = col<pad::L,T>;
 
 template <pad P,typename T>
-static inline std::ostream &operator<< (std::ostream &os, const col<P,T> &p) {
+static inline std::ostream &operator<<(std::ostream &os, const col<P,T> &p) {
   auto s = format(p.value);
   std::stringstream ss;
   if (P == pad::L) {
@@ -88,15 +90,23 @@ static void fatal(Ts...ts) {
   std::cerr << format(ts...) << "\n";
   exit(EXIT_FAILURE);
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// CUDA API wrapper
+
 #define CUDA_API(__CUDA_API__,...) \
-  do {\
-    auto __cuda_api_err = __CUDA_API__(__VA_ARGS__);\
-    if (__cuda_api_err != cudaSuccess) {\
-      fatal(#__CUDA_API__," near line ",__LINE__," failed with ",\
-          cudaGetErrorName(__cuda_api_err),\
-          " (",cudaGetErrorString(__cuda_api_err),")");\
-    }\
+  do { \
+    auto __cuda_api_err = __CUDA_API__(__VA_ARGS__); \
+    if (__cuda_api_err != cudaSuccess) { \
+      fatal(#__CUDA_API__, " near line ", __LINE__, " failed with ", \
+          cudaGetErrorName(__cuda_api_err), \
+          " (", cudaGetErrorString(__cuda_api_err), ")"); \
+    } \
   } while(0)
+
+
+///////////////////////////////////////////////////////////////////////////////
+// random number generation
 
 struct random_state {
   std::mt19937 gen;
@@ -108,23 +118,18 @@ struct random_state {
     std::seed_seq ss(str.begin(), str.end());
     gen.seed(ss);
   }
-
-  // static std::seed_seq get_seq(const char *s) {
-  //  std::string str = s;
-  //  return std::seed_seq(str.begin(), str.end());
-  // }
 }; // random_state
 
 template <typename T,typename R = T>
 static void randomize_integral(
   random_state &rnd,
   T *vals,
-  size_t elems,
+  size_t nelems,
   T lo = std::numeric_limits<T>::min(),
   T hi = std::numeric_limits<T>::max())
 {
-  std::uniform_int_distribution<R> d(lo, hi);
-  for (size_t i = 0; i < elems; i++) {
+  std::uniform_int_distribution<R> d {R(lo), R(hi)};
+  for (size_t i = 0; i < nelems; i++) {
     vals[i] = T(d(rnd.gen));
   }
 }
@@ -133,107 +138,15 @@ template <typename T, typename R = T>
 static void randomize_real(
   random_state &rnd,
   T *vals,
-  size_t elems,
-  T lo = (T)0.0f,
-  T hi = (T)1.0f)
+  size_t nelems,
+  T lo = T(0.0f),
+  T hi = T(1.0f))
 {
-  std::uniform_real_distribution<R> d((R)lo,(R)hi);
-  for (size_t i = 0; i < elems; i++) {
+  std::uniform_real_distribution<R> d {R(lo), R(hi)};
+  for (size_t i = 0; i < nelems; i++) {
     vals[i] = T(d(rnd.gen));
   }
 }
-
-/*
-
-// int8_t and uint8_t don't have unifor_int_distribution instances
-// use 16b and narrow
-template <typename T,typename R = T>
-static void handle_init_random_int(T *vals, size_t elems, T lo, T hi) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<R> d(lo,hi);
-  for (size_t i = 0; i < elems; i++) {
-    vals[i] = (T)d(gen);
-  }
-}
-template <typename uint8_t,typename R = uint16_t>
-static void handle_init_random_int(T *vals, size_t elems, T lo, T hi) {
-  handle_init_random_int<uint8_t,uint16_t>(vals, elems, lo, hi);
-}
-
-template <typename T>
-static void handle_init_random_int(T *vals, size_t elems, T lo, T hi)
-{
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<T> d(lo,hi);
-  for (size_t i = 0; i < elems; i++) {
-    vals[i] = d(gen)
-  }
-}
-template <typename T>
-static void handle_init_random_real(T *vals, size_t elems, T lo, T hi)
-{
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<T> d(lo,hi);
-  for (size_t i = 0; i < elems; i++) {
-    vals[i] = d(gen)
-  }
-}
-
-
-#define VINT_INSTANCE(VTYPE) \
-  template <>\
-  static void handle_init_random<TYPE>(TYPE *vals, size_t elems, TYPE lo, TYPE hi) {\
-    handle_init_random_int<TYPE>(vals, elems, lo, hi);\
-  }
-
-#define INT_INSTANCE(TYPE) \
-  template <>\
-  static void handle_init_random<TYPE>(TYPE *vals, size_t elems, TYPE lo, TYPE hi) {\
-    handle_init_random_int<TYPE>(vals, elems, lo, hi);\
-  }
-
-INT_INSTANCE(uint8_t)
-INT_INSTANCE(uint16_t)
-INT_INSTANCE(uint32_t)
-INT_INSTANCE(uint64_t)
-INT_INSTANCE(int8_t)
-INT_INSTANCE(int16_t)
-INT_INSTANCE(int32_t)
-INT_INSTANCE(int64_t)
-
-
-
-
-static global_state gs;
-static void set_global_seed(unsigned s) {
-  gs.gen.seed(s);
-}
-
-/*
-template <typename T, typename R = T>
-static void randomize_real(T *vals, size_t elems, T lo, T hi)
-{
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<R> d((R)lo,(R)hi);
-  for (size_t i = 0; i < elems; i++) {
-    vals[i] = d(gs.gen);
-  }
-}
-template <typename T,typename R = T>
-static void randomize_integral(T *vals, size_t elems, T lo, T hi)
-{
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<R> d((R)lo,(R)hi);
-  for (size_t i = 0; i < elems; i++) {
-    vals[i] = (T)d(gs.gen);
-  }
-}
-*/
 
 // T is the type of the buffer
 // R is the type of the random sequence;
@@ -244,11 +157,11 @@ static void randomize_integral(T *vals, size_t elems, T lo, T hi)
 // randomizing floats to an integer sequence (each converted to float)
 // for example.
 //
-// In addition int8_t doesn't have a std::uniform_int_distribution
+// In addition, int8_t doesn't have a std::uniform_int_distribution
 // instance.  Hence, one would need to use int16_t or something as
 // the random sequence.
 // template <typename T,typename R = T>
-// static void randomize(T *vals, size_t elems, R lo, R hi);
+// static void randomize(random_state &rs, T *vals, size_t elems, R lo, R hi);
 
 //
 // E.g. for float
@@ -257,13 +170,16 @@ static void randomize_integral(T *vals, size_t elems, T lo, T hi)
 //     randomize_real<T,float>(vals, elems, lo, hi);
 //   }
 
-#define RANDOMIZE_INSTANCE2(RCAST_TO,RSEQ,DELEGATE)\
-  template <typename T>\
-  static void randomize(random_state &rs, T *vals, size_t elems, RCAST_TO lo, RCAST_TO hi) {\
-    DELEGATE<T,RSEQ>(rs, vals, elems, lo, hi); \
+template <typename T, typename R>
+static void randomize(random_state &rs, T *vals, size_t elems, T lo, T hi);
+
+#define RANDOMIZE_INSTANCE2(T,R,DELEGATE)\
+  template <>\
+  static void randomize<T,R>(random_state &rs, T *vals, size_t elems, T lo, T hi) { \
+    DELEGATE<T,R>(rs, vals, elems, lo, hi); \
   }
-#define RANDOMIZE_INSTANCE(R,DELEGATE)\
-  RANDOMIZE_INSTANCE2(R,R,DELEGATE)
+#define RANDOMIZE_INSTANCE(T,DELEGATE)\
+  RANDOMIZE_INSTANCE2(T,T,DELEGATE)
 
 RANDOMIZE_INSTANCE(float, randomize_real)
 RANDOMIZE_INSTANCE(double, randomize_real)
@@ -284,7 +200,7 @@ RANDOMIZE_INSTANCE(uint64_t, randomize_integral)
 //
 // This is harder becuase our bounds were our overload ranges.
 // template <typename T>
-// static void randomize(T ## N *vals, size_t elems, RCAST_TO lo, RCAST_TO hi) {
+// static void randomize(T ## N *vals, size_t elems, RCAST_TO lo, RCAST_TO hi) {...}
 // splicing T ## N creates nonsensical T4 for float 4.
 // We need RCAST_TO to be float4 to follow the pattern.
 //
@@ -300,17 +216,6 @@ RANDOMIZE_INSTANCE(uint64_t, randomize_integral)
 // float2
 // RANDOMIZE_VECTOR_INSTANCE(float,2,randomize_real)
 
-/*
-static inline bool operator==(float2 a, float2 b) {
-  return a.x == b.x && a.y == b.y;
-}
-static inline bool operator!=(float2 a, float2 b) {
-  return !(a == b);
-}
-static inline bool operator!=(float2 a, float b) {
-  return a.x != b || a.y != b;
-}
-*/
 // broadcast conversion
 // static inline operator float2(float x) const { return make_float2(x, x); }
 struct frac {
@@ -411,7 +316,6 @@ static inline std::ostream &operator <<(std::ostream &os, frac v) {
   case frac::F64x2:
     ss << "{" << v.v.f64x2.x << ", " << v.v.f64x2.y << "}";
     break;
-
   default:
     fatal("mincu: << not defined for this tag\n");
   }
@@ -419,89 +323,8 @@ static inline std::ostream &operator <<(std::ostream &os, frac v) {
   return os;
 }
 
-
-
-
-template <typename R>
-struct init {
-  enum class init_type {NONE, CONST, SEQ, RANDOM} type;
-  union {
-    struct {R const_val;};
-    struct {R seq_init, seq_delta, seq_mod;};
-    struct {random_state *rndst; R rnd_lo, rnd_hi;};
-  };
-  init() : type(init_type::NONE) { }
-  init(R _const) : type(init_type::CONST), const_val(_const) { }
-  init(random_state *rs, R _lo, R _hi) : type(init_type::RANDOM), rndst(rs), rnd_lo(_lo), rnd_hi(_hi) { }
-  init(R _init, R _delta, R mod) : type(init_type::SEQ), seq_init(_init), seq_delta(_delta), seq_mod(mod) { }
-
-  template <typename T = R>
-  void apply(T *vals, size_t elems) const
-  {
-    switch (type) {
-    case init_type::NONE:
-      break;
-    case init_type::CONST:
-    {
-      for (size_t k = 0; k < elems; k++) {
-        vals[k] = T(const_val);
-      }
-      break;
-    }
-    case init_type::SEQ:
-    {
-      R val = seq_init;
-      if (seq_mod != T(0)) {
-        if constexpr (std::is_floating_point<R>::value && std::is_floating_point<T>::value) {
-          val = std::fmod(val, seq_mod);
-        } else {
-          val %= seq_mod;
-        }
-      }
-      for (size_t k = 0; k < elems; k++) {
-        vals[k] = val;
-        val += seq_delta;
-        if (seq_mod) {
-          if constexpr (std::is_floating_point<R>::value && std::is_floating_point<T>::value) {
-            val = std::fmod(val, seq_mod);
-          } else {
-            val %= seq_mod;
-          }
-        }
-      }
-      break;
-    }
-    case init_type::RANDOM:
-      randomize<T>(*rndst, vals, elems, rnd_lo, rnd_hi);
-      break;
-    }
-  }
-};
-template <typename R>
-static init<R> init_none() {return init<R>();}
-template <typename R>
-static init<R> init_const(R _const) {return init<R>(_const);}
-template <typename R>
-static init<R> init_seq(R _init, R _delta = (R)1, R _mod = 0) {
-  return init<R>(_init, _delta, _mod);
-}
-template <typename R>
-static init<R> init_random(
-  random_state &_rs,
-  R _rnd_lo = std::numeric_limits<R>::min(),
-  R _rnd_hi = std::numeric_limits<R>::max())
-{
-    return init<R>(&_rs, _rnd_lo,_rnd_hi);
-}
-
-// THIS doesn't work... immediate constructed arguments (temps)
-// fall out of scope before init is called
-//
-// template <typename R>
-// static init<R> init_func(std::function<R(size_t)> apply) {
-//    return init<R>(&apply);
-// }
-
+///////////////////////////////////////////////////////////////////////////////
+// buffer formatting
 
 template <typename T> static inline const char *type_name() {return "???";}
 template <> static inline const char *type_name<int8_t>() {return "int8_t";}
@@ -520,165 +343,9 @@ template <> static inline const char *type_name<double2>() {return "double2";}
 template <> static inline const char *type_name<double4>() {return "double4";}
 
 
-struct umem_alloc {
-  void *mem;
-  size_t mem_size;
-
-  umem_alloc(size_t size) : mem_size(size) {
-    // size = align_up<size_t>(size, 4096);
-    CUDA_API(cudaMallocManaged, (void **)&mem, size);
-    // mem = _aligned_malloc(size, 4096);
-  }
-  ~umem_alloc() {
-    // std::cout << "~umem_alloc " << mem << "\n";
-    if (mem) {
-      CUDA_API(cudaFree, mem);
-      // _aligned_free(mem);
-      mem = nullptr;
-      mem_size = 0x0;
-    }
-  }
-};
-
-#if 0
-// should I enable span access?
-// TODO: add stride
-// TODO: make conversion routines
-// TODO: support with init umem constructors and combine with umem?
-template <typename E>
-class umem_view
-{
-  std::shared_ptr<umem_alloc> ptr;
-  size_t                      off, len;
-
-        E *get_ptr()        {return const_cast<E *>(get_cptr());}
-  const E *get_cptr() const {return (const E *)ptr.get()->mem + off;}
-
-public:
-  umem_view(
-      umem_alloc _alloc,
-      size_t _off = 0,
-      size_t _len = _alloc.mem_size/sizeof(E))
-    : alloc(_alloc)
-    , off(_off)
-    , len(_len)
-  {
-    if (off >= len)
-      fatal("umem_view with off > len");
-    if (off >= _alloc.mem_size/sizeof(E))
-      fatal("umem_view with start off out of bounds");
-    // TODO: we could have a char[13] map to int[2] pruning the tails
-    if (_alloc.mem_size % sizeof(E))
-      fatal("umem_view with misaligned type");
-  }
-
-  void prefetch_to_device() const {
-    CUDA_API(cudaMemPrefetchAsync,
-      get_cptr(), 0, size()*sizeof(E));
-  }
-  void prefetch_to_host() const {
-    CUDA_API(cudaMemPrefetchAsync,
-      get_cptr(), cudaCpuDeviceId, size()*sizeof(E));
-  }
-
-  operator       E *()       {return get_ptr();}
-  operator const E *() const {return get_ptr();}
-
-  size_t size() const {return len - off;}
-
-  template <typename R>
-  void apply(const init<R> &i) {
-    i.apply<E>(get_ptr(), size());
-    // prefetch_to_device();
-  }
-
-  template <typename T>
-  static void format_elem(std::ostream &os, T t, int prec) {
-    if (prec >= 0)
-      os << std::fixed  << std::setprecision(prec) << t;
-    else
-      os << t;
-  }
-
-  template <>
-  static void format_elem(std::ostream &os, uint16_t t, int prec) {
-    os << "0x" << fmt_hex_digits(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, uint32_t t, int prec) {
-    os << "0x" << fmt_hex_digits(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, uint64_t t, int prec) {
-    os << "0x" << fmt_hex_digits(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, int16_t t, int prec) {
-    os << fmt_dec(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, int32_t t, int prec) {
-    os << fmt_dec(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, int64_t t, int prec) {
-    os << fmt_dec(t);
-  }
-  template <>
-  static void format_elem(std::ostream &os, float2 t, int prec) {
-    os << frac(t, prec);
-  }
-
-  template <typename T>
-  static std::string fmt_hex_digits(T t, int cw = -1) {
-    cw = cw <= 0 ? 2*sizeof(t) : cw;
-    std::stringstream ss;
-    ss << std::setw(cw) << std::uppercase << std::setfill('0')
-      << std::hex << t;
-    return ss.str();
-  }
-  template <typename T>
-  static std::string fmt_dec(T t, int cw = -1) {
-    cw = cw <= 0 ? 2*sizeof(t) : cw;
-    std::stringstream ss;
-    ss << std::setw(cw) << std::dec << t;
-    return ss.str();
-  }
-
-  void str(
-    std::ostream &os,
-    int elems_per_line = -1, int prec = -1) const
-  {
-    os << type_name<E>() << "[" << elems << "]: " <<
-      "0x" << fmt_hex_digits<uint64_t>((uintptr_t)get_cptr()) << ":\n";
-    elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
-    prec = prec < 0 ? 3 : prec;
-    int addr_size =
-      sizeof(E)*elems <= 0xFFFFull ? 4 :
-      sizeof(E)*elems <= 0xFFFFFFFFull ? 8 :
-      -1;
-    size_t i = 0;
-    while (i < elems) {
-      os << fmt_hex_digits<uint64_t>(i, addr_size) << ": ";
-      for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
-        os << "  ";
-        format_elem(os, get_cptr()[i], prec);
-        os.flush();
-      }
-      os << "\n";
-    }
-  }
-  std::string str(int elems_per_line = -1, int prec = -1) const {
-    std::stringstream ss;
-    formt(os, elems_per_line, prec);
-    return ss.str();
-  }
-};
-#endif // 0
-
 template <typename T>
 static std::string fmt_hex_digits(T t, int cw = -1) {
-  cw = cw <= 0 ? 2*sizeof(t) : cw;
+  cw = cw <= 0 ? 2 * sizeof(t) : cw;
   std::stringstream ss;
   ss << std::setw(cw) << std::uppercase << std::setfill('0')
     << std::hex << t;
@@ -686,7 +353,7 @@ static std::string fmt_hex_digits(T t, int cw = -1) {
 }
 template <typename T>
 static std::string fmt_dec(T t, int cw = -1) {
-  cw = cw <= 0 ? 2*sizeof(t) : cw;
+  cw = cw <= 0 ? 2 * sizeof(t) : cw;
   std::stringstream ss;
   ss << std::setw(cw) << std::dec << t;
   return ss.str();
@@ -773,9 +440,127 @@ static void format_buffer(
       });
 }
 
+
+
+///////////////////////////////////////////////////////////////////////////////
+// memory initialization generators
+template <typename E>
+struct const_seq {
+  const E value;
+
+  const_seq(E e) : value(e) { }
+
+  void apply(E *vals, size_t n) const {
+    for (size_t i = 0; i < n; i++) {vals[i] = value;}
+  }
+};
+
+// bounded linear arithmetic sequence
+//   x[i] = (x[i-1] + seq_delta)            [ when seq_mod == 0 ]
+//   x[i] = (x[i-1] + seq_delta) % seq_mod  [ when seq_mod != 0 ]
+template <typename E>
+struct arith_seq {
+  const E seq_init, seq_delta, seq_mod;
+  arith_seq(E _init, E _delta = E(1), E mod = E(0))
+      : seq_init(_init), seq_delta(_delta), seq_mod(mod) { }
+
+  void apply(E *vals, size_t n) const {
+    E val = seq_init;
+    if (seq_mod != E(0)) {
+      if constexpr (std::is_floating_point<E>::value &&
+                    std::is_floating_point<E>::value) {
+        val = std::fmod(val, seq_mod);
+      } else {
+        val %= seq_mod;
+      }
+    }
+    for (size_t k = 0; k < n; k++) {
+      vals[k] = val;
+      val += seq_delta;
+      if (seq_mod != E(0)) {
+        if constexpr (std::is_floating_point<E>::value &&
+                      std::is_floating_point<E>::value) {
+          val = std::fmod(val, seq_mod);
+        } else {
+          val %= seq_mod;
+        }
+      }
+    }
+  } // apply
+}; // arith_seq
+
+// cyclic sequence
+template <typename E>
+struct cyc_seq {
+  const std::initializer_list<E> ilist;
+
+  cyc_seq(std::initializer_list<E> _elems) : ilist(_elems) {
+    if (ilist.empty())
+      fatal("mincu: cyc_seq empty list");
+  }
+
+  void apply(E *vals, size_t n) const {
+    size_t i = 0;
+    for (size_t k = 0; k < n; k++) {
+      if (i == ilist.size())
+        i = 0;
+      vals[k] = ilist[i];
+    }
+  }
+}; // cyc_seq
+
+// E - the element type
+// R - representation type (usually the same)
+//    e.g. E=half uses R=float;  E=int8_t uses R=int16_t
+template <typename E, typename R = E>
+struct rnd_seq {
+  const random_state rndst;
+  const E rnd_lo, rnd_hi;
+
+  rnd_seq(
+      const random_state &_rndst,
+      E _rnd_lo = std::numeric_limits<E>::min(),
+      E _rnd_hi = std::numeric_limits<E>::max())
+    : rndst(_rndst), rnd_lo(_rnd_lo), rnd_hi(_rnd_hi) { }
+
+  void apply(E *vals, size_t n) const {
+    random_state tmp = rndst; // make copy (randomize advances state)
+    random_state &tmpr = tmp;
+    randomize<E,R>(tmpr, vals, n, rnd_lo, rnd_hi);
+  }
+}; // rnd_seq
+
+
+///////////////////////////////////////////////////////////////////////////////
+// umem - unified memory buffer
+struct umem_alloc {
+  void *mem;
+  size_t mem_size;
+
+  umem_alloc(size_t size) : mem_size(size) {
+    // size = align_up<size_t>(size, 4096);
+    CUDA_API(cudaMallocManaged, (void **)&mem, size);
+    // mem = _aligned_malloc(size, 4096);
+  }
+  ~umem_alloc() {
+    // std::cout << "~umem_alloc " << mem << "\n";
+    if (mem) {
+      CUDA_API(cudaFree, mem);
+      // _aligned_free(mem);
+      mem = nullptr;
+      mem_size = 0x0;
+    }
+  }
+};
+
+// template <typename E>
+// using init_function_type = std::function<E(size_t);
+
+// genericize umem
 template <typename E>
 class umem // unified memory buffer
 {
+  // destructor deallocs umem_alloc, if it's the last ref
   std::shared_ptr<umem_alloc> ptr;
   size_t                      elems;
 
@@ -785,19 +570,26 @@ public:
   explicit umem(std::shared_ptr<umem_alloc> &_ptr, size_t _elems)
     : elems(_elems), ptr(_ptr) { }
 
-  template <typename R>
-  explicit umem(size_t _elems, const init<R> &i)
-    : umem<E>(_elems)
-  {
-    apply<R>(i);
-  }
-  explicit umem(size_t _elems, std::function<E(size_t)> init)
-    : umem<E>(_elems)
-  {
-    apply(init);
-  }
-  ~umem() {
-    // destructs ptr, which deallocs umem_alloc, if it's the last ref
+  explicit umem(size_t _elems, const const_seq<E> &g)
+    : umem<E>(_elems) {init(g);}
+  explicit umem(size_t _elems, const arith_seq<E> &g)
+    : umem<E>(_elems) {init(g);}
+  explicit umem(size_t _elems, const cyc_seq<E> &g)
+    : umem<E>(_elems) {init(g);}
+  explicit umem(size_t _elems, const rnd_seq<E> &g)
+    : umem<E>(_elems) {init(g);}
+  explicit umem(size_t _elems, std::function<E(size_t)> g)
+    : umem<E>(_elems) {init(g);}
+
+  void init(const const_seq<E> &g) {g.apply(get_ptr(), size());}
+  void init(const arith_seq<E> &g) {g.apply(get_ptr(), size());}
+  void init(const cyc_seq<E> &g) {g.apply(get_ptr(), size());}
+  void init(const rnd_seq<E> &g) {g.apply(get_ptr(), size());}
+
+  void init(std::function<E(size_t)> f) {
+    for (size_t i = 0; i < size(); i++) {
+      get_ptr()[i] = f[i];
+    }
   }
 
   size_t size() const {return elems;}
@@ -824,17 +616,6 @@ public:
   }
   void prefetch_to_host() const {
     CUDA_API(cudaMemPrefetchAsync, get_cptr(), elems * sizeof(E), cudaCpuDeviceId);
-  }
-
-
-  template <typename R>
-  void apply(const init<R> &i) {
-    i.apply<E>(get_ptr(), size());
-  }
-  void apply(std::function<E(size_t)> init) {
-    for (size_t i = 0; i < size(); i++) {
-      get_ptr()[i] = init[i];
-    }
   }
 
    // elements
@@ -870,9 +651,8 @@ public:
   }
 }; // struct umem
 
-
-
-
+///////////////////////////////////////////////////////////////////////////////
+// fp16 support
 static const int F32_BITS = 32;
 static const int F32_MNT_BITS = 23;
 static const int F32_EXP_BITS = F32_BITS - 1 - F32_MNT_BITS; // 23
@@ -1068,145 +848,8 @@ static int64_t parse_int64(
   return parse_uintT<int64_t>(s, allow_suffix, what);
 }
 
-static std::string cudaErrorSymbol(enum cudaError e)
-{
-#define MINCU_MKCASE(E) case E: return #E
-  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g3f51e3575c2178246db0a94a430e0038
-  switch(e) {
-  MINCU_MKCASE(cudaSuccess);
-  MINCU_MKCASE(cudaErrorInvalidValue);
-  MINCU_MKCASE(cudaErrorMemoryAllocation);
-  MINCU_MKCASE(cudaErrorInitializationError);
-  MINCU_MKCASE(cudaErrorCudartUnloading);
-  MINCU_MKCASE(cudaErrorProfilerDisabled);
-  MINCU_MKCASE(cudaErrorProfilerNotInitialized);
-  MINCU_MKCASE(cudaErrorProfilerAlreadyStarted);
-  MINCU_MKCASE(cudaErrorProfilerAlreadyStopped);
-  MINCU_MKCASE(cudaErrorInvalidConfiguration);
-  MINCU_MKCASE(cudaErrorInvalidPitchValue);
-  MINCU_MKCASE(cudaErrorInvalidSymbol);
-  MINCU_MKCASE(cudaErrorInvalidHostPointer);
-  MINCU_MKCASE(cudaErrorInvalidDevicePointer);
-  MINCU_MKCASE(cudaErrorInvalidTexture);
-  MINCU_MKCASE(cudaErrorInvalidTextureBinding);
-  MINCU_MKCASE(cudaErrorInvalidChannelDescriptor);
-  MINCU_MKCASE(cudaErrorInvalidMemcpyDirection);
-  MINCU_MKCASE(cudaErrorAddressOfConstant);
-  MINCU_MKCASE(cudaErrorTextureFetchFailed);
-  MINCU_MKCASE(cudaErrorTextureNotBound);
-  MINCU_MKCASE(cudaErrorSynchronizationError);
-  MINCU_MKCASE(cudaErrorInvalidFilterSetting);
-  MINCU_MKCASE(cudaErrorInvalidNormSetting);
-  MINCU_MKCASE(cudaErrorMixedDeviceExecution);
-  MINCU_MKCASE(cudaErrorNotYetImplemented);
-  MINCU_MKCASE(cudaErrorMemoryValueTooLarge);
-  MINCU_MKCASE(cudaErrorStubLibrary);
-  MINCU_MKCASE(cudaErrorInsufficientDriver);
-  MINCU_MKCASE(cudaErrorCallRequiresNewerDriver);
-  MINCU_MKCASE(cudaErrorInvalidSurface);
-  MINCU_MKCASE(cudaErrorDuplicateVariableName);
-  MINCU_MKCASE(cudaErrorDuplicateTextureName);
-  MINCU_MKCASE(cudaErrorDuplicateSurfaceName);
-  MINCU_MKCASE(cudaErrorDevicesUnavailable);
-  MINCU_MKCASE(cudaErrorIncompatibleDriverContext);
-  MINCU_MKCASE(cudaErrorMissingConfiguration);
-  MINCU_MKCASE(cudaErrorPriorLaunchFailure);
-  MINCU_MKCASE(cudaErrorLaunchMaxDepthExceeded);
-  MINCU_MKCASE(cudaErrorLaunchFileScopedTex);
-  MINCU_MKCASE(cudaErrorLaunchFileScopedSurf);
-  MINCU_MKCASE(cudaErrorSyncDepthExceeded);
-  MINCU_MKCASE(cudaErrorLaunchPendingCountExceeded);
-  MINCU_MKCASE(cudaErrorInvalidDeviceFunction);
-  MINCU_MKCASE(cudaErrorNoDevice);
-  MINCU_MKCASE(cudaErrorInvalidDevice);
-  MINCU_MKCASE(cudaErrorDeviceNotLicensed);
-  MINCU_MKCASE(cudaErrorSoftwareValidityNotEstablished);
-  MINCU_MKCASE(cudaErrorStartupFailure);
-  MINCU_MKCASE(cudaErrorInvalidKernelImage);
-  MINCU_MKCASE(cudaErrorDeviceUninitialized);
-  MINCU_MKCASE(cudaErrorMapBufferObjectFailed);
-  MINCU_MKCASE(cudaErrorUnmapBufferObjectFailed);
-  MINCU_MKCASE(cudaErrorArrayIsMapped);
-  MINCU_MKCASE(cudaErrorNoKernelImageForDevice);
-  MINCU_MKCASE(cudaErrorAlreadyAcquired);
-  MINCU_MKCASE(cudaErrorNotMapped);
-  MINCU_MKCASE(cudaErrorNotMappedAsArray);
-  MINCU_MKCASE(cudaErrorNotMappedAsPointer);
-  MINCU_MKCASE(cudaErrorECCUncorrectable);
-  MINCU_MKCASE(cudaErrorUnsupportedLimit);
-  MINCU_MKCASE(cudaErrorDeviceAlreadyInUse);
-  MINCU_MKCASE(cudaErrorPeerAccessUnsupported);
-  MINCU_MKCASE(cudaErrorInvalidPtx);
-  MINCU_MKCASE(cudaErrorInvalidGraphicsContext);
-  MINCU_MKCASE(cudaErrorNvlinkUncorrectable);
-  MINCU_MKCASE(cudaErrorJitCompilerNotFound);
-  MINCU_MKCASE(cudaErrorUnsupportedPtxVersion);
-  MINCU_MKCASE(cudaErrorJitCompilationDisabled);
-  MINCU_MKCASE(cudaErrorUnsupportedExecAffinity);
-  // MINCU_MKCASE(cudaErrorUnsupportedDevSideSync);
-  MINCU_MKCASE(cudaErrorInvalidSource);
-  MINCU_MKCASE(cudaErrorFileNotFound);
-  MINCU_MKCASE(cudaErrorSharedObjectSymbolNotFound);
-  MINCU_MKCASE(cudaErrorSharedObjectInitFailed);
-  MINCU_MKCASE(cudaErrorOperatingSystem);
-  MINCU_MKCASE(cudaErrorInvalidResourceHandle);
-  MINCU_MKCASE(cudaErrorIllegalState);
-  // MINCU_MKCASE(cudaErrorLossyQuery);
-  MINCU_MKCASE(cudaErrorSymbolNotFound);
-  MINCU_MKCASE(cudaErrorNotReady);
-  MINCU_MKCASE(cudaErrorIllegalAddress);
-  MINCU_MKCASE(cudaErrorLaunchOutOfResources);
-  MINCU_MKCASE(cudaErrorLaunchTimeout);
-  MINCU_MKCASE(cudaErrorLaunchIncompatibleTexturing);
-  MINCU_MKCASE(cudaErrorPeerAccessAlreadyEnabled);
-  MINCU_MKCASE(cudaErrorPeerAccessNotEnabled);
-  MINCU_MKCASE(cudaErrorSetOnActiveProcess);
-  MINCU_MKCASE(cudaErrorContextIsDestroyed);
-  MINCU_MKCASE(cudaErrorAssert);
-  MINCU_MKCASE(cudaErrorTooManyPeers);
-  MINCU_MKCASE(cudaErrorHostMemoryAlreadyRegistered);
-  MINCU_MKCASE(cudaErrorHostMemoryNotRegistered);
-  MINCU_MKCASE(cudaErrorHardwareStackError);
-  MINCU_MKCASE(cudaErrorIllegalInstruction);
-  MINCU_MKCASE(cudaErrorMisalignedAddress);
-  MINCU_MKCASE(cudaErrorInvalidAddressSpace);
-  MINCU_MKCASE(cudaErrorInvalidPc);
-  MINCU_MKCASE(cudaErrorLaunchFailure);
-  MINCU_MKCASE(cudaErrorCooperativeLaunchTooLarge);
-  MINCU_MKCASE(cudaErrorNotPermitted);
-  MINCU_MKCASE(cudaErrorNotSupported);
-  MINCU_MKCASE(cudaErrorSystemNotReady);
-  MINCU_MKCASE(cudaErrorSystemDriverMismatch);
-  MINCU_MKCASE(cudaErrorCompatNotSupportedOnDevice);
-  MINCU_MKCASE(cudaErrorMpsConnectionFailed);
-  MINCU_MKCASE(cudaErrorMpsRpcFailure);
-  MINCU_MKCASE(cudaErrorMpsServerNotReady);
-  MINCU_MKCASE(cudaErrorMpsMaxClientsReached);
-  MINCU_MKCASE(cudaErrorMpsMaxConnectionsReached);
-  MINCU_MKCASE(cudaErrorMpsClientTerminated);
-  MINCU_MKCASE(cudaErrorCdpNotSupported);
-  MINCU_MKCASE(cudaErrorCdpVersionMismatch);
-  MINCU_MKCASE(cudaErrorStreamCaptureUnsupported);
-  MINCU_MKCASE(cudaErrorStreamCaptureInvalidated);
-  MINCU_MKCASE(cudaErrorStreamCaptureMerge);
-  MINCU_MKCASE(cudaErrorStreamCaptureUnmatched);
-  MINCU_MKCASE(cudaErrorStreamCaptureUnjoined);
-  MINCU_MKCASE(cudaErrorStreamCaptureIsolation);
-  MINCU_MKCASE(cudaErrorStreamCaptureImplicit);
-  MINCU_MKCASE(cudaErrorCapturedEvent);
-  MINCU_MKCASE(cudaErrorStreamCaptureWrongThread);
-  MINCU_MKCASE(cudaErrorTimeout);
-  MINCU_MKCASE(cudaErrorGraphExecUpdateFailure);
-  MINCU_MKCASE(cudaErrorExternalDevice);
-  MINCU_MKCASE(cudaErrorInvalidClusterSize);
-  MINCU_MKCASE(cudaErrorUnknown);
-  MINCU_MKCASE(cudaErrorApiFailureBase);
-  default:
-    return mincu::format("cudaError(0x", hex((int)e), ")");
-  }
-#undef MINCU_MKCASE
-}
-
+///////////////////////////////////////////////////////////////////////////////
+// times dispatches
 static float time_dispatch_ms(std::function<void()> func)
 {
   cudaEvent_t start, stop;
@@ -1226,41 +869,6 @@ static float time_dispatch_s(std::function<void()> func) {
   return time_dispatch_ms(func) / 1000.0f;
 }
 
-
-/*
-#define VEC_OPERATORS_WITH_OP(STYPE, VTYPE,OP_SYMBOL)\
-  VTYPE operator OP_SYMBOL (VTYPE v1, VTYPE v2) {\
-    return make_ ## VTYPE (v1.x OP_SYMBOL v2.x, v1.y OP_SYMBOL v2.y, v3.z OP_SYMBOL v2.z,v1.w OP_SYMBOL v2.w);\
-  }\
-  VTYPE operator OP_SYMBOL (STYPE s, VTYPE v) {\
-    return make_ ## VTYPE (s OP_SYMBOL v.x,s OP_SYMBOL v.y,s OP_SYMBOL v.z,s OP_SYMBOL v.w);\
-  }\
-  VTYPE  operator OP_SYMBOL (VTYPE v, STYPE s) {\
-    return s OP_SYMBOL v;\
-  }
-
-#define VEC_OPERATORS(STYPE, VTYPE)\
-  VEC_OPERATORS_WITH_OP(STYPE, VTYPE, *)
-  VEC_OPERATORS_WITH_OP(STYPE, VTYPE, /)
-  VEC_OPERATORS_WITH_OP(STYPE, VTYPE, +)
-  VEC_OPERATORS_WITH_OP(STYPE, VTYPE, +)
-
-#define OPERATORS(TYPE)\
-  VEC_OPERATORS(TYPE,TYPE ## 1)\
-  VEC_OPERATORS(TYPE,TYPE ## 2)\
-  VEC_OPERATORS(TYPE,TYPE ## 3)\
-  VEC_OPERATORS(TYPE,TYPE ## 4)
-
-OPERATORS(float)
-OPERATORS(double)
-//
-OPERATORS(int)
-
-#undef VEC_OPERATORS
-#undef OPERATORS
-*/
-
-
 } // namespace mincu::
 
-#endif //
+#endif // MINCU_HPP
