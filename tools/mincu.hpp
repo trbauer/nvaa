@@ -495,16 +495,21 @@ struct cyc_seq {
   const std::initializer_list<E> ilist;
 
   cyc_seq(std::initializer_list<E> _elems) : ilist(_elems) {
-    if (ilist.empty())
+    if (ilist.size() == 0)
       fatal("mincu: cyc_seq empty list");
   }
 
   void apply(E *vals, size_t n) const {
     size_t i = 0;
-    for (size_t k = 0; k < n; k++) {
-      if (i == ilist.size())
-        i = 0;
-      vals[k] = ilist[i];
+    while (true) {
+      for (const E &e : ilist) {
+        if (i == n) {
+          break;
+        }
+        vals[i++] = e;
+      }
+      if (i == n)
+        break;
     }
   }
 }; // cyc_seq
@@ -588,7 +593,7 @@ public:
 
   void init(std::function<E(size_t)> f) {
     for (size_t i = 0; i < size(); i++) {
-      get_ptr()[i] = f[i];
+      get_ptr()[i] = f(i);
     }
   }
 
