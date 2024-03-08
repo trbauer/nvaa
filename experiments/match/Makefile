@@ -62,4 +62,4 @@ ${WORKLOAD}-sm_${EXE_ARCH}.sass: ${WORKLOAD}-sm_${EXE_ARCH}.cubin
 
 
 times: ${WORKLOAD}${EXE_ARCH}.exe
-	.\${WORKLOAD}${EXE_ARCH}.exe > ${WORKLOAD}-sm_${EXE_ARCH}.times
+	${WORKLOAD}${EXE_ARCH}.exe > ${WORKLOAD}-sm_${EXE_ARCH}.times
