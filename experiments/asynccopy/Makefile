@@ -55,7 +55,7 @@ micro75.sass: micro.cu Makefile ../../tools/mincu.hpp
 		--generate-line-info -std=c++20 \
 		-I../../cuda-samples/common -I ../../tools \
 		-arch sm_75 -cubin -o micro.cubin
-	nva micro.cubin --arch sm_75 \
+	nva micro.cubin -text --arch sm_75 \
 			> micro75.sass
 
 micro90: micro90.ptx micro90.sass
@@ -69,7 +69,7 @@ micro90.sass: micro.cu Makefile ../../tools/mincu.hpp
 		--generate-line-info -std=c++20 \
 		-I../../cuda-samples/common -I ../../tools \
 		-arch sm_90 -cubin -o micro.cubin
-	nva micro.cubin --arch sm_90 \
+	nva micro.cubin --arch sm_90 -text \
 			> micro90.sass
 	nva micro.cubin --arch sm_90 --no-filter-asm \
 			> micro90-raw.sass
