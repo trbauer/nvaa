@@ -49,7 +49,7 @@ static const int MATCH_ITRS = 64;
 
 // __device__ uint32_t match_any_emu(uint32_t value) { }
 
-__global__ void match_latency(
+__global__ void match_any_latency(
     uint64_t *times,
     uint32_t *oups,
     const uint32_t *srcs,
@@ -75,15 +75,39 @@ __global__ void match_latency(
   oups[gid] = x;
   times[gid] = en - st;
 }
+__global__ void match_all_latency(
+    uint64_t *times,
+    uint32_t *oups,
+    const uint32_t *srcs,
+    uint32_t zero)
+{
+  const auto gid = blockIdx.x * blockDim.x + threadIdx.x;
+  const uint32_t x0 = srcs[gid];
+  uint32_t x = x0;
+  auto st = clock64();
+  for (int i = 0; i < MATCH_ITRS; i++) {
+    // Create sequence of b2b dependency
+    // Force the compiler to use the initial value only in matching values.
+    // This inserts an IMAD into the pipe, but that's lower latency
+    // than a fake compare.
+    int z = 0; x = __match_all_sync(0xFFFFFFFFu, x, &z) * zero + x0;
+  }
+  auto en = clock64();
+  oups[gid] = x;
+  times[gid] = en - st;
+}
 
 static const int ITERATIONS = 2; // drop the first run to hide for warmup costs
 static const size_t BLOCKS = 1; // 1 warp only
 static const size_t TPB = 32; // threads per block (1 warp)
 
+enum class test_op {ANY, ALL};
+
 // test - label (no spaces)
 // comment - what is this test showing (if anything); can be nullptr
 // setter - a lambda function that sets each element based on index
 static void test_latency_on(
+    test_op op,
     std::string test,
     std::function<uint32_t(size_t)> setter,
     const char *comment = nullptr)
@@ -108,7 +132,11 @@ static void test_latency_on(
   }
 
   for (int i = 0; i < ITERATIONS; i++) {
-    match_latency<<<BLOCKS,TPB>>>(times, oups, inps, 0u);
+    if (op == test_op::ANY) {
+      match_any_latency<<<BLOCKS,TPB>>>(times, oups, inps, 0u);
+    } else {
+      match_all_latency<<<BLOCKS,TPB>>>(times, oups, inps, 0u);
+    }
     auto e = cudaDeviceSynchronize();
     if (e != cudaSuccess) {
       fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error");
@@ -132,29 +160,32 @@ static void test_latency_on(
   }
 }
 
-static void test_latency()
+static void test_latency(test_op op)
 {
+  std::cout << "========= tests for " <<
+      (op == test_op::ANY ? "match_any" : "match_all") << "\n";
   std::cout <<
       coll<std::string>("test", 24) << " " <<
       colr<std::string>("equiv.classes", 12) << " " <<
       colr<std::string>("latency(c/match)",12) << " " <<
       coll<std::string>("hint", 24) << "\n";
   if (verbosity >= 1) {
-    test_latency_on("1-all-zeros", [](size_t ix){return 0u;});
-    test_latency_on("1-all-ones", [](size_t ix){return ~0u;},
+    test_latency_on(op, "1-all-zeros", [](size_t ix){return 0u;});
+    test_latency_on(op, "1-all-ones", [](size_t ix){return ~0u;},
                     "perf is value-insensitive");
-    test_latency_on("1-all-42", [](size_t ix){return 42u;},
+    test_latency_on(op, "1-all-42", [](size_t ix){return 42u;},
                     "perf is value-insensitive");
   }
 
   for (uint32_t i = 1; i <= 32; i++) {
     auto tnm = i == 1 ? format(i, "-class") : format(i, "-classes");
-    test_latency_on(tnm, [&](size_t ix){return (uint32_t)ix % i;});
+    test_latency_on(op, tnm, [&](size_t ix){return (uint32_t)ix % i;});
     if (verbosity >= 1)
-      test_latency_on(tnm + "-rotated", [&](size_t ix){return (uint32_t)(ix + 1) % i;},
+      test_latency_on(op,
+                      tnm + "-rotated",
+                      [&](size_t ix){return (uint32_t)(ix + 1) % i;},
                       "perf is value-insensitive");
   }
-
 /*
   test_latency_on("1-equivalence-classes-ones", inps_1s);
   umem<uint32_t> inps_42s(BLOCKS * TPB, const_seq<uint32_t>(42u));
@@ -225,7 +256,8 @@ int main(int argc, const char **argv)
     }
   } // for args
 
-  test_latency();
+  test_latency(test_op::ANY);
+  test_latency(test_op::ALL);
   return EXIT_SUCCESS;
 }
 

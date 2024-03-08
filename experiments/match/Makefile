@@ -8,6 +8,7 @@ help:
 	@echo make  exe${ARCH}, exe${EXE_ARCH}
 	@echo make  ptx${ARCH}
 	@echo make  sass${ARCH}, sass${EXE_ARCH}
+	@echo make  times
 
 exe: ${WORKLOAD}${EXE_ARCH}.exe
 exe${EXE_ARCH}: ${WORKLOAD}${EXE_ARCH}.exe
@@ -58,3 +59,7 @@ ${WORKLOAD}-sm_${EXE_ARCH}.sass: ${WORKLOAD}-sm_${EXE_ARCH}.cubin
 		-lines \
 		${WORKLOAD}-raw-sm_${EXE_ARCH}.sass \
 		-o=${WORKLOAD}-sm_${EXE_ARCH}.sass
+
+
+times: ${WORKLOAD}${EXE_ARCH}.exe
+	.\${WORKLOAD}${EXE_ARCH}.exe > ${WORKLOAD}-sm_${EXE_ARCH}.times
