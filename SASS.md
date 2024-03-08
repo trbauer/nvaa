@@ -208,11 +208,12 @@ https://nvidia.github.io/cccl/libcudacxx/extended_api/asynchronous_operations/me
 
 ## Sampler Messages
 
-
+```C++
     const sampler_t sampler0 =
         CLK_NORMALIZED_COORDS_FALSE |
         CLK_ADDRESS_CLAMP_TO_EDGE |
         CLK_FILTER_NEAREST;
+```
 
 Yields:
 
@@ -250,25 +251,31 @@ Able to prove that:
 
 
 ### __all_sync
+
+```C++
     if (__all_sync(0xFFFFFFFF, val >= 2.0f)) {
         dsts[gid] = 1.0f;
     }
+```
 
 Produces CUDA12 sm90
 
+```
            FSETP.GE.AND  P0, PT,     R2,     2,      PT       {!13,Y,^3};
            VOTE.ALL  P0,     P0                               {!13,Y};
      @!P0  EXIT
      .... do the store
+```
 
 ### __any_sync
 
 If we reduce the sync mask.
 
+```C++
     if (__any_sync(0xFFFF0000, val >= 2.0f)) {
         dsts[gid] = 1.0f;
     }
-
+```
 
 
 We get (CUDA12:sm90) PTX `vote.sync.any.pred 	%p2, %p1, %r5`.
@@ -297,22 +304,26 @@ Enabling a non-uniform mask and testing the output.
     if (x == 0x000000FF)
       dsts[gid] = val;
 
-Gives PTX
+Gives the following PTX.
 
-	setp.ge.f32 	%p1, %f1, 0f40400000; // 3.0f
-	mov.u32 	%r5, -252645136; // 0xF0F0F0F0
-	vote.sync.ballot.b32 	%r6, %p1, %r5; // %r6 is bit mask
-	setp.ne.s32 	%p3, %r6, 255; // 0xFF
-    @%p3 bra ... around store
+```C++
+setp.ge.f32 	%p1, %f1, 0f40400000; // 3.0f
+mov.u32 	%r5, -252645136; // 0xF0F0F0F0
+vote.sync.ballot.b32 	%r6, %p1, %r5; // %r6 is bit mask
+setp.ne.s32 	%p3, %r6, 255; // 0xFF
+@%p3 bra ... around store
+```
 
 SASS gives.
 
-          IMAD.MOV  R0,     RZ,     RZ,     -0xf0f0f10       {!1}; // 0xF0F0F0F0u
-          FSETP.GE.AND  P0, PT,     R7,     3,      PT       {!3,Y,^3}; // 3.0f
-          WARPSYNC.EXCLUSIVE  R0                             {!10};
-          VOTE.ANY  R0,     PT,     P0                       {!4,Y};
-          ISETP.NE.AND  P0, PT,     R0,     0xff,   PT       {!13,Y};
-    @P0   EXIT
+```C++
+      IMAD.MOV  R0,     RZ,     RZ,     -0xf0f0f10       {!1}; // 0xF0F0F0F0u
+      FSETP.GE.AND  P0, PT,     R7,     3,      PT       {!3,Y,^3}; // 3.0f
+      WARPSYNC.EXCLUSIVE  R0                             {!10};
+      VOTE.ANY  R0,     PT,     P0                       {!4,Y};
+      ISETP.NE.AND  P0, PT,     R0,     0xff,   PT       {!13,Y};
+@P0   EXIT
+```
 
 Seems like `VOTE.{ANY,ALL}` where an optional data register destination holds
 the bitmask (`R0` here) of those passing the predicate for `ANY`.
@@ -386,7 +397,7 @@ Do exited channels count?
     unsigned x = __match_any_sync(0x0000FFFFu, val);
     dsts[gid] = x;
 
-    E:\dev\nvaa\experiments\micros>micros
+    %> micros
     float[32]: 0x0000000E00010000:
     0000:   0.000  -0.000  0.000  1.000  0.000  0.000  0.000  0.000
     0008:   2.000  2.000  0.000  0.000  0.000  0.000  0.000  0.000
