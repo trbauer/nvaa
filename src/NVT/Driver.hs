@@ -250,13 +250,13 @@ runWithOpts os
                 | not (null (oSavePtxTo os)) = (oSavePtxTo os,False)
                 | oSavePtx os = (deriveFileNameFrom cl_fp ".ptx",False)
                 | otherwise = ("nva-" ++ deriveFileNameFrom cl_fp ".ptx",True)
-              build_opts =
-                  "-cl-nv-arch " ++ oArch os ++ maybe_clstd ++ maybe_lines
+              build_opts = "-cl-nv-arch " ++ oArch os ++ maybe_clstd ++ maybe_lines
                 where maybe_lines = if oPrintLines os then " -nv-line-info" else ""
                       maybe_clstd
                         | any hasClstd (oExtraCl2ptxArgs os) = ""
                         | otherwise = " -cl-nv-cstd=CL1.2"
-                        where hasClstd x = "-b="`isPrefixOf`x && "-cl-nv-cstd="`isInfixOf`x
+                        where hasClstd x =
+                                "-b="`isPrefixOf`x && ("-cl-nv-cstd="`isInfixOf`x)
               cl2ptx_args =
                 [cl_fp, "-b=" ++ build_opts,"-o=" ++ ptx_dst] ++ oExtraCl2ptxArgs os
           (ec,out,err) <- runProcessWithExitCode (mkExe "cl2ptx") cl2ptx_args

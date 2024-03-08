@@ -479,7 +479,7 @@ pFltImm32 op
           | is_fp64 = pWithLoc $ \loc -> do
             f64b <- doubleToBits <$> pWholeOrDecimal64
             when ((f64b .&. 0xFFFFFFFF) /= 0) $
-              pSemanticError loc "fp64 imm not-representible imm32"
+              pSemanticError loc "fp64 imm not-representable imm32"
             return $ fromIntegral (f64b `shiftR` 32)
           | otherwise = floatToBits <$> parseF32
           where parseF32 :: PI Float

@@ -33,9 +33,9 @@ sdks =
   , (11,5)
   , (11,6)
   , (12,0)
-  -- guessing
-  , (12,1)
-  , (12,2)
+  -- disable until I can get OpenCL C working again
+  -- , (12,3)
+  --   guessing
   ]
 
 cuda_env_vars :: [String]

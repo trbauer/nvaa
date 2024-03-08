@@ -108,4 +108,14 @@ warningLn os
 
 
 fatal :: String -> IO a
-fatal msg = die msg
+fatal msg = do
+  -- Using either approach below; this can truncate the error message if we
+  -- are reading input from tty... not sure why.
+  -- % nva / CtrlZ
+  -- cannInterrupted
+  -- ^^^^ "cannot infer..."
+  --
+  -- hPutStrLn stderr msg
+  -- hFlush stderr
+  -- exitFailure
+  die msg
