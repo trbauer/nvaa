@@ -18,6 +18,18 @@
 #include <string>
 #include <type_traits>
 
+// CUDA includes
+//   cuda.h - driver API
+//   cuda_runtime_api.h - public host functions
+//   cuda_runtime.h - includes the above, function overlays, and device intrinsics
+// SOURCE: https://stackoverflow.com/questions/6302695/difference-between-cuda-h-cuda-runtime-h-cuda-runtime-api-h
+//
+//   "If you are writing code which will be compiled using nvcc, it is all irrelevant,
+//    because nvcc takes care of inclusion of all the required headers automatically
+//    without programmer intervention."
+//
+// should probably be this (OR none!)
+// #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 
 namespace mincu
@@ -324,25 +336,209 @@ static inline std::ostream &operator <<(std::ostream &os, frac v) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// type details
+template <typename T>
+struct mc_type_info {
+// using inner_type
+  static int preferred_columns();
+  static const char *name();
+  static int channels();
+};
+//////////////////////////
+template <>
+struct mc_type_info<int8_t> {
+  using inner_type = int8_t;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "int8_t";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<char2> {
+  using inner_type = char2;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "char2";}
+  static int channels() {return 2;}
+};
+template <>
+struct mc_type_info<char4> {
+  using inner_type = char4;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "char4";}
+  static int channels() {return 4;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<int16_t> {
+  using inner_type = int16_t;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "int16_t";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<short2> {
+  using inner_type = int16_t;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "short2";}
+  static int channels() {return 2;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<int32_t> {
+  using inner_type = int32_t;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "int32_t";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<int2> {
+  using inner_type = int2;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "int2";}
+  static int channels() {return 2;}
+};
+template <>
+struct mc_type_info<int4> {
+  using inner_type = int4;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "int4";}
+  static int channels() {return 4;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<int64_t> {
+  using inner_type = int64_t;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "int64_t";}
+  static int channels() {return 1;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<uint8_t> {
+  using inner_type = uint8_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uint8_t";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<uchar2> {
+  using inner_type = uint8_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uchar2";}
+  static int channels() {return 2;}
+};
+template <>
+struct mc_type_info<uchar4> {
+  using inner_type = uint8_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uchar4";}
+  static int channels() {return 4;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<uint16_t> {
+  using inner_type = uint16_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uint16_t";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<ushort2> {
+  using inner_type = uint16_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "ushort2";}
+  static int channels() {return 2;}
+};
+template <>
+struct mc_type_info<ushort4> {
+  using inner_type = uint16_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "ushort4";}
+  static int channels() {return 4;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<uint32_t> {
+  using inner_type = uint32_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uint32_t";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<uint2> {
+  using inner_type = uint32_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uint2";}
+  static int channels() {return 2;}
+};
+template <>
+struct mc_type_info<uint4> {
+  using inner_type = uint32_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uint4";}
+  static int channels() {return 4;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<uint64_t> {
+  using inner_type = uint64_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "uint64_t";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<ulonglong2> {
+  using inner_type = uint64_t;
+  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
+  static const char *name() {return "ulonglong2";}
+  static int channels() {return 2;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<float> {
+  using inner_type = float;
+  static int preferred_columns() {return 10;}
+  static const char *name() {return "float";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<float2> {
+  using inner_type = float;
+  static int preferred_columns() {return 16;}
+  static const char *name() {return "float2";}
+  static int channels() {return 2;}
+};
+template <>
+struct mc_type_info<float4> {
+  using inner_type = float;
+  static int preferred_columns() {return 16;}
+  static const char *name() {return "float4";}
+  static int channels() {return 4;}
+};
+//////////////////////////
+template <>
+struct mc_type_info<double> {
+  using inner_type = double;
+  static int preferred_columns() {return 16;}
+  static const char *name() {return "double";}
+  static int channels() {return 1;}
+};
+template <>
+struct mc_type_info<double2> {
+  using inner_type = double;
+  static int preferred_columns() {return 16;}
+  static const char *name() {return "double2";}
+  static int channels() {return 2;}
+};
+template <>
+struct mc_type_info<double4> {
+  using inner_type = double;
+  static int preferred_columns() {return 16;}
+  static const char *name() {return "double4";}
+  static int channels() {return 4;}
+};
+
+///////////////////////////////////////////////////////////////////////////////
 // buffer formatting
-
-template <typename T> static inline const char *type_name() {return "???";}
-template <> static inline const char *type_name<int8_t>() {return "int8_t";}
-template <> static inline const char *type_name<int16_t>() {return "int16_t";}
-template <> static inline const char *type_name<int32_t>() {return "int32_t";}
-template <> static inline const char *type_name<int64_t>() {return "int64_t";}
-template <> static inline const char *type_name<uint8_t>() {return "uint8_t";}
-template <> static inline const char *type_name<uint16_t>() {return "uint16_t";}
-template <> static inline const char *type_name<uint32_t>() {return "uint32_t";}
-template <> static inline const char *type_name<uint64_t>() {return "uint64_t";}
-template <> static inline const char *type_name<float>() {return "float";}
-template <> static inline const char *type_name<float2>() {return "float2";}
-template <> static inline const char *type_name<float4>() {return "float4";}
-template <> static inline const char *type_name<double>() {return "double";}
-template <> static inline const char *type_name<double2>() {return "double2";}
-template <> static inline const char *type_name<double4>() {return "double4";}
-
-
 template <typename T>
 static std::string fmt_hex_digits(T t, int cw = -1) {
   cw = cw <= 0 ? 2 * sizeof(t) : cw;
@@ -360,44 +556,82 @@ static std::string fmt_dec(T t, int cw = -1) {
 }
 
 template <typename T>
-static void format_elem(std::ostream &os, T t, int prec);
+static void format_elem(std::ostream &os, T t, int cols_per_elem, int prec);
 
 template <>
-static void format_elem(std::ostream &os, uint16_t t, int prec) {
+static void format_elem(std::ostream &os, uint16_t t, int cols_per_elem, int prec) {
   os << "0x" << fmt_hex_digits(t);
 }
 template <>
-static void format_elem(std::ostream &os, uint32_t t, int prec) {
+static void format_elem(std::ostream &os, uint32_t t, int cols_per_elem, int prec) {
   os << "0x" << fmt_hex_digits(t);
 }
 template <>
-static void format_elem(std::ostream &os, uint64_t t, int prec) {
+static void format_elem(std::ostream &os, uint64_t t, int cols_per_elem, int prec) {
   os << "0x" << fmt_hex_digits(t);
 }
 template <>
-static void format_elem(std::ostream &os, int16_t t, int prec) {
+static void format_elem(std::ostream &os, int16_t t, int cols_per_elem, int prec) {
   os << fmt_dec(t);
 }
 template <>
-static void format_elem(std::ostream &os, int32_t t, int prec) {
+static void format_elem(std::ostream &os, int32_t t, int cols_per_elem, int prec) {
   os << fmt_dec(t);
 }
 template <>
-static void format_elem(std::ostream &os, int64_t t, int prec) {
+static void format_elem(std::ostream &os, int64_t t, int cols_per_elem, int prec) {
   os << fmt_dec(t);
 }
 template <>
-static void format_elem(std::ostream &os, float t, int prec) {
-  os << frac(t, prec);
+static void format_elem(std::ostream &os, float t, int cols_per_elem, int prec) {
+  os << colr<frac>(frac(t, prec), cols_per_elem);
+}
+
+
+
+template <typename T>
+static void format_elem_vec(std::ostream &os, const T *t, int n, int cols_per_elem, int prec) {
+  os << '{';
+  format_elem<T>(os, t[0], cols_per_elem, prec);
+  for (int i = 1; i < n; i++) {
+    os << ',';
+    format_elem<T>(os, t[i], cols_per_elem, prec);
+  }
+  os << '}';
+}
+
+/////////////
+// formatting vector types
+template <>
+static void format_elem(std::ostream &os, float2 v, int cols_per_elem, int prec) {
+  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
 }
 template <>
-static void format_elem(std::ostream &os, float2 t, int prec) {
-  os << frac(t, prec);
+static void format_elem(std::ostream &os, float4 v, int cols_per_elem, int prec) {
+  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
 }
 template <>
-static void format_elem(std::ostream &os, float4 t, int prec) {
-  os << frac(t, prec);
+static void format_elem(std::ostream &os, uint2 v, int cols_per_elem, int prec) {
+  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
 }
+template <>
+static void format_elem(std::ostream &os, uint4 v, int cols_per_elem, int prec) {
+  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
+}
+template <>
+static void format_elem(std::ostream &os, int2 v, int cols_per_elem, int prec) {
+  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
+}
+template <>
+static void format_elem(std::ostream &os, int4 v, int cols_per_elem, int prec) {
+  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
+}
+
+static const char *ANSI_RESET = "\033[0m";
+static const char *ANSI_COLOR0 = "\033[1;36m";
+static const char *ANSI_COLOR1 = "\033[2;36m";
+static const char *ANSI_NVDAMOD = "\033[38;2;94;182;0m";
+
 
 template <typename T>
 static void format_buffer(
@@ -406,9 +640,10 @@ static void format_buffer(
     size_t elems,
     int elems_per_line,
     std::function<void(std::ostream&,const T&)> fmt_elem,
+    std::function<const char*(const T&)> color_elem_ansi,
     std::function<void(std::ostream&,size_t)> fmt_addr)
 {
-  os << type_name<T>() << "[" << elems << "]: " <<
+  os << mc_type_info<T>::name() << "[" << elems << "]: " <<
     "0x" << fmt_hex_digits<uint64_t>((uintptr_t)ptr) << ":\n";
   elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
   size_t i = 0;
@@ -417,30 +652,57 @@ static void format_buffer(
     os << ": ";
     for (size_t c = 0; c < elems_per_line && i < elems; c++, i++) {
       os << "  ";
+      auto color = color_elem_ansi(ptr[i]);
+      if (color)
+          os << color;
       fmt_elem(os, ptr[i]);
+      if (color)
+          os << ANSI_RESET;
     }
     os << "\n";
   }
 }
-
 template <typename T>
 static void format_buffer(
     std::ostream &os,
     const T *ptr,
     size_t elems,
     int elems_per_line,
-    std::function<void(std::ostream&,const T&)> fmt_elem)
+    std::function<void(std::ostream&,const T&)> fmt_elem,
+    std::function<const char*(const T&)> color_elem)
 {
   const int addr_size =
-    sizeof(T) * elems <= 0xFFFFull ? 4 :
-    sizeof(T) * elems <= 0xFFFFFFFFull ? 8 : -1;
-  format_buffer<T>(os, ptr, elems, elems_per_line, fmt_elem,
-      [&](std::ostream &os, size_t ix) {
-        os << fmt_hex_digits<uint64_t>(sizeof(T) * ix, addr_size);
-      });
+      sizeof(T) * elems <= 0xFFFFull ? 4 :
+      sizeof(T) * elems <= 0xFFFFFFFFull ? 8 : -1;
+  format_buffer<T>(os,
+                   ptr, elems,
+                   elems_per_line, fmt_elem, color_elem,
+                   [&](std::ostream &os, size_t ix) {
+                     os << fmt_hex_digits<uint64_t>(sizeof(T) * ix, addr_size);
+                   });
 }
 
 
+
+
+///////////////////////////////////////////////////////////////////////////////
+template <typename T>
+static std::function<const char*(const T&)> color_elems_none() {
+    std::function<const char*(const T&)> fmt_no_color =
+        [](const T&) -> const char * {return nullptr;};
+    return fmt_no_color;
+}
+template <typename T>
+static std::function<void(std::ostream&,const T&)>
+    default_elem_formatter(int cols_per_elem = mc_type_info<T>::preferred_columns(),
+                           int prec = 3)
+{
+    std::function<void(std::ostream&,const T&)> fmt =
+        [&](std::ostream &os, const T &t) {
+          format_elem(os, t, cols_per_elem, prec);
+        };
+    return fmt;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // memory initialization generators
@@ -467,8 +729,7 @@ struct arith_seq {
   void apply(E *vals, size_t n) const {
     E val = seq_init;
     if (seq_mod != E(0)) {
-      if constexpr (std::is_floating_point<E>::value &&
-                    std::is_floating_point<E>::value) {
+      if constexpr (std::is_floating_point<E>::value) {
         val = std::fmod(val, seq_mod);
       } else {
         val %= seq_mod;
@@ -478,8 +739,7 @@ struct arith_seq {
       vals[k] = val;
       val += seq_delta;
       if (seq_mod != E(0)) {
-        if constexpr (std::is_floating_point<E>::value &&
-                      std::is_floating_point<E>::value) {
+        if constexpr (std::is_floating_point<E>::value) {
           val = std::fmod(val, seq_mod);
         } else {
           val %= seq_mod;
@@ -563,6 +823,7 @@ struct umem_alloc {
 
 // genericize umem
 template <typename E>
+  // requires(is_trivially_copyable_v<E>
 class umem // unified memory buffer
 {
   // destructor deallocs umem_alloc, if it's the last ref
@@ -591,9 +852,9 @@ public:
   void init(const cyc_seq<E> &g) {g.apply(get_ptr(), size());}
   void init(const rnd_seq<E> &g) {g.apply(get_ptr(), size());}
 
-  void init(std::function<E(size_t)> f) {
+  void init(std::function<E(size_t)> g) {
     for (size_t i = 0; i < size(); i++) {
-      get_ptr()[i] = f(i);
+      get_ptr()[i] = g(i);
     }
   }
 
@@ -624,9 +885,9 @@ public:
   }
 
    // elements
-   operator       E *()       {return get_ptr();}
+   operator       E *()        {return get_ptr();}
                   E *get_ptr() {return const_cast<E *>(get_cptr());}
-   operator const E *() const {return get_cptr();}
+   operator const E *()         const {return get_cptr();}
             const E *get_cptr() const {return (const E *)ptr.get()->mem;}
    //      E &operator[](size_t ix)       {return get_ptr()[ix];} // TODO: check bounds
    //const E &operator[](size_t ix) const {return get_ptr()[ix];}
@@ -635,23 +896,25 @@ public:
   void str(
     std::function<void(std::ostream&,const E&)> fmt_elem,
     std::ostream &os = std::cout,
-    int elems_per_line = -1,
-    int prec = -1) const
+    int elems_per_line = -1) const
   {
-    format_buffer(os, get_cptr(), size(), elems_per_line, fmt_elem);
+    format_buffer(os, get_cptr(), size(),
+                  elems_per_line,
+                  fmt_elem, color_elems_none<E>());
   }
   void str(
     std::ostream &os = std::cout,
     int elems_per_line = -1,
+    int cols_per_elem = mc_type_info<E>::preferred_columns(),
     int prec = -1) const
   {
-    std::function<void(std::ostream&,const E&)> fmt =
-        [&](std::ostream &os, const E &e){format_elem<E>(os, e, prec);};
-    str(fmt, os, elems_per_line, prec);
+    str(default_elem_formatter<E>(cols_per_elem, prec), os, elems_per_line);
   }
-  std::string str(int elems_per_line = -1, int prec = -1) const {
+  std::string str(int elems_per_line = -1,
+                  int cols_per_elem = 0,
+                  int prec = -1) const {
     std::stringstream ss;
-    str(ss, elems_per_line, prec);
+    str(ss, elems_per_line, cols_per_elem, prec);
     return ss.str();
   }
 }; // struct umem
