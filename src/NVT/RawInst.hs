@@ -305,6 +305,10 @@ decodeDepInfo w128 = tokens
         --  [7:5]   / [112:110] = write barrier index
         --  [4]     / [109]     = !yield (yield if zero)
         --  [3:0]   / [108:105] = stall cycles (0 to 15)
+        --
+        -- After seeing DEPBAR.LE and that those SB operands,
+        -- then we have an idea that barrier indices are SB0..SB5
+        -- (instead of 1..6).  So the encoded value *is* the barrier id.
         stall_tk
           | stalls == 0 = ""
           | otherwise = "!" ++ show stalls
@@ -315,12 +319,12 @@ decodeDepInfo w128 = tokens
         wr_alloc_tk = mkAllocTk ".W" 5
         rd_alloc_tk = mkAllocTk ".R" 8
         mkAllocTk sfx off
-          | val == 7 = "" -- I guess 7 is their ignored value
-          | otherwise = "+" ++ show (val + 1) ++ sfx
-          where val = getField64 off 3 control_bits
+          | enc == 7 = "" -- I guess 7 is their ignored value
+          | otherwise = "+" ++ show enc ++ sfx
+          where enc = getField64 off 3 control_bits
         wait_mask_tk
           | null indices = ""
-          | otherwise = intercalate "," (map (\i -> "^" ++ show (i + 1)) indices)
+          | otherwise = intercalate "," (map (\bid -> "^" ++ show bid) indices)
           where indices = filter (testBit wait_mask) [0..5]
                  where wait_mask = getField64 11 6 control_bits
 

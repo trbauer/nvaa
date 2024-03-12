@@ -35,6 +35,7 @@ sdks =
   , (12,0)
   -- disable until I can get OpenCL C working again
   -- , (12,3)
+  -- , (12,4)
   --   guessing
   ]
 
