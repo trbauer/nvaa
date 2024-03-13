@@ -45,8 +45,9 @@ __global__ void pipecopy_zfill(
     uint32_t zero)
 {
   const auto gid = blockIdx.x * blockDim.x + threadIdx.x;
+  __shared__ uint4 shmem[64];
 
-  uint4 val;
+  uint4 *shptr = &shmem[threadIdx.x];
 
   // 8,8;8,4
 //  uint4 val = srcs[gid];
@@ -55,20 +56,19 @@ __global__ void pipecopy_zfill(
 //  }
 
   // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memcpy-async-primitive
-
+// printf("T%d \n", threadIdx.x);
   if (threadIdx.x == 2) {
-    __pipeline_memcpy_async(&val.x, &srcs[gid].x, 16, 5); // zero-fill last 4
-//    __pipeline_memcpy_async(&val.x, &srcs[gid].x, 16, 4); // zero-fill last 4
-//    __pipeline_memcpy_async(&val.x, &srcs[gid].x, 16, 12); // zero-fill last 12
-//  } else if (threadIdx.x == 3) {
-//    __pipeline_memcpy_async(&val.x, &srcs[gid].x, 16, 8); // zero-fill last 8
+//    __pipeline_memcpy_async(shptr, &srcs[gid].x, 16, 5); // zero-fill last 5? (works on sm_75)
+    __pipeline_memcpy_async(shptr, &srcs[gid].x, 16, 4); // zero-fill last 4
+//    __pipeline_memcpy_async(shptr, &srcs[gid].x, 16, 8); // zero-fill last 8
+//    __pipeline_memcpy_async(shptr, &srcs[gid].x, 16, 12); // zero-fill last 12
   } else {
-    __pipeline_memcpy_async(&val.x, &srcs[gid].x, 16); // no zero-fill
+    __pipeline_memcpy_async(shptr, &srcs[gid].x, 16); // no zero-fill
   }
   __pipeline_commit();
   __pipeline_wait_prior(0);
 
-  oups[gid] = val;
+  oups[gid] = *shptr;
 }
 
 static const size_t BLOCKS = 1; // 1 warp only
@@ -83,7 +83,7 @@ static void run_zfill(const opts &os)
   umem<uint4> oups(BLOCKS * TPB, const_seq<uint4>(make_uint4(0u, 0u, 0u, 0u)));
   std::cout << "inps:\n";
   inps.str(std::cout, 2);
-  std::cout << "oups:\n";
+  std::cout << "oups (init):\n";
   oups.str(std::cout, 2);
 
   pipecopy_zfill<<<BLOCKS,TPB>>>(oups, inps, 0);
@@ -92,6 +92,7 @@ static void run_zfill(const opts &os)
   if (e != cudaSuccess) {
     fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error");
   }
+  std::cout << "oups (final):\n";
   oups.str(std::cout, 2);
 }
 

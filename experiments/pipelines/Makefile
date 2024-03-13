@@ -1,7 +1,7 @@
 WORKLOAD=pipelines
 NVCC_EXTRA_FLAGS=-std=c++20
 ARCH=90
-EXE_ARCH=75
+EXE_ARCH=86
 
 
 help:
