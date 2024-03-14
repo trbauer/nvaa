@@ -205,7 +205,7 @@ runWithOpts os
   | oClean os = do
     forM_  (oArtifacts os) $ \a -> do
       oVerboseLn os $ "cleaning " ++ fmtArtifact a
-      (_,oups) <- a_inputs_outputs a
+      (_,oups) <- a_inputs_outputs True a
       forM_ oups $ \oup -> do
         z <- doesFileExist oup
         when z $ do
@@ -235,8 +235,9 @@ runWithOpts os
           when (oVerbosity os >= 2) $
             putStrLn "checking for updates"
           z <- loopForUpdate (concat p)
-          if not z then watchForUpdate delay_s
-            else executePlan os p
+          when z $ executePlan os p
+          watchForUpdate delay_s
+
     executePlan os p
     case oWatch os of
       Nothing -> return ()
@@ -284,8 +285,10 @@ makePlan as =
 
 
 -- (inputs, outputs) of a phase
-a_inputs_outputs :: Artifact -> IO ([FilePath], [FilePath])
-a_inputs_outputs (ak,fp,sm) = do
+-- is_for_clean means to include stuff that might not matter like .lib files
+--  this is used by --clean, but not incremental rebuild
+a_inputs_outputs :: Bool -> Artifact -> IO ([FilePath], [FilePath])
+a_inputs_outputs is_for_clean (ak,fp,sm) = do
     uses_mincu <- usesMincuHpp fp
     let maybe_mincu
           | uses_mincu = [mINCU_PATH]
@@ -295,7 +298,10 @@ a_inputs_outputs (ak,fp,sm) = do
       case ak of
         -- what about mincu.hpp?
         ArtifactKindCUBIN -> (root_files,[cubin_fp])
-        ArtifactKindEXE -> (root_files,[exe_fp,exe_lib_fp,exe_exp_fp])
+        -- ArtifactKindEXE -> (root_files,[exe_fp,exe_lib_fp,exe_exp_fp])
+        ArtifactKindEXE
+          | is_for_clean -> (root_files,[exe_fp,exe_lib_fp,exe_exp_fp])
+          | otherwise -> (root_files,[exe_fp])
         ArtifactKindPTX -> (root_files,[ptx_fp])
         ArtifactKindSASS -> ([cubin_fp],[sass_fp])
         ArtifactKindSASSG -> ([cubin_fp],[sass_png_fp,dot_fp])
@@ -412,7 +418,7 @@ shouldRebuild :: Opts -> Artifact -> IO ShouldRebuild
 shouldRebuild os a@(ak,_,_)
   | oClobber os = return $ ShouldRebuildCLOBBER
   | otherwise = do
-    (inps,oups) <- a_inputs_outputs a
+    (inps,oups) <- a_inputs_outputs False a
     let doesFileNotExist f = not <$> doesFileExist f
     missing_inp <- filterM doesFileNotExist inps
     if not (null missing_inp)
