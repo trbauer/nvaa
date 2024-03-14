@@ -209,6 +209,8 @@ runWithOpts os
 
         processFile :: FilePath -> IO ()
         processFile fp = do
+          unless ("sm_"`isPrefixOf`oArch os || "compute_"`isPrefixOf`oArch os) $
+            fatal "--arch=... argument invalid (must be \"sm_...\")"
           debugLn os $ show os
           case takeExtension fp of
             ".cl" -> processClFile fp

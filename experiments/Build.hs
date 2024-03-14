@@ -499,7 +499,8 @@ buildArtifact os dio a@(ak,fp,arch) = do
         [ "-std=c++20"
         , "-arch","sm_"++arch
         , "-I", takeDirectory mINCU_PATH
-        , "--generate-line-info", "--source-in-ptx"
+        , "--generate-line-info"
+        -- , "--source-in-ptx" (shouldn't be needed; since PTX doesn't use this path)
         , "-cubin"
         , "-o", fp_cubin
         , fp
@@ -507,7 +508,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
     ArtifactKindSASS -> do
       callExeToFile os dio "nvdisasm"
         [ "--print-instruction-encoding" -- for depinfo
-        , "--print-line-info-ptx" -- (TODO)
+        -- , "--print-line-info-ptx" -- (TODO: need to decode .nv_debug_ptx_txt section to make that work)
         , "--print-line-info" -- for lines
         , "--print-line-info-inline" -- for inline call sites
         -- , "--print-life-ranges"
