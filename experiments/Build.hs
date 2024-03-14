@@ -20,10 +20,11 @@ import Text.Printf
 import qualified Data.Set as DS
 import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 
--- TODO: args to nvcc or args to exe
--- TODO:
---   * "watch" mode that polls for changes iteratively
---   * cancel/kill/abort
+-- TODO: extra args to nvcc or args to exe (override things like C++ std if present)
+-- TODO: -q hides everything except errors
+--       -v=0 shows only modified changes
+--       -v=1 shows success steps (e.g. skipped)
+-- TODO: -j=... parallelism for parallel build
 -- TODO: sniff out #include dependencies...
 
 main :: IO ()
@@ -35,6 +36,7 @@ run as = parseOpts dft_opts as >>= runWithOpts
 data Opts =
   Opts {
     oArtifacts :: ![Artifact]
+  , oClean :: !Bool -- clean mode
   , oClobber :: !Bool
   , oDryRun :: !Bool
   , oVerbosity :: !Int
@@ -45,6 +47,7 @@ dft_opts :: Opts
 dft_opts =
   Opts {
     oArtifacts = []
+  , oClean = False
   , oClobber = False
   , oDryRun = False
   , oVerbosity = 0
@@ -80,6 +83,7 @@ parseOpts os (a:as)
       "Build Experiment\n" ++
       "where OPTS are:\n" ++
       "   -c/--clobber               overrides file time checks\n" ++
+      "      --clean                 remove outputs from given targets\n" ++
       "   -d/--dry-run               don't actually execute the operation\n" ++
       "   -w/--watch=SECONDS         enable watch mode (iteratively builds)\n" ++
       "   -q/-v/-v2/-v=INT           sets the verbosity\n" ++
@@ -100,6 +104,7 @@ parseOpts os (a:as)
   | a`elem`["-v2"] = nextArg os{oVerbosity = 2}
   | k == "-v=" = parseAsIntValue (\i -> os{oVerbosity = i})
   --
+  | a`elem`["--clean"] = nextArg os {oClean = True}
   | a `elem` ["-d","--dry-run"] = nextArg os {oDryRun = True}
   | a `elem` ["-c","--clobber"] = nextArg os {oClobber = True}
   | k `elem` ["-w=","--watch"] = parseAsFloatValue (\f -> os{oWatch = Just f})
@@ -196,35 +201,46 @@ checkTools = do
 
 
 runWithOpts :: Opts -> IO ()
-runWithOpts os = do -- mapM_ (runCommandWithOpts os) (oCommands os)
-  let p = makePlan (oArtifacts os)
-  when (oVerbosity os >= 2) $ do
-    putStrLn "============= PLAN =============="
-    forM_ (zip [0..] p) $ \(ix,as) ->
-      putStrLn $ "step " ++ show ix ++ ": " ++ intercalate "|" (map fmtArtifact as)
-  unless (oDryRun os) $ checkTools
-  let loopForUpdate :: [Artifact] -> IO Bool
-      loopForUpdate [] = return False
-      loopForUpdate (a:as) = do
-        sr <- shouldRebuild os a
-        case sr of
-          ShouldRebuildERROR err -> fatal (fmtArtifact a ++ ": " ++ err)
-          ShouldRebuildUPTODATE -> loopForUpdate as
-          x -> do
-            putStrLn $ "============= " ++ fmtArtifact a ++ ": " ++ show x
-            return True
-  let watchForUpdate delay_s = do
-        when (delay_s > 0.0) $ do
-          threadDelay (round (delay_s * 1000 * 1000))
-        when (oVerbosity os >= 2) $
-          putStrLn "checking for updates"
-        z <- loopForUpdate (concat p)
-        if not z then watchForUpdate delay_s
-          else executePlan os p
-  executePlan os p
-  case oWatch os of
-    Nothing -> return ()
-    Just s -> watchForUpdate s
+runWithOpts os
+  | oClean os = do
+    forM_  (oArtifacts os) $ \a -> do
+      oVerboseLn os $ "cleaning " ++ fmtArtifact a
+      (_,oups) <- a_inputs_outputs a
+      forM_ oups $ \oup -> do
+        z <- doesFileExist oup
+        when z $ do
+          oDebugLn os $ "  removing " ++ oup
+          removeFile oup
+
+  | otherwise = do -- mapM_ (runCommandWithOpts os) (oCommands os)
+    let p = makePlan (oArtifacts os)
+    when (oVerbosity os >= 2) $ do
+      putStrLn "============= PLAN =============="
+      forM_ (zip [0..] p) $ \(ix,as) ->
+        putStrLn $ "step " ++ show ix ++ ": " ++ intercalate "|" (map fmtArtifact as)
+    unless (oDryRun os) $ checkTools
+    let loopForUpdate :: [Artifact] -> IO Bool
+        loopForUpdate [] = return False
+        loopForUpdate (a:as) = do
+          sr <- shouldRebuild os a
+          case sr of
+            ShouldRebuildERROR err -> fatal (fmtArtifact a ++ ": " ++ err)
+            ShouldRebuildUPTODATE -> loopForUpdate as
+            x -> do
+              putStrLn $ "============= " ++ fmtArtifact a ++ ": " ++ show x
+              return True
+    let watchForUpdate delay_s = do
+          when (delay_s > 0.0) $ do
+            threadDelay (round (delay_s * 1000 * 1000))
+          when (oVerbosity os >= 2) $
+            putStrLn "checking for updates"
+          z <- loopForUpdate (concat p)
+          if not z then watchForUpdate delay_s
+            else executePlan os p
+    executePlan os p
+    case oWatch os of
+      Nothing -> return ()
+      Just s -> watchForUpdate s
 
 -- list of concurrent plans we can run
 -- EXE
@@ -279,16 +295,20 @@ a_inputs_outputs (ak,fp,sm) = do
       case ak of
         -- what about mincu.hpp?
         ArtifactKindCUBIN -> (root_files,[cubin_fp])
-        ArtifactKindEXE -> (root_files,[exe_fp])
+        ArtifactKindEXE -> (root_files,[exe_fp,exe_lib_fp,exe_exp_fp])
         ArtifactKindPTX -> (root_files,[ptx_fp])
         ArtifactKindSASS -> ([cubin_fp],[sass_fp])
-        ArtifactKindSASSG -> ([cubin_fp],[sass_png_fp])
+        ArtifactKindSASSG -> ([cubin_fp],[sass_png_fp,dot_fp])
   where stem = dropExtension fp
         sass_fp = stem ++ "-sm_"++sm++".sass"
+        sass_raw_fp = stem ++ "-raw-sm_"++sm++".sass"
         sass_png_fp = stem ++ "-sm_"++sm++"-sass.png"
         ptx_fp = stem ++ "-sm_"++sm++".ptx"
         cubin_fp = stem ++ "-sm_"++sm++".cubin"
         exe_fp = stem ++ "-sm_"++sm++".exe"
+        exe_lib_fp = stem ++ "-sm_"++sm++".lib"
+        exe_exp_fp = stem ++ "-sm_"++sm++".exp"
+        dot_fp = stem ++ "-" ++ "sm_" ++ sm ++ ".dot"
 
         usesMincuHpp :: FilePath -> IO Bool
         usesMincuHpp fp = do
@@ -302,7 +322,8 @@ executePlan os ass = executeStep 0 ass
   where executeStep :: Int -> [[Artifact]] -> IO ()
         executeStep _ [] = return ()
         executeStep n (as:ass) = do
-            putStrLn $ "executing step " ++ show n ++ " ..."
+            when (oVerbosity os >= 1) $
+              putStrLn $ "========== executing step " ++ show n ++ " ..."
             mapM_ execSerial as
             executeStep (n + 1) ass
         execSerial a = do
@@ -457,7 +478,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
   let fp_noext = dropExtension fp
       fp_cubin = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".cubin"
       fp_exe = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".exe"
-      fp_rsass = fp_noext ++ "-" ++ "sm_" ++ arch ++ "-raw.sass"
+      fp_rsass = fp_noext ++ "-raw-" ++ "sm_" ++ arch ++ ".sass"
       fp_sass = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".sass"
       fp_dot_sass = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".dot"
       fp_sass_png = fp_noext ++ "-sm_" ++ arch ++"-sass.png"
@@ -504,7 +525,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
     ArtifactKindSASSG -> do
       callExeToFile os dio "nvdisasm"
         [ "--print-instruction-encoding" -- for depinfo
-        -- --print-line-info-ptx (TODO)
+        -- --print-line-info-ptx -- (TODO)
         , "--print-line-info" -- for lines
         , "--print-line-info-inline" -- for inline call sites
         , "--print-code" -- only text sections
@@ -523,7 +544,8 @@ buildArtifact os dio a@(ak,fp,arch) = do
         [ "-std=c++20"
         , "-arch","sm_"++arch
         , "-I", takeDirectory mINCU_PATH
-        , "--generate-line-info", "--source-in-ptx"
+        , "--generate-line-info" -- .loc directives
+        , "--source-in-ptx" -- emits // lines with source (requires --generate-line-info)
         , "--ptx"
         , "-o", fp_ptx
         , fp
