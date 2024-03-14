@@ -517,7 +517,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
         ] fp_rsass ""
         -- just for filter assembly
       callExe os dio "nva.exe"
-        [ "--arch=" ++ arch
+        [ "--arch=sm_" ++ arch
         , "-lines"
         , fp_rsass
         , "-o=" ++ fp_sass
