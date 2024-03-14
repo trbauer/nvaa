@@ -15,6 +15,8 @@
 
 #include <cuda_runtime.h>
 #include <cuda_pipeline_primitives.h>
+#include <cuda/pipeline>
+#include <cooperative_groups.h>
 
 #include "mincu.hpp"
 
@@ -32,12 +34,12 @@ struct opts {
 // 2zb. device function memcpy_async to pipeline 16, 4 (ZFILL)
 // 2zc. device function memcpy_async to pipeline 16, 8 (ZFILL)
 //
-/*
-void __pipeline_memcpy_async(void* __restrict__ dst_shared,
-                             const void* __restrict__ src_global,
-                             size_t size_and_align,
-                             size_t zfill=0);
-*/
+
+// void __pipeline_memcpy_async(void* __restrict__ dst_shared,
+//                              const void* __restrict__ src_global,
+//                              size_t size_and_align,
+//                              size_t zfill=0);
+
 
 __global__ void pipecopy_zfill(
     uint4 *oups,
@@ -71,11 +73,64 @@ __global__ void pipecopy_zfill(
   oups[gid] = *shptr;
 }
 
-static const size_t BLOCKS = 1; // 1 warp only
-static const size_t TPB = 8; // threads per block (1 warp)
+const uint32_t BLOCK_SIZE = 64;
+__global__ void pipecopy_multistage(
+    int32_t *oups,
+    const int32_t *srcs,
+    int32_t zero)
+{
+  constexpr size_t MAX_STAGES = 4;
+  const auto gid = blockIdx.x * blockDim.x + threadIdx.x;
+  __shared__ int32_t shmem[MAX_STAGES][BLOCK_SIZE];
+
+  cuda::pipeline<cuda::thread_scope_thread> pipe = cuda::make_pipeline();
+  const auto asize = cuda::aligned_size_t<alignof(int32_t)>(sizeof(int32_t));
+
+  for (int stage = 0; stage < MAX_STAGES; stage++) {
+    pipe.producer_acquire();
+    cuda::memcpy_async(shmem[stage] + threadIdx.x,
+                       srcs + stage * BLOCK_SIZE + threadIdx.x,
+                       asize,
+                       pipe);
+    pipe.producer_commit();
+  }
+
+  uint32_t sum = 0;
+  for (int stage = 0; stage < MAX_STAGES; stage++) {
+    pipe.consumer_wait();
+    const auto me = shmem[stage][threadIdx.x];
+    for (int i = 0; i < BLOCK_SIZE; i++)
+      sum += shmem[stage][i] - me;
+    pipe.consumer_release();
+  }
+
+  oups[gid] = sum;
+}
+
+/*
+__global__ void pipecopy_multistage_sharedstate(
+    uint1 *oups,
+    const uint1 *srcs,
+    uint32_t zero)
+{
+  constexpr size_t maxPipelineStages = 4;
+  const auto gid = blockIdx.x * blockDim.x + threadIdx.x;
+  __shared__ uint4 shmem[64];
+
+  const auto shape = cuda::aligned_size_t<alignof(*srcs)>(sizeof(*srcs));
+  __shared__ cuda::pipeline_shared_state<cuda::thread_scope_block,
+                                         maxPipelineStages> shared_state;
+  const auto thread_role = (threadIdx.x < 32)
+                               ? cuda::pipeline_role::consumer
+                               : cuda::pipeline_role::producer;
+  auto pipe = cuda::make_pipeline(cta, &shared_state, thread_role);
+}
+*/
 
 static void run_zfill(const opts &os)
 {
+  static const size_t BLOCKS = 1; // 1 warp only
+  static const size_t TPB = 8; // threads per block (1 warp)
   // uint4
   // int4
   umem<uint4> inps(BLOCKS * TPB,

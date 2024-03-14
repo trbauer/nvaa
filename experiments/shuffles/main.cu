@@ -101,7 +101,7 @@ static void test_shuffle_vidx(const opts &os)
   // likely to be contention over SMs
   const uint32_t TOTAL_BLOCKS = 1;
 
-  umem<uint32_t> idxs(TOTAL_BLOCKS * 32, init_seq<uint32_t>(1));
+  umem<uint32_t> idxs(TOTAL_BLOCKS * 32, arith_seq<uint32_t>(1));
   idxs[0] = 16;
   idxs[1] = 4;
   idxs[2] = 4;
@@ -308,17 +308,17 @@ static void test_shuffle_vidx_xxx_perf(
     };
 
   //////////////////////////////////////////////////////////////////////
-  umem<uint32_t> inpsID(32, init_seq<uint32_t>(0));
-  umem<uint32_t> inpsIDM2(32, init_seq<uint32_t>(0, 1, 2));
-  umem<uint32_t> inpsIDM4(32, init_seq<uint32_t>(0, 1, 4));
-  umem<uint32_t> inpsNXT32(32, init_seq<uint32_t>(0, 1, 32));
-  umem<uint32_t> inpsNXT4(32, init_seq<uint32_t>(0, 1, 4));
-  umem<uint32_t> inpsK5(32, init_const<uint32_t>(25));
-  umem<uint32_t> inpsREV(32, init_seq<uint32_t>(31, (uint32_t)-1));
+  umem<uint32_t> inpsID(32, arith_seq<uint32_t>(0));
+  umem<uint32_t> inpsIDM2(32, arith_seq<uint32_t>(0, 1, 2));
+  umem<uint32_t> inpsIDM4(32, arith_seq<uint32_t>(0, 1, 4));
+  umem<uint32_t> inpsNXT32(32, arith_seq<uint32_t>(0, 1, 32));
+  umem<uint32_t> inpsNXT4(32, arith_seq<uint32_t>(0, 1, 4));
+  umem<uint32_t> inpsK5(32, const_seq<uint32_t>(25));
+  umem<uint32_t> inpsREV(32, arith_seq<uint32_t>(31, (uint32_t)-1));
 
 
   random_state rs(12007);
-  umem<uint32_t> inpsRND(32, init_random(rs, 0, 31));
+  umem<uint32_t> inpsRND(32, rnd_seq<uint32_t>(rs, 0, 31));
   //////////////////////////////////////////////////////////////////////
   testCase("id",  inpsID);
   testCase("idm2", inpsIDM2);

@@ -15,16 +15,16 @@ all: exe ptx sass
 exe: ${WORKLOAD}.exe
 ${WORKLOAD}: ${WORKLOAD}.exe
 ${WORKLOAD}.exe: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu
-	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu -arch ${ARCH} -I ../../tools -o ${WORKLOAD}.exe
+	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu -arch ${ARCH} -I .. -o ${WORKLOAD}.exe
 
 ptx: Makefile ${WORKLOAD}-${ARCH}.ptx
 ${WORKLOAD}-${ARCH}.ptx: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu
-	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx --source-in-ptx -I ../../tools -arch ${ARCH}
+	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx --source-in-ptx -I .. -arch ${ARCH}
 	mv ${WORKLOAD}.ptx ${WORKLOAD}-${ARCH}.ptx
 
 sass: Makefile ${WORKLOAD}-${ARCH}.sass
 ${WORKLOAD}-${ARCH}.sass: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu
-	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --source-in-ptx -c -o ${WORKLOAD}-${ARCH}.cubin -I ../../tools -cubin -arch ${ARCH}
+	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --source-in-ptx -c -o ${WORKLOAD}-${ARCH}.cubin -I .. -cubin -arch ${ARCH}
 	nvdisasm.exe \
 		--print-instruction-encoding \
 		-g \
@@ -48,7 +48,7 @@ atomic-support-${ARCH}.sass: ../../tools/mincu.hpp Makefile atomic-support.cu
 atomic-support-raw-${ARCH}.sass: ../../tools/mincu.hpp Makefile atomic-support.cu
 	nvcc ${NVCC_EXTRA_FLAGS} atomic-support.cu \
 		--generate-line-info --source-in-ptx -c -o atomic-support-${ARCH}.cubin \
-		-I ../../tools -cubin -arch ${ARCH}
+		-I .. -cubin -arch ${ARCH}
 	nvdisasm.exe \
 		--print-instruction-encoding -g atomic-support-${ARCH}.cubin \
 			> atomic-support-raw-${ARCH}.sass

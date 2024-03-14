@@ -2,7 +2,7 @@ ARCH=sm_75
 ARCH_NEW=sm_86
 WORKLOAD=shuffles
 # NVCC_EXTRA_FLAGS=--expt-relaxed-constexpr
-NVCC_EXTRA_FLAGS=
+NVCC_EXTRA_FLAGS=-std=c++20
 
 help:
 	@echo make  exe
@@ -13,20 +13,20 @@ all: exe ptx sass
 
 exe: ${WORKLOAD}.exe
 ${WORKLOAD}: ${WORKLOAD}.exe
-${WORKLOAD}.exe: Makefile ../../tools/mincu.hpp main.cu stats.hpp timers.cuh
-	nvcc ${NVCC_EXTRA_FLAGS} main.cu -arch ${ARCH} -I ../../tools -o ${WORKLOAD}.exe
+${WORKLOAD}.exe: Makefile ../mincu.hpp main.cu stats.hpp timers.cuh
+	nvcc ${NVCC_EXTRA_FLAGS} main.cu -arch ${ARCH} -I .. -o ${WORKLOAD}.exe
 
 ptx: Makefile ${WORKLOAD}-${ARCH}.ptx
-${WORKLOAD}-${ARCH}.ptx: Makefile ../../tools/mincu.hpp main.cu stats.hpp timers.cuh
-	nvcc ${NVCC_EXTRA_FLAGS} main.cu --generate-line-info --ptx --source-in-ptx -I ../../tools -arch ${ARCH}
+${WORKLOAD}-${ARCH}.ptx: Makefile ../mincu.hpp main.cu stats.hpp timers.cuh
+	nvcc ${NVCC_EXTRA_FLAGS} main.cu --generate-line-info --ptx --source-in-ptx -I .. -arch ${ARCH}
 	mv ${WORKLOAD}.ptx ${WORKLOAD}-${ARCH}.ptx
 
 sass: Makefile ${WORKLOAD}-${ARCH}.sass ${WORKLOAD}.exe
-${WORKLOAD}-${ARCH}.sass: Makefile ../../tools/mincu.hpp main.cu stats.hpp timers.cuh
+${WORKLOAD}-${ARCH}.sass: Makefile ../mincu.hpp main.cu stats.hpp timers.cuh
 	nvcc ${NVCC_EXTRA_FLAGS} main.cu \
 		--generate-line-info --source-in-ptx \
 		-c -o ${WORKLOAD}-${ARCH}.cubin \
-		-I ../../tools -cubin -arch ${ARCH}
+		-I .. -cubin -arch ${ARCH}
 	nvdisasm.exe \
 		--print-instruction-encoding \
 		-g \
@@ -41,7 +41,7 @@ ${WORKLOAD}-${ARCH}.sass: Makefile ../../tools/mincu.hpp main.cu stats.hpp timer
 	nvcc ${NVCC_EXTRA_FLAGS} main.cu \
 		--generate-line-info --source-in-ptx \
 		-c -o ${WORKLOAD}-${ARCH_NEW}.cubin \
-		-I ../../tools -cubin -arch ${ARCH_NEW}
+		-I .. -cubin -arch ${ARCH_NEW}
 	nvdisasm.exe \
 		--print-instruction-encoding \
 		-g \

@@ -353,6 +353,13 @@ struct mc_type_info<int8_t> {
   static int channels() {return 1;}
 };
 template <>
+struct mc_type_info<char> {
+  using inner_type = char;
+  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
+  static const char *name() {return "char";}
+  static int channels() {return 1;}
+};
+template <>
 struct mc_type_info<char2> {
   using inner_type = char2;
   static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
@@ -559,6 +566,10 @@ template <typename T>
 static void format_elem(std::ostream &os, T t, int cols_per_elem, int prec);
 
 template <>
+static void format_elem(std::ostream &os, uint8_t t, int cols_per_elem, int prec) {
+  os << "0x" << fmt_hex_digits((uint16_t)t);
+}
+template <>
 static void format_elem(std::ostream &os, uint16_t t, int cols_per_elem, int prec) {
   os << "0x" << fmt_hex_digits(t);
 }
@@ -569,6 +580,14 @@ static void format_elem(std::ostream &os, uint32_t t, int cols_per_elem, int pre
 template <>
 static void format_elem(std::ostream &os, uint64_t t, int cols_per_elem, int prec) {
   os << "0x" << fmt_hex_digits(t);
+}
+template <>
+static void format_elem(std::ostream &os, char t, int cols_per_elem, int prec) {
+  os << fmt_dec((int16_t)t);
+}
+template <>
+static void format_elem(std::ostream &os, int8_t t, int cols_per_elem, int prec) {
+  os << fmt_dec((int16_t)t);
 }
 template <>
 static void format_elem(std::ostream &os, int16_t t, int cols_per_elem, int prec) {
@@ -584,6 +603,10 @@ static void format_elem(std::ostream &os, int64_t t, int cols_per_elem, int prec
 }
 template <>
 static void format_elem(std::ostream &os, float t, int cols_per_elem, int prec) {
+  os << colr<frac>(frac(t, prec), cols_per_elem);
+}
+template <>
+static void format_elem(std::ostream &os, double t, int cols_per_elem, int prec) {
   os << colr<frac>(frac(t, prec), cols_per_elem);
 }
 
@@ -602,31 +625,25 @@ static void format_elem_vec(std::ostream &os, const T *t, int n, int cols_per_el
 
 /////////////
 // formatting vector types
-template <>
-static void format_elem(std::ostream &os, float2 v, int cols_per_elem, int prec) {
-  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
-}
-template <>
-static void format_elem(std::ostream &os, float4 v, int cols_per_elem, int prec) {
-  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
-}
-template <>
-static void format_elem(std::ostream &os, uint2 v, int cols_per_elem, int prec) {
-  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
-}
-template <>
-static void format_elem(std::ostream &os, uint4 v, int cols_per_elem, int prec) {
-  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
-}
-template <>
-static void format_elem(std::ostream &os, int2 v, int cols_per_elem, int prec) {
-  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
-}
-template <>
-static void format_elem(std::ostream &os, int4 v, int cols_per_elem, int prec) {
-  format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec);
-}
+#define MK_VEC_FORMAT_ELEM_N(TYPE, N) \
+  template <> \
+  static void format_elem(std::ostream &os, TYPE ## N v, int cols_per_elem, int prec) { \
+    format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec); \
+  }
+#define MK_VEC_FORMAT_ELEM(TYPE) \
+  MK_VEC_FORMAT_ELEM_N(TYPE, 2) \
+  MK_VEC_FORMAT_ELEM_N(TYPE, 3) \
+  MK_VEC_FORMAT_ELEM_N(TYPE, 4)
 
+MK_VEC_FORMAT_ELEM(float)
+MK_VEC_FORMAT_ELEM(double)
+MK_VEC_FORMAT_ELEM(uint)
+MK_VEC_FORMAT_ELEM(int)
+MK_VEC_FORMAT_ELEM(ulonglong)
+MK_VEC_FORMAT_ELEM(longlong)
+
+
+/////////////
 static const char *ANSI_RESET = "\033[0m";
 static const char *ANSI_COLOR0 = "\033[1;36m";
 static const char *ANSI_COLOR1 = "\033[2;36m";

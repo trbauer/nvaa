@@ -1,7 +1,8 @@
 WORKLOAD=pipelines
 NVCC_EXTRA_FLAGS=-std=c++20
 ARCH=90
-EXE_ARCH=86
+EXE_ARCH=75
+# EXE_ARCH=86
 
 
 help:
@@ -12,23 +13,23 @@ help:
 
 exe: ${WORKLOAD}${EXE_ARCH}.exe
 exe${EXE_ARCH}: ${WORKLOAD}${EXE_ARCH}.exe
-${WORKLOAD}${EXE_ARCH}.exe: ${WORKLOAD}.cu Makefile  ../../tools/mincu.hpp
-	nvcc -std=c++20 -arch sm_${EXE_ARCH} -I ../../tools ${WORKLOAD}.cu -o ${WORKLOAD}${EXE_ARCH}.exe
+${WORKLOAD}${EXE_ARCH}.exe: ${WORKLOAD}.cu Makefile  ../mincu.hpp
+	nvcc -std=c++20 -arch sm_${EXE_ARCH} -I .. ${WORKLOAD}.cu -o ${WORKLOAD}${EXE_ARCH}.exe
 
 ptx${ARCH}: Makefile ${WORKLOAD}-sm_${ARCH}.ptx
-${WORKLOAD}-sm_${ARCH}.ptx: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu
-	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx -I ../../tools -arch sm_${ARCH}
-	# nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx --source-in-ptx -I ../../tools -arch sm_${ARCH}
+${WORKLOAD}-sm_${ARCH}.ptx: Makefile ../mincu.hpp ${WORKLOAD}.cu
+	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx -I .. -arch sm_${ARCH}
+	# nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx --source-in-ptx -I .. -arch sm_${ARCH}
 	mv ${WORKLOAD}.ptx ${WORKLOAD}-sm_${ARCH}.ptx
 
 
-${WORKLOAD}-sm_${ARCH}.cubin: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu
+${WORKLOAD}-sm_${ARCH}.cubin: Makefile ../mincu.hpp ${WORKLOAD}.cu
 	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info \
-		--source-in-ptx -c -o ${WORKLOAD}-sm_${ARCH}.cubin -I ../../tools -cubin -arch sm_${ARCH}
+		--source-in-ptx -c -o ${WORKLOAD}-sm_${ARCH}.cubin -I .. -cubin -arch sm_${ARCH}
 
-${WORKLOAD}-sm_${EXE_ARCH}.cubin: Makefile ../../tools/mincu.hpp ${WORKLOAD}.cu
+${WORKLOAD}-sm_${EXE_ARCH}.cubin: Makefile ../mincu.hpp ${WORKLOAD}.cu
 	nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info \
-		--source-in-ptx -c -o ${WORKLOAD}-sm_${EXE_ARCH}.cubin -I ../../tools -cubin -arch sm_${EXE_ARCH}
+		--source-in-ptx -c -o ${WORKLOAD}-sm_${EXE_ARCH}.cubin -I .. -cubin -arch sm_${EXE_ARCH}
 
 
 

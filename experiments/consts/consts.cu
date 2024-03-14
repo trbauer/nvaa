@@ -158,8 +158,8 @@ static int test_dfma_lat()
 {
   int ret = EXIT_SUCCESS;
 
-  umem<double> oups(1, init_const<double>(0.0));
-  umem<uint64_t> runtimes(1, init_seq<uint32_t>(0));
+  umem<double> oups(1, const_seq<double>(0.0));
+  umem<uint64_t> runtimes(1, arith_seq<uint64_t>(0));
 
   emitTableHdr("run", "clks/ref");
 

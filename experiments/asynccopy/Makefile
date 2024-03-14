@@ -40,44 +40,44 @@ test_inline_info:
 
 #
 
-micro.exe: micro.cu Makefile ../../tools/mincu.hpp
+micro.exe: micro.cu Makefile ../mincu.hpp
 	nvcc  micro.cu \
 		--generate-line-info -std=c++20 \
-		-I../../cuda-samples/common -I ../../tools \
+		-I../../cuda-samples/common -I .. \
 		-arch sm_75 -o micro.exe
-micro75.ptx: micro.cu Makefile ../../tools/mincu.hpp
+micro75.ptx: micro.cu Makefile ../mincu.hpp
 	nvcc  micro.cu \
 		--generate-line-info -std=c++20 \
-		-I../../cuda-samples/common -I ../../tools \
+		-I../../cuda-samples/common -I .. \
 		-arch sm_75 --ptx -o micro75.ptx
-micro75.sass: micro.cu Makefile ../../tools/mincu.hpp
+micro75.sass: micro.cu Makefile ../mincu.hpp
 	nvcc  micro.cu \
 		--generate-line-info -std=c++20 \
-		-I../../cuda-samples/common -I ../../tools \
+		-I../../cuda-samples/common -I .. \
 		-arch sm_75 -cubin -o micro.cubin
 	nva micro.cubin -text --arch sm_75 \
 			> micro75.sass
 
 micro90: micro90.ptx micro90.sass
-micro90.ptx: micro.cu Makefile ../../tools/mincu.hpp
+micro90.ptx: micro.cu Makefile ../mincu.hpp
 	nvcc  micro.cu \
 		--generate-line-info -std=c++20 \
-		-I../../cuda-samples/common -I ../../tools \
+		-I../../cuda-samples/common -I .. \
 		-arch sm_90 --ptx -o micro90.ptx
-micro90.sass: micro.cu Makefile ../../tools/mincu.hpp
+micro90.sass: micro.cu Makefile ../mincu.hpp
 	nvcc  micro.cu \
 		--generate-line-info -std=c++20 \
-		-I../../cuda-samples/common -I ../../tools \
+		-I../../cuda-samples/common -I .. \
 		-arch sm_90 -cubin -o micro.cubin
 	nva micro.cubin --arch sm_90 -text \
 			> micro90.sass
 	nva micro.cubin --arch sm_90 --no-filter-asm \
 			> micro90-raw.sass
 
-micro: micro.cu Makefile ../../tools/mincu.hpp
+micro: micro.cu Makefile ../mincu.hpp
 	nvcc  micro.cu \
 		--generate-line-info --source-in-ptx -cubin \
-		-I../../cuda-samples/common -I ../../tools -arch sm_90
+		-I../../cuda-samples/common -I .. -arch sm_90
 	nvdisasm.exe \
 		--print-instruction-encoding -g -gi \
 		micro.cubin \
@@ -91,25 +91,25 @@ NGT_FILES=\
 	count_gt_async.cu \
 	count_gt.h
 
-ngt_tile.exe: ${NGT_FILES} Makefile ../../tools/mincu.hpp
+ngt_tile.exe: ${NGT_FILES} Makefile ../mincu.hpp
 	nvcc  count_gt_main.cu count_gt_sync.cu count_gt_async.cu \
 		--generate-line-info -std=c++20 \
-		-I ../../tools \
+		-I .. \
 		-arch sm_86 -o ngt_tile.exe
 
 CTGTSM=sm_86
 
 ngt_tile_asm: ngt_tile-${CTGTSM}.sass
-ngt_tile-${CTGTSM}.sass: ${NGT_FILES} Makefile ../../tools/mincu.hpp
+ngt_tile-${CTGTSM}.sass: ${NGT_FILES} Makefile ../mincu.hpp
 	nvcc  count_gt_sync.cu -cubin \
 		--generate-line-info -std=c++20 \
-		-I ../../tools \
+		-I .. \
 		-arch ${CTGTSM} -o count_gt_sync-${CTGTSM}.cubin
 	nva count_gt_sync-${CTGTSM}.cubin -text --arch ${CTGTSM} \
 		> count_gt_sync-${CTGTSM}.sass
 	nvcc  count_gt_async.cu -cubin \
 		--generate-line-info -std=c++20 \
-		-I ../../tools \
+		-I .. \
 		-arch ${CTGTSM} -o count_gt_async-${CTGTSM}.cubin
 	nva count_gt_async-${CTGTSM}.cubin -text --arch ${CTGTSM} \
 		> count_gt_async-${CTGTSM}.sass

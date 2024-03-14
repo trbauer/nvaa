@@ -22,13 +22,19 @@ struct opts {
 };
 
 
+// https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#atomic-functions
+// "The atomic functions described in this section have ordering cuda::memory_order_relaxed and are only atomic at a particular scope:"
+
+
 // native atomic functions
 // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#atomic-functions
 
-static __device__ __host__ unsigned classify(unsigned x, unsigned NBINS) {
+static __device__ __host__
+unsigned classify(unsigned x, unsigned NBINS) {
   return x % NBINS;
 }
 
+// Classical reduction via shared memory.
 template <unsigned NBINS>
 __global__ void hist_satom_gatom(
   // cuda::atomic<unsigned,cuda::thread_scope_system> *g_hist,
@@ -61,11 +67,12 @@ __global__ void hist_satom_gatom(
   for (int bin_idx = threadIdx.x; bin_idx < NBINS; bin_idx += blockDim.x) {
     auto sval = s_hist[bin_idx];
     atomicAdd(g_hist + bin_idx, sval);
-//    printf("gid: %d adding %d to glb[%d]\n", gid, sval, bin_idx);
     // auto sval = s_bins[threadIdx.x].load(cuda::memory_order_relaxed);
     // g_hist[threadIdx.x].fetch_add(sval, cuda::memory_order_relaxed);
   }
 }
+
+// Thundering herd global atomic reduction
 template <unsigned NBINS>
 __global__ void hist_gatom(
   unsigned *g_hist,
@@ -82,23 +89,27 @@ __global__ void hist_gatom(
   }
 }
 
+// Using local memory (terrible idea)
 template <unsigned NBINS>
-__global__ void hist_lmem_gatom(
+__global__ void hist_lgatom(
   unsigned *g_hist,
   const unsigned *inps,
   unsigned per_wi)
 {
   const unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
-  unsigned bins[NBINS] { };
+  unsigned l_hist[NBINS] { };
 
   for (unsigned i = 0; i < per_wi; i++) {
     auto datum = inps[gid * per_wi + i];
     auto bin_idx = classify(datum, NBINS);
-    bins[bin_idx]++;
+    l_hist[bin_idx]++;
+    // atomicAdd(l_hist + bin_idx, 1); (VERY ILLEGAL)
   }
 
-  for (int bin_idx = threadIdx.x; bin_idx < NBINS; bin_idx += blockDim.x) {
-    atomicAdd(g_hist + bin_idx, bins[bin_idx]);
+  // T __ldlu(const T* address);
+  for (int bin_idx = 0; bin_idx < NBINS; bin_idx++) {
+    // atomicAdd(g_hist + bin_idx, __ldlu(l_hist + bin_idx)); // creates LDG.E.LU!!!ma
+    atomicAdd(g_hist + bin_idx, l_hist[bin_idx]);
   }
 }
 
@@ -128,10 +139,10 @@ static result run_test(
   const call_kernel_wrapper &call_kernel,
   std::stringstream &vss)
 {
-  umem<unsigned> oups(nbins, init_const<unsigned>(0u));
+  umem<unsigned> oups {(size_t)nbins, const_seq(0u)};
 
   const size_t buffer_elems = blocks_per_grid * thrs_per_block * data_per_thr;
-  vss << "buffer is " << frac(buffer_elems/1024.0/1024.0, 3) << " MB\n";
+  vss << "buffer is " << frac(sizeof(unsigned)*buffer_elems/1024.0/1024.0, 3) << " MB\n";
   if (os.debug()) {
     vss << "blocks_per_grid = " << blocks_per_grid << "; "
            "threads_per_block = " << thrs_per_block << "; "
@@ -139,14 +150,14 @@ static result run_test(
   }
 
   random_state rs {2024u};
-  const umem<unsigned> inps(buffer_elems, init_random<unsigned>(rs));
+  const umem<unsigned> inps {buffer_elems, rnd_seq<unsigned>(rs)};
 #ifndef _WIN32
   inps.prefetch_to_device();
 #endif
 
   float min_ms = std::numeric_limits<float>::infinity();
   for (int i = 0; i < os.iterations; i++) {
-    oups.apply(init_const<unsigned>(0u));
+    oups.init(const_seq(0u));
     // std::cerr << "\n: run[" << i << "]: oups is\n"; oups.str(std::cerr);
 #ifndef _WIN32
     oups.prefetch_to_device();
@@ -205,21 +216,27 @@ const static std::tuple<std::string,unsigned,std::string,call_kernel_wrapper> AL
    [](size_t bpg, size_t tpb, unsigned *oups, const unsigned *inps, unsigned dpt) -> void { \
      hist_gatom<NBINS><<<bpg,tpb>>>(oups, inps, dpt); \
    }}
+/*
   MAKE_GATOM(2),
   MAKE_GATOM(4),
   MAKE_GATOM(8),
+*/
   MAKE_GATOM(16),
+/*
   MAKE_GATOM(32),
   MAKE_GATOM(48),
   MAKE_GATOM(64),
   MAKE_GATOM(96),
   MAKE_GATOM(128),
   MAKE_GATOM(192),
+*/
   MAKE_GATOM(256),
+/*
   MAKE_GATOM(320),
   MAKE_GATOM(384),
   MAKE_GATOM(448),
   MAKE_GATOM(512),
+*/
 #define MAKE_SGATOM(NBINS) \
   {"sgatom-h" #NBINS, \
    (unsigned)(NBINS), \
@@ -227,21 +244,46 @@ const static std::tuple<std::string,unsigned,std::string,call_kernel_wrapper> AL
    [](size_t bpg, size_t tpb, unsigned *oups, const unsigned *inps, unsigned dpt) -> void { \
      hist_satom_gatom<NBINS><<<bpg,tpb>>>(oups, inps, dpt); \
    }}
-  MAKE_SGATOM(2),
-  MAKE_SGATOM(4),
-  MAKE_SGATOM(8),
+//  MAKE_SGATOM(2),
+//  MAKE_SGATOM(4),
+//  MAKE_SGATOM(8),
   MAKE_SGATOM(16),
-  MAKE_SGATOM(32),
-  MAKE_SGATOM(48),
-  MAKE_SGATOM(64),
-  MAKE_SGATOM(96),
-  MAKE_SGATOM(128),
-  MAKE_SGATOM(320),
+//  MAKE_SGATOM(32),
+//  MAKE_SGATOM(48),
+//  MAKE_SGATOM(64),
+//  MAKE_SGATOM(96),
+//  MAKE_SGATOM(128),
+//  MAKE_SGATOM(320),
   MAKE_SGATOM(256),
-  MAKE_SGATOM(384),
-  MAKE_SGATOM(448),
-  MAKE_SGATOM(512),
+//  MAKE_SGATOM(384),
+//  MAKE_SGATOM(448),
+//  MAKE_SGATOM(512),
+#define MAKE_LGATOM(NBINS) \
+  {"lgatom-h" #NBINS, \
+   (unsigned)(NBINS), \
+   #NBINS "-bin reduction in local memory bins then out to global memory bins", \
+   [](size_t bpg, size_t tpb, unsigned *oups, const unsigned *inps, unsigned dpt) -> void { \
+     hist_lgatom<NBINS><<<bpg,tpb>>>(oups, inps, dpt); \
+   }}
+  MAKE_LGATOM(2),
+  MAKE_LGATOM(4),
+  MAKE_LGATOM(8),
+  MAKE_LGATOM(16),
+  MAKE_LGATOM(32),
+  MAKE_LGATOM(48),
+  MAKE_LGATOM(64),
+  MAKE_LGATOM(96),
+  MAKE_LGATOM(128),
+  MAKE_LGATOM(256),
+  MAKE_LGATOM(320),
+  MAKE_LGATOM(384),
+  MAKE_LGATOM(448),
+  MAKE_LGATOM(512),
 };
+
+
+
+
 
 int main(int argc, const char **argv)
 {
