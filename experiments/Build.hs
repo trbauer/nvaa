@@ -108,8 +108,10 @@ parseOpts os (a:as)
       "    builds all artifacts of bar.cu for sm_90\n" ++
       "  % bexp  bar.cu:75 --clean\n" ++
       "    cleans all artifacts of bar.cu for sm_75\n" ++
-      "  % bexp  bar.cu:75 --cmake\n" ++
-      "    Sets up cmake for bar.cu for sm_75\n" ++
+      "  % bexp  foo.cu:75 bar.cu:75,86 --cmake\n" ++
+      "    Sets up cmake for foo.cu for sm_75 and bar.cu for sm_75 and sm_86\n" ++
+      "  % bexp  .:72,75 --cmake\n" ++
+      "    Set up cmake for *.cu for sm_72 and sm_75\n" ++
       ""
     exitSuccess
   --
@@ -139,36 +141,45 @@ parseOpts os (a:as)
 
         parseTargets  :: String -> IO [Artifact]
         parseTargets a =
-          case span (/=':') a of
-            (path,':':sfx) -> do
-              when (any (`elem`"/\\") path) $
-                putStrLn $ "WARNING: should be run from within local experiment directory"
-              z <- doesFileExist path
-              (path,z) <-
-                if z || ".cu"`isSuffixOf`path then return (path,z)
-                  else do
-                    z <- doesFileExist (path ++ ".cu")
-                    return (path ++ ".cu",z) -- error will get the more specific path
-              unless z $ badArg $ path ++ ": file not found"
-              case span (not . isDigit) sfx of
-                (art_str,ds@(_:_)) -> do
-                  let archs = splitOnCommas ds
-                  -- ensure archs are sane looking at least
-                  -- take 2 allow trailing nondigits sm_90a ("90a")
-                  case filter (not . all isDigit . take 2) archs of
-                    [] -> return ()
-                    x:_ ->
-                      badArg $
-                        x ++ ": suspicious looking SM architecture " ++
-                        "(e.g. expecting something like 75, 90, or 90a)"
-                  if null art_str
-                    then return [(ak,path,arch) | ak<-all_artifact_kinds, arch<-archs]
-                    else
-                      case find (\a -> fmtArtifactKind a == art_str) all_artifact_kinds of
-                        Just art -> return [(art,path,arch) | arch <- archs]
-                        Nothing -> badArg $ art_str ++ ": unrecognized artifact"
-                _ -> badArg $ sfx ++ ": invalid (ARTIFACT)?SM_DIGITS suffix"
-            _ -> badArg "malformed command; should be of form (PATH:(ARTIFACT)?SM_DIGITS)"
+            case span (/=':') a of
+              (path_str,':':sfx) -> do
+                paths <- getPaths path_str
+                case span (not . isDigit) sfx of
+                  (art_str,ds@(_:_)) -> do
+                    let archs = splitOnCommas ds
+                    -- ensure archs are sane looking at least
+                    -- take 2 allow trailing non-digits sm_90a ("90a")
+                    case filter (not . all isDigit . take 2) archs of
+                      [] -> return ()
+                      x:_ ->
+                        badArg $
+                          x ++ ": suspicious looking SM architecture " ++
+                          "(e.g. expecting something like 75, 90, or 90a)"
+                    if null art_str
+                      then return [(ak,path,arch) | path<-paths, ak<-all_artifact_kinds, arch<-archs]
+                      else
+                        case find (\a -> fmtArtifactKind a == art_str) all_artifact_kinds of
+                          Just ak -> return [(ak,path,arch) | path <- paths, arch <- archs]
+                          Nothing -> badArg $ art_str ++ ": unrecognized artifact"
+                  _ -> badArg $ sfx ++ ": invalid (ARTIFACT)?SM_DIGITS suffix"
+              _ -> badArg "malformed command; should be of form (PATH:(ARTIFACT)?SM_DIGITS)"
+          where getPaths :: FilePath -> IO [FilePath]
+                getPaths "." = do
+                  es <- listDirectory "."
+                  return $ filter (".cu"`isSuffixOf`) es
+                getPaths path = do
+                  when (any (`elem`"/\\") path) $
+                    putStrYellow $ "WARNING: should be run from within local experiment directory\n"
+                  file_exists <- doesFileExist path
+                  (path,file_exists) <-
+                    if file_exists || ".cu"`isSuffixOf`path then return (path,file_exists)
+                      else do
+                        file_exists <- doesFileExist (path ++ ".cu")
+                        return (path ++ ".cu",file_exists) -- error takes more specific path
+                  if not file_exists
+                    then badArg $ path ++ ": file not found"
+                    else return [path]
+
 
         parseAsIntValue :: (Int -> Opts) -> IO Opts
         parseAsIntValue func =
@@ -276,7 +287,7 @@ runWithOpts os
     let cmake_dir = "vs"
     z <- doesDirectoryExist cmake_dir
     when (z && not (oClobber os)) $
-      fatal $ cmake_dir ++ ": cmake builld dir alread exists"
+      fatal $ cmake_dir ++ ": cmake build dir already exists"
     when z $ do
       oDebugLn os $ "nuking " ++ cmake_dir
       removeDirectoryRecursive cmake_dir
@@ -646,6 +657,8 @@ putStrRed :: String -> IO ()
 putStrRed = hPutVivid SCA.Red stdout
 putStrGreen :: String -> IO ()
 putStrGreen = hPutVivid SCA.Green stdout
+putStrYellow :: String -> IO ()
+putStrYellow = hPutVivid SCA.Yellow stdout
 --
 hPutVivid :: SCA.Color -> Handle -> String -> IO ()
 hPutVivid = hPutColor SCA.Vivid
