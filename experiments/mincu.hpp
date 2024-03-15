@@ -2,16 +2,24 @@
 #define MINCU_HPP
 
 // #if __cplusplus < 201703L
-// #error "Need -std=c++17"
+// #error "Need at least -std=c++17"
 // #endif
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#undef NOMINMAX
+#endif
 
 #include <cmath>
+#include <concepts>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <ostream>
 #include <random>
 #include <sstream>
@@ -29,8 +37,8 @@
 //    without programmer intervention."
 //
 // should probably be this (OR none!)
-// #include <cuda_runtime.h>
-#include <cuda_runtime_api.h>
+#include <cuda_runtime.h>
+// #include <cuda_runtime_api.h>
 
 namespace mincu
 {
@@ -42,13 +50,14 @@ static inline T align_up(T n, T a) {
 ///////////////////////////////////////////////////////////////////////////////
 // text formatting
 template <typename...Ts>
-static void format_to(std::stringstream &os) { }
+static void format_to(std::ostream &os) { }
 template <typename T, typename...Ts>
-static void format_to(std::stringstream &os, T t, Ts...ts) {os << t; format_to(os, ts...);}
+static void format_to(std::ostream &os, T t, Ts...ts);
 template <typename...Ts>
 static std::string format(Ts...ts) {
   std::stringstream ss; format_to(ss, ts...); return ss.str();
 }
+
 struct hex
 {
   uint64_t value;
@@ -64,15 +73,69 @@ static inline std::ostream &operator <<(std::ostream &os, hex h) {
   return os;
 }
 
+template <typename T>
+static inline void fmt_hex_digits(std::ostream &os, T t, int digs = -1) {
+  if (digs < 0)
+    digs = 2 * sizeof(T);
+  if (sizeof(T) == 1) {
+    os << std::uppercase << std::setw(digs) << std::setfill('0') << std::hex
+       << ((uint16_t)t & 0xFF);
+  } else {
+    os << std::uppercase << std::setw(digs) << std::setfill('0') << std::hex
+       << t;
+  }
+}
+template <typename T>
+static inline std::string fmt_hex_digits(T t, int digs = -1) {
+
+  std::stringstream ss;
+  fmt_hex_digits(ss, t, digs);
+  return ss.str();
+}
+
+// pads out to the size of the underlying type filling
+// '0' and then ' ' after that
+// E.g. fmt_hex<uint8_t>(..., 5) => " 0x05"
+template <typename T>
+static inline void fmt_hex(std::ostream &os, T t, int digs = -1) {
+  os << "0x"; fmt_hex_digits(os, t, digs);
+}
+template <typename T>
+static inline std::string fmt_hex(T t, int digs = -1) {
+  std::stringstream ss;
+  fmt_hex(ss, t, digs);
+  return ss.str();
+}
+template <typename T>
+static inline std::string fmt_dec(T t, int cw = -1) {
+  if (sizeof(t) == 1) {
+    if constexpr (std::is_signed<T>()) {
+      return fmt_dec((int16_t)t, cw); // avoid alphachar
+    } else if constexpr (std::is_floating_point<T>()) {
+      static_assert("whoops: fmt_dec called on a floating point type");
+    } else {
+      return fmt_dec((uint16_t)t, cw); // avoid alphachar
+    }
+  }
+  std::stringstream ss;
+  if (cw > 0) {
+    ss << std::setw(cw) << std::dec << t;
+  } else {
+    ss << std::dec << t;
+  }
+  return ss.str();
+}
+
+///////////////////////////////////////////////////////////////////////////////
 enum class pad {L, R};
 
 template <pad P, typename T>
 struct col
 {
   const T &value;
-  size_t width;
+  int width;
   char pad_fill;
-  col(const T &val, size_t wid = 2 * sizeof(T), char f = ' ')
+  col(const T &val, int wid, char f = ' ')
     : value(val), width(wid), pad_fill(f) { }
 }; // col
 template <typename T>
@@ -83,14 +146,18 @@ using colr = col<pad::L,T>;
 template <pad P,typename T>
 static inline std::ostream &operator<<(std::ostream &os, const col<P,T> &p) {
   auto s = format(p.value);
+  if (p.width <= 0) {
+    os << s;
+    return os;
+  }
   std::stringstream ss;
   if (P == pad::L) {
-    for (size_t i = s.size(); i < p.width; i++)
+    for (size_t i = s.size(); i < (size_t)p.width; i++)
       ss << p.pad_fill;
   }
   ss << s;
   if (P == pad::R) {
-    for (size_t i = s.size(); i < p.width; i++)
+    for (size_t i = s.size(); i < (size_t)p.width; i++)
       ss << p.pad_fill;
   }
   os << ss.str();
@@ -99,6 +166,7 @@ static inline std::ostream &operator<<(std::ostream &os, const col<P,T> &p) {
 
 template <typename...Ts>
 static void fatal(Ts...ts) {
+  // format_to(std::cerr, ts...); std::cerr << "\n";
   std::cerr << format(ts...) << "\n";
   exit(EXIT_FAILURE);
 }
@@ -110,7 +178,7 @@ static void fatal(Ts...ts) {
   do { \
     auto __cuda_api_err = __CUDA_API__(__VA_ARGS__); \
     if (__cuda_api_err != cudaSuccess) { \
-      fatal(#__CUDA_API__, " near line ", __LINE__, " failed with ", \
+      mincu::fatal(#__CUDA_API__, " near line ", __LINE__, " failed with ", \
           cudaGetErrorName(__cuda_api_err), \
           " (", cudaGetErrorString(__cuda_api_err), ")"); \
     } \
@@ -234,53 +302,29 @@ struct frac {
   const int prec;
   union {
     uint16_t f16;
-    uint16_t f16x2[2];
     uint16_t bf16;
-    uint16_t bf16x2[2];
     float    f32;
-    float2   f32x2;
-    float4   f32x4;
     double   f64;
-    double2  f64x2;
+    uint64_t b64;
   } v;
-  const enum frac_tag {F16,F16x2,BF16,BF16x2,F32,F32x2,F32x4,F64,F64x2} tag;
+  const enum frac_tag {F16,BF16,F32,F64} tag;
 
   frac(float f, int _prec = -1) : tag(F32), prec(_prec) {
     v.f32 = f;
   }
-  frac(float2 f, int _prec = -1) : tag(F32x2), prec(_prec) {
-    v.f32x2 = f;
-  }
-  frac(float4 f, int _prec = -1) : tag(F32x4), prec(_prec) {
-    v.f32x4 = f;
-  }
   frac(double f, int _prec = -1) : tag(F64), prec(_prec) {
     v.f64 = f;
   }
-  frac(double2 f, int _prec = -1) : tag(F64x2), prec(_prec) {
-    v.f64x2 = f;
-  }
+
   /*
-  static inline frac bf16(uint16_t fb, int _prec = -1) {
+  static inline frac from_bf16(uint16_t fb, int _prec = -1) {
     frac f {frac::BF16, prec};
     f.v.bf16 = fb;
     return f;
   }
-  static inline frac bf16x2(uint32_t fb, int _prec = -1) {
-    frac f {frac::BF16x2, prec};
-    f.v.bf16x2[0] = fb & 0xFFFF;
-    f.v.bf16x2[1] = fb >> 16;
-    return f;
-  }
-  static inline frac f16(uint16_t fb, int _prec = -1) {
+  static inline frac from_f16(uint16_t fb, int _prec = -1) {
     frac f {frac::F16, prec};
     f.v.f16 = fb;
-    return f;
-  }
-  static inline frac f16x2(uint32_t fb, int _prec = -1) {
-    frac f {frac::F16x2, prec};
-    f.v.f16x2[0] = fb & 0xFFFF;
-    f.v.f16x2[1] = fb >> 16;
     return f;
   }
   */
@@ -295,38 +339,23 @@ static inline float bf_to_f(uint16_t u16) {
   u.i = (uint32_t)u16 << 16;
   return u.f;
 }
-static inline std::ostream &operator <<(std::ostream &os, frac v) {
+static inline std::ostream &operator <<(std::ostream &os, frac f) {
   std::stringstream ss;
-  if (v.prec >= 0)
-    ss << std::setprecision(v.prec);
+  if (f.prec >= 0)
+    ss << std::setprecision(f.prec);
   ss << std::fixed;
-  switch (v.tag) {
+  switch (f.tag) {
   case frac::F16:
-    ss << hf_to_f(v.v.f16);
-    break;
-  case frac::F16x2:
-    ss << "{" << hf_to_f(v.v.f16x2[0]) << ", " << hf_to_f(v.v.f16x2[1]) << "}";
+    ss << hf_to_f(f.v.f16);
     break;
   case frac::BF16:
-    ss << bf_to_f(v.v.bf16);
-    break;
-  case frac::BF16x2:
-    ss << "{" << bf_to_f(v.v.bf16x2[0]) << ", " << bf_to_f(v.v.bf16x2[1]) << "}";
+    ss << bf_to_f(f.v.bf16);
     break;
   case frac::F32:
-    ss << v.v.f32;
-    break;
-  case frac::F32x2:
-    ss << "{" << v.v.f32x2.x << ", " << v.v.f32x2.y << "}";
-    break;
-  case frac::F32x4:
-    ss << "{" << v.v.f32x4.x << ", " << v.v.f32x4.y << ", " << v.v.f32x4.z << ", " << v.v.f32x4.w << "}";
+    ss << f.v.f32;
     break;
   case frac::F64:
-    ss << v.v.f64;
-    break;
-  case frac::F64x2:
-    ss << "{" << v.v.f64x2.x << ", " << v.v.f64x2.y << "}";
+    ss << f.v.f64;
     break;
   default:
     fatal("mincu: << not defined for this tag\n");
@@ -336,319 +365,537 @@ static inline std::ostream &operator <<(std::ostream &os, frac v) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// type details
+// ansi colors
+
+// [(0|1)
+static const char *ANSI_RESET = "\033[0m";
+static const char *ANSI_RED = "\033[1;31m";
+static const char *ANSI_GREEN = "\033[1;32m";
+static const char *ANSI_YELLOW = "\033[1;33m";
+static const char *ANSI_BLUE = "\033[1;34m";
+static const char *ANSI_MAGENTA = "\033[1;35m";
+static const char *ANSI_CYAN = "\033[1;36m";
+static const char *ANSI_WHITE = "\033[1;37m";
+static const char *ANSI_NVMOD = "\033[38;2;94;182;0m";
+
 template <typename T>
-struct mc_type_info {
-// using inner_type
-  static int preferred_columns();
-  static const char *name();
-  static int channels();
+struct ansi_esc {
+  const char *esc;
+  const T value;
+  ansi_esc(const char *e, const T &val) : esc(e), value(val) { }
 };
+template <typename T>
+static ansi_esc<T> ansi_red(const T &val) {return ansi_esc(ANSI_RED, val);}
+template <typename T>
+static ansi_esc<T> ansi_blue(const T &val) {return ansi_esc(ANSI_BLUE, val);}
+template <typename T>
+static ansi_esc<T> ansi_yellow(const T &val) {return ansi_esc(ANSI_YELLOW, val);}
+template <typename T>
+static ansi_esc<T> ansi_green(const T &val) {return ansi_esc(ANSI_GREEN, val);}
+template <typename T>
+static ansi_esc<T> ansi_cyan(const T &val) {return ansi_esc(ANSI_CYAN, val);}
+template <typename T>
+static ansi_esc<T> ansi_magenta(const T &val) {return ansi_esc(ANSI_MAGENTA, val);}
+// ...
+
+template <typename T>
+static inline std::ostream &operator<<(std::ostream &os, const ansi_esc<T> &e) {
+  try {
+    os << e.esc << e.value << ANSI_RESET;
+  } catch (...) {
+    os << ANSI_RESET;
+    throw;
+  }
+  return os;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// ansi colors
+
+struct fmt_opts {
+  int         cols_per_elem;
+  int         frac_prec; // decimal precision
+  bool        force_hex; // force hex (even for float)
+  bool        force_dec;
+  const char *ansi_color;
+  constexpr fmt_opts(int cpe = -1, int pr = 3, bool fh = false, bool fd = false,
+                     const char *ansi = nullptr)
+      : cols_per_elem(cpe), frac_prec(pr), force_hex(fh), force_dec(fd),
+        ansi_color(nullptr) {}
+  //
+  constexpr fmt_opts cols(int cpe) const {auto c = *this; c.cols_per_elem = cpe; return c;}
+  constexpr fmt_opts hex() const {auto c = *this; c.force_hex = true; return c;}
+  constexpr fmt_opts dec() const {auto c = *this; c.force_dec = true; return c;}
+  constexpr fmt_opts color(const char *a) const {auto c = *this; c.ansi_color = a; return c;}
+  constexpr fmt_opts prec(int p) const {auto c = *this; c.frac_prec = p; return c;}
+};
+
+
+
+template <typename T>
+static void format_elem_unsigned(std::ostream &os, T t, const fmt_opts &fos) {
+  if (fos.ansi_color) {
+    os << fos.ansi_color;
+  }
+  if (fos.force_dec && !fos.force_hex) {
+    os << mincu::colr<std::string>(mincu::fmt_dec(t), fos.cols_per_elem);
+  } else {
+    os << mincu::colr<std::string>(mincu::fmt_hex(t), fos.cols_per_elem);
+  }
+  if (fos.ansi_color) {
+    os << ANSI_RESET;
+  }
+}
+template <typename T>
+static void format_elem_signed(std::ostream &os, T t, const fmt_opts &fos) {
+  if (fos.ansi_color) {
+    os << fos.ansi_color;
+  }
+  if (fos.force_hex && !fos.force_dec) {
+    os << mincu::colr<std::string>(mincu::fmt_hex(t), fos.cols_per_elem);
+  } else {
+    os << mincu::colr<std::string>(mincu::fmt_dec(t), fos.cols_per_elem);
+  }
+  if (fos.ansi_color) {
+    os << ANSI_RESET;
+  }
+}
+template <typename T>
+static void format_elem_frac(std::ostream &os, T t, const fmt_opts &fos) {
+  if (fos.ansi_color) {
+    os << fos.ansi_color;
+  }
+  if (fos.force_hex) {
+    if constexpr (sizeof(T) == 8) {
+      format_elem_unsigned(os, *(const uint64_t *)&t, fos);
+    } else if constexpr (sizeof(T) == 4) {
+      format_elem_unsigned(os, *(const uint32_t *)&t, fos);
+    } else if constexpr (sizeof(T) == 2) {
+      format_elem_unsigned(os, *(const uint16_t *)&t, fos);
+    } else if constexpr (sizeof(T) == 1) {
+      format_elem_unsigned(os, *(const uint8_t *)&t, fos);
+    } else {
+      static_assert("invalid float type for this function");
+    }
+  } else {
+    os << mincu::colr<mincu::frac>(mincu::frac(t, fos.frac_prec), fos.cols_per_elem);
+  }
+  if (fos.ansi_color) {
+    os << ANSI_RESET;
+  }
+}
+
+template <typename T>
+static void format_elem_prim(std::ostream &os, const T &t, const fmt_opts &fos) {
+  if constexpr (std::is_floating_point<T>()) {
+    format_elem_frac<T>(os, t, fos);
+  } else if constexpr (std::is_signed<T>()) {
+    format_elem_signed<T>(os, t, fos);
+  } else if constexpr (std::is_unsigned<T>()) {
+    format_elem_unsigned<T>(os, t, fos);
+  } else {
+    static_assert("unsupported type");
+  }
+}
+
+template <typename V, typename E>
+static inline void format_elem_v(
+    std::ostream &os,
+    const V &v,
+    const fmt_opts &fos)
+{
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    if (fos.ansi_color) {
+      os << fos.ansi_color;
+    }
+    // make a copy so the element formatter doesn't apply coloring
+    fmt_opts fos_copy = fos;
+    fos_copy.ansi_color = nullptr;
+    os << '{';
+    const auto *ep = (const E *)&v;
+    format_elem_prim<E>(os, ep[0], fos_copy);
+    for (int i = 1; i < channels; i++) {
+      os << ',';
+      format_elem_prim<E>(os, ep[i], fos_copy);
+    }
+    os << '}';
+    if (fos.ansi_color) {
+      os << ANSI_RESET;
+    }
+  } else {
+    format_elem_prim<E>(os, v, fos);
+  }
+}
+
+template <typename V, typename E>
+static V default_broadcast(E e) {
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V v;
+    for (int i = 0; i < channels; i++) {
+      ((E *)&v)[i] = e;
+    }
+    return v;
+  } else{
+    return e;
+  }
+}
+
+// Functions for mincu vector types and elements
+template <typename T>
+static const char *type_name();
+template <typename T>
+static void format_elem(std::ostream &os, const T &t, const fmt_opts &fos);
+template <typename T>
+static T zero();
+// static inline V broadcast(const E &e);
+
+// Relations for mincu vector types and elements
+template <typename V>
+struct mc_vec_type {
+//  using elem_type = E;
+//  static const int N = #;
+//  static const V zero {...};
+};
+template <typename E,int N>
+struct mc_elem_type {
+//  using vec_type = V;
+};
+
+
+#define MAKE_MC_TYPE_V(ST, VT, VN) \
+  template <> static const char *type_name<VT ## VN>() { return #VT #VN; } \
+  template <> struct mc_vec_type<VT ## VN> {using elem_type = ST; static const int N = VN;}; \
+  template <> struct mc_elem_type<ST,VN> {using vec_type = VT ## VN;}; \
+  template <> static void format_elem<VT ## VN>(\
+      std::ostream & os, const VT##VN &v, const fmt_opts &fos) \
+  { \
+    format_elem_v<VT ## VN,ST>(os, v, fos); \
+  } \
+  template <> static VT ## VN broadcast<VT ## VN>(ST x) {return default_broadcast<VT ## VN, ST>(x);} \
+  template <> static VT ## VN zero<VT ## VN>() {return broadcast<VT ## VN>(ST(0));} \
+  static inline std::ostream &operator<<(std::ostream &os, const VT ## VN &v) { \
+    format_elem<VT ## VN>(os, v, fmt_opts()); return os; \
+  }
+
+#define MAKE_MC_TYPE(ST, VT) \
+  template <> static const char *type_name<ST>() {return #ST;} \
+  template <> struct mc_vec_type<ST> {using elem_type = ST; static const int N = 1;}; \
+  template <> struct mc_elem_type<ST,1> {using vec_type = ST;}; \
+  template <> static void format_elem<ST>(std::ostream &os, const ST &v, const fmt_opts &fos) { \
+    format_elem_v<ST,ST>(os, v, fos); \
+  } \
+  template <typename V> static V broadcast(ST x); \
+  template <> static ST broadcast<ST>(ST x) {return ST(x);} \
+  template <> static ST zero<ST>() {return ST(0);} \
+  MAKE_MC_TYPE_V(ST, VT, 2) \
+  MAKE_MC_TYPE_V(ST, VT, 3) \
+  MAKE_MC_TYPE_V(ST, VT, 4)
+
+
+
+MAKE_MC_TYPE(uint8_t, uchar)
+MAKE_MC_TYPE(uint16_t, ushort)
+MAKE_MC_TYPE(uint32_t, uint)
+MAKE_MC_TYPE(uint64_t, ulonglong)
+
+MAKE_MC_TYPE(int8_t, char)
+MAKE_MC_TYPE(int16_t, short)
+MAKE_MC_TYPE(int32_t, int)
+MAKE_MC_TYPE(int64_t, longlong)
+
+MAKE_MC_TYPE(float, float)
+MAKE_MC_TYPE(double, double)
+
+template <typename V, typename E>
+concept is_vec_elem_pair = std::is_same_v<E,typename mc_vec_type<V>::elem_type>;
+
+
+template <typename V>
+static inline bool operator==(const V &v1, const V &v2) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    for (int i = 0; i < channels; i++) {
+      if (e1[i] != e2[i]) {
+        return false;
+      }
+    }
+    return true;
+  } else{
+    return v1 == v2;
+  }
+}
+
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline bool operator==(const V &v1, const E &e2) {
+  return v1 == default_broadcast<V,E>(e2);
+}
+template <typename V>
+static inline bool operator!=(const V &v1, const V &v2) {
+  return !(v1 == v2);
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline bool operator!=(const V &v1, const E &e2) {
+  return !(v1 == e2);
+}
+template <typename V>
+static inline V operator+(const V &v1, const V &v2) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = e1[i] + e2[i];
+    }
+    return r;
+  } else{
+    return v1 + v2;
+  }
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V operator+(const V &v1, const E &e2) {
+  return v1 + default_broadcast<V,E>(e2);
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V operator+(const E &e2, const V &v1) {
+  return v1 + default_broadcast<V,E>(e2);
+}
+
+template <typename V>
+static inline V operator-(const V &v1, const V &v2) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = e1[i] - e2[i];
+    }
+    return r;
+  } else{
+    return v1 - v2;
+  }
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V operator-(const V &v1, const E &e2) {
+  return v1 - default_broadcast<V,E>(e2);
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V operator-(const E &e2, const V &v1) {
+  return v1 - default_broadcast<V,E>(e2);
+}
+
+template <typename V>
+static inline V operator*(const V &v1, const V &v2) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = e1[i] * e2[i];
+    }
+    return r;
+  } else{
+    return v1 * v2;
+  }
+}
+template <typename E, typename V> requires is_vec_elem_pair<V, E>
+static inline V operator*(const E &e1, const V &v2) {
+  return default_broadcast<V,E>(e1) * v2;
+}
+template <typename E, typename V> requires is_vec_elem_pair<V, E>
+static inline V operator*(const V &v1, const E &e2) {
+  return v1 * default_broadcast<V,E>(e2);
+}
+
+template <typename V>
+static inline V operator/(const V &v1, const V &v2) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = e1[i] / e2[i];
+    }
+    return r;
+  } else{
+    return v1 / v2;
+  }
+}
+template <typename E, typename V> requires is_vec_elem_pair<V, E>
+static inline V operator/(const E &e1, const V &v2) {
+  return default_broadcast<V,E>(e1) / v2;
+}
+template <typename E, typename V> requires is_vec_elem_pair<V, E>
+static inline V operator/(const V &v1, const E &e2) {
+  return v1 / default_broadcast<V,E>(e2);
+}
+
+template <typename V>
+static inline V operator%(const V &v1, const V &v2) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      if constexpr (std::is_floating_point<E>()) {
+        er[i] = std::fmod(e1[i], e2[i]);
+      } else {
+        er[i] = e1[i] % e2[i];
+      }
+    }
+    return r;
+  } else{
+    return v1 + v2;
+  }
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V operator%(const V &v1, const E &e2) {
+  return v1 % default_broadcast<V,E>(e2);
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V operator%(const E &e2, const V &v1) {
+  return default_broadcast<V,E>(e2) % v1;
+}
+
+// negation
+template <typename V>
+static inline V operator-(const V &v) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    for (int i = 0; i < channels; i++) {
+      ((E *)&r)[i] = -((E *)&v)[i];
+    }
+    return r;
+  } else{
+    return -v;
+  }
+}
+
+template <typename V>
+static inline V &operator+=(V &lhs, const V &v) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    for (int i = 0; i < channels; i++) {
+      ((E *)&lhs)[i] += ((const E *)&v)[i];
+    }
+  } else{
+    lhs += v;
+  }
+  return lhs;
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V &operator+=(V &lhs, const E &e) {
+  return lhs += default_broadcast<V,E>(e);
+}
+template <typename V>
+static inline V &operator-=(V &lhs, const V &v) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    for (int i = 0; i < channels; i++) {
+      ((E *)&lhs)[i] -= ((const E *)&v)[i];
+    }
+  } else{
+    lhs += v;
+  }
+  return lhs;
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V &operator-=(V &lhs, const E &e) {
+  return lhs -= default_broadcast<V,E>(e);
+}
+template <typename V>
+static inline V &operator*=(V &lhs, const V &v) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    for (int i = 0; i < channels; i++) {
+      ((E *)&lhs)[i] *= ((const E *)&v)[i];
+    }
+  } else{
+    lhs *= v;
+  }
+  return lhs;
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V &operator*=(V &lhs, const E &e) {
+  return lhs *= default_broadcast<V,E>(e);
+}
+template <typename V>
+static inline V &operator/=(V &lhs, const V &v) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    for (int i = 0; i < channels; i++) {
+      ((E *)&lhs)[i] /= ((const E *)&v)[i];
+    }
+  } else{
+    lhs /= v;
+  }
+  return lhs;
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V &operator/=(V &lhs, const E &e) {
+  return lhs /= default_broadcast<V,E>(e);
+}
+template <typename V>
+static inline V &operator%=(V &lhs, const V &v) {
+  using E = typename mc_vec_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    for (int i = 0; i < channels; i++) {
+      if constexpr (std::is_floating_point<E>()) {
+        ((E *)&lhs)[i] = std::fmod(((E *)&lhs)[i], ((const E *)&v)[i]);
+      } else {
+        ((E *)&lhs)[i] %= ((const E *)&v)[i];
+      }
+    }
+  } else{
+    lhs %= v;
+  }
+  return lhs;
+}
+template <typename V, typename E> requires is_vec_elem_pair<V, E>
+static inline V &operator%=(V &lhs, const E &e) {
+  return lhs %= default_broadcast<V,E>(e);
+}
 //////////////////////////
-template <>
-struct mc_type_info<int8_t> {
-  using inner_type = int8_t;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "int8_t";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<char> {
-  using inner_type = char;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "char";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<char2> {
-  using inner_type = char2;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "char2";}
-  static int channels() {return 2;}
-};
-template <>
-struct mc_type_info<char4> {
-  using inner_type = char4;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "char4";}
-  static int channels() {return 4;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<int16_t> {
-  using inner_type = int16_t;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "int16_t";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<short2> {
-  using inner_type = int16_t;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "short2";}
-  static int channels() {return 2;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<int32_t> {
-  using inner_type = int32_t;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "int32_t";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<int2> {
-  using inner_type = int2;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "int2";}
-  static int channels() {return 2;}
-};
-template <>
-struct mc_type_info<int4> {
-  using inner_type = int4;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "int4";}
-  static int channels() {return 4;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<int64_t> {
-  using inner_type = int64_t;
-  static int preferred_columns() {return std::numeric_limits<inner_type>::max_digits10;}
-  static const char *name() {return "int64_t";}
-  static int channels() {return 1;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<uint8_t> {
-  using inner_type = uint8_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uint8_t";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<uchar2> {
-  using inner_type = uint8_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uchar2";}
-  static int channels() {return 2;}
-};
-template <>
-struct mc_type_info<uchar4> {
-  using inner_type = uint8_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uchar4";}
-  static int channels() {return 4;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<uint16_t> {
-  using inner_type = uint16_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uint16_t";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<ushort2> {
-  using inner_type = uint16_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "ushort2";}
-  static int channels() {return 2;}
-};
-template <>
-struct mc_type_info<ushort4> {
-  using inner_type = uint16_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "ushort4";}
-  static int channels() {return 4;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<uint32_t> {
-  using inner_type = uint32_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uint32_t";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<uint2> {
-  using inner_type = uint32_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uint2";}
-  static int channels() {return 2;}
-};
-template <>
-struct mc_type_info<uint4> {
-  using inner_type = uint32_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uint4";}
-  static int channels() {return 4;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<uint64_t> {
-  using inner_type = uint64_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "uint64_t";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<ulonglong2> {
-  using inner_type = uint64_t;
-  static int preferred_columns() {return 2 + 2 * sizeof(inner_type);}
-  static const char *name() {return "ulonglong2";}
-  static int channels() {return 2;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<float> {
-  using inner_type = float;
-  static int preferred_columns() {return 10;}
-  static const char *name() {return "float";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<float2> {
-  using inner_type = float;
-  static int preferred_columns() {return 16;}
-  static const char *name() {return "float2";}
-  static int channels() {return 2;}
-};
-template <>
-struct mc_type_info<float4> {
-  using inner_type = float;
-  static int preferred_columns() {return 16;}
-  static const char *name() {return "float4";}
-  static int channels() {return 4;}
-};
-//////////////////////////
-template <>
-struct mc_type_info<double> {
-  using inner_type = double;
-  static int preferred_columns() {return 16;}
-  static const char *name() {return "double";}
-  static int channels() {return 1;}
-};
-template <>
-struct mc_type_info<double2> {
-  using inner_type = double;
-  static int preferred_columns() {return 16;}
-  static const char *name() {return "double2";}
-  static int channels() {return 2;}
-};
-template <>
-struct mc_type_info<double4> {
-  using inner_type = double;
-  static int preferred_columns() {return 16;}
-  static const char *name() {return "double4";}
-  static int channels() {return 4;}
-};
+// V(+,-,*,/,%,==,!=,<,<=,>,>=)(V,E)
+// E(+,-,*,/,%,==,!=,<,<=,>,>=)V
+
+
+template <typename V>
+static int default_format_elem_preferred_columns() {
+  using E = typename mc_vec_type<V>::elem_type;
+  if constexpr (std::is_floating_point<E>()) {
+    return std::numeric_limits<E>::max_digits10;
+  } else if constexpr (std::is_signed<E>()) {
+    return std::numeric_limits<E>::max_digits10;
+  } else {
+    return 2 + 2 * sizeof(E); // 0x+...
+  }
+}
+
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // buffer formatting
-template <typename T>
-static std::string fmt_hex_digits(T t, int cw = -1) {
-  cw = cw <= 0 ? 2 * sizeof(t) : cw;
-  std::stringstream ss;
-  ss << std::setw(cw) << std::uppercase << std::setfill('0')
-    << std::hex << t;
-  return ss.str();
-}
-template <typename T>
-static std::string fmt_dec(T t, int cw = -1) {
-  cw = cw <= 0 ? 2 * sizeof(t) : cw;
-  std::stringstream ss;
-  ss << std::setw(cw) << std::dec << t;
-  return ss.str();
-}
-
-template <typename T>
-static void format_elem(std::ostream &os, T t, int cols_per_elem, int prec);
-
-template <>
-static void format_elem(std::ostream &os, uint8_t t, int cols_per_elem, int prec) {
-  os << "0x" << fmt_hex_digits((uint16_t)t);
-}
-template <>
-static void format_elem(std::ostream &os, uint16_t t, int cols_per_elem, int prec) {
-  os << "0x" << fmt_hex_digits(t);
-}
-template <>
-static void format_elem(std::ostream &os, uint32_t t, int cols_per_elem, int prec) {
-  os << "0x" << fmt_hex_digits(t);
-}
-template <>
-static void format_elem(std::ostream &os, uint64_t t, int cols_per_elem, int prec) {
-  os << "0x" << fmt_hex_digits(t);
-}
-template <>
-static void format_elem(std::ostream &os, char t, int cols_per_elem, int prec) {
-  os << fmt_dec((int16_t)t);
-}
-template <>
-static void format_elem(std::ostream &os, int8_t t, int cols_per_elem, int prec) {
-  os << fmt_dec((int16_t)t);
-}
-template <>
-static void format_elem(std::ostream &os, int16_t t, int cols_per_elem, int prec) {
-  os << fmt_dec(t);
-}
-template <>
-static void format_elem(std::ostream &os, int32_t t, int cols_per_elem, int prec) {
-  os << fmt_dec(t);
-}
-template <>
-static void format_elem(std::ostream &os, int64_t t, int cols_per_elem, int prec) {
-  os << fmt_dec(t);
-}
-template <>
-static void format_elem(std::ostream &os, float t, int cols_per_elem, int prec) {
-  os << colr<frac>(frac(t, prec), cols_per_elem);
-}
-template <>
-static void format_elem(std::ostream &os, double t, int cols_per_elem, int prec) {
-  os << colr<frac>(frac(t, prec), cols_per_elem);
-}
-
-
-
-template <typename T>
-static void format_elem_vec(std::ostream &os, const T *t, int n, int cols_per_elem, int prec) {
-  os << '{';
-  format_elem<T>(os, t[0], cols_per_elem, prec);
-  for (int i = 1; i < n; i++) {
-    os << ',';
-    format_elem<T>(os, t[i], cols_per_elem, prec);
-  }
-  os << '}';
-}
-
-/////////////
-// formatting vector types
-#define MK_VEC_FORMAT_ELEM_N(TYPE, N) \
-  template <> \
-  static void format_elem(std::ostream &os, TYPE ## N v, int cols_per_elem, int prec) { \
-    format_elem_vec(os, &v.x, sizeof(v) / sizeof(v.x), cols_per_elem, prec); \
-  }
-#define MK_VEC_FORMAT_ELEM(TYPE) \
-  MK_VEC_FORMAT_ELEM_N(TYPE, 2) \
-  MK_VEC_FORMAT_ELEM_N(TYPE, 3) \
-  MK_VEC_FORMAT_ELEM_N(TYPE, 4)
-
-MK_VEC_FORMAT_ELEM(float)
-MK_VEC_FORMAT_ELEM(double)
-MK_VEC_FORMAT_ELEM(uint)
-MK_VEC_FORMAT_ELEM(int)
-MK_VEC_FORMAT_ELEM(ulonglong)
-MK_VEC_FORMAT_ELEM(longlong)
-
-
-/////////////
-static const char *ANSI_RESET = "\033[0m";
-static const char *ANSI_COLOR0 = "\033[1;36m";
-static const char *ANSI_COLOR1 = "\033[2;36m";
-static const char *ANSI_NVDAMOD = "\033[38;2;94;182;0m";
-
 
 template <typename T>
 static void format_buffer(
@@ -660,7 +907,7 @@ static void format_buffer(
     std::function<const char*(const T&)> color_elem_ansi,
     std::function<void(std::ostream&,size_t)> fmt_addr)
 {
-  os << mc_type_info<T>::name() << "[" << elems << "]: " <<
+  os << type_name<T>() << "[" << elems << "]: " <<
     "0x" << fmt_hex_digits<uint64_t>((uintptr_t)ptr) << ":\n";
   elems_per_line = elems_per_line < 0 ? 8 : elems_per_line;
   size_t i = 0;
@@ -688,37 +935,34 @@ static void format_buffer(
     std::function<void(std::ostream&,const T&)> fmt_elem,
     std::function<const char*(const T&)> color_elem)
 {
-  const int addr_size =
+  const int addr_cols =
       sizeof(T) * elems <= 0xFFFFull ? 4 :
+      sizeof(T) * elems <= 0xFFFFFFull ? 6 :
       sizeof(T) * elems <= 0xFFFFFFFFull ? 8 : -1;
-  format_buffer<T>(os,
-                   ptr, elems,
-                   elems_per_line, fmt_elem, color_elem,
-                   [&](std::ostream &os, size_t ix) {
-                     os << fmt_hex_digits<uint64_t>(sizeof(T) * ix, addr_size);
-                   });
+  std::function<void(std::ostream&,size_t)> fmt_addr =
+      [&](std::ostream &os, size_t ix) {
+        os << mincu::fmt_hex_digits<uint64_t>(sizeof(T) * ix, addr_cols);
+      };
+  mincu::format_buffer<T>(os, ptr, elems, elems_per_line,
+                          fmt_elem, color_elem, fmt_addr);
 }
-
-
 
 
 ///////////////////////////////////////////////////////////////////////////////
 template <typename T>
 static std::function<const char*(const T&)> color_elems_none() {
-    std::function<const char*(const T&)> fmt_no_color =
-        [](const T&) -> const char * {return nullptr;};
-    return fmt_no_color;
+  std::function<const char*(const T&)> fmt_no_color =
+      [](const T&) -> const char * {return nullptr;};
+  return fmt_no_color;
 }
 template <typename T>
-static std::function<void(std::ostream&,const T&)>
-    default_elem_formatter(int cols_per_elem = mc_type_info<T>::preferred_columns(),
-                           int prec = 3)
-{
-    std::function<void(std::ostream&,const T&)> fmt =
-        [&](std::ostream &os, const T &t) {
-          format_elem(os, t, cols_per_elem, prec);
-        };
-    return fmt;
+static std::function<void(std::ostream &, const T &)> default_elem_formatter(
+    const fmt_opts &fos) {
+  std::function<void(std::ostream &, const T &)> fmt =
+      [&](std::ostream &os, const T &t) {
+        mincu::format_elem(os, t, fos);
+      };
+  return fmt;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -739,29 +983,34 @@ struct const_seq {
 //   x[i] = (x[i-1] + seq_delta) % seq_mod  [ when seq_mod != 0 ]
 template <typename E>
 struct arith_seq {
-  const E seq_init, seq_delta, seq_mod;
-  arith_seq(E _init, E _delta = E(1), E mod = E(0))
-      : seq_init(_init), seq_delta(_delta), seq_mod(mod) { }
+  const E seq_init, seq_delta;
+  const std::optional<E> seq_mod;
+  arith_seq(E _init, E _delta = E(broadcast<E>(mc_vec_type<E>::elem_type(1))), std::optional<E> mod = std::nullopt)
+      : seq_init(_init), seq_delta(_delta), seq_mod(mod)
+  {
+    if (mod && *mod == zero<E>())
+      fatal("arith_seq: zero modulus (division by zero)");
+  }
+  arith_seq(E _init, E _delta, E mod)
+      : arith_seq(_init, _delta, std::make_optional(mod)) {}
 
   void apply(E *vals, size_t n) const {
     E val = seq_init;
-    if (seq_mod != E(0)) {
-      if constexpr (std::is_floating_point<E>::value) {
-        val = std::fmod(val, seq_mod);
-      } else {
-        val %= seq_mod;
-      }
-    }
+    auto next_val =
+        [&]() {
+          if (seq_mod) {
+            if constexpr (std::is_floating_point<E>::value) {
+              // FIXME: need float vector mod support
+              val = std::fmod(val, *seq_mod);
+            } else {
+              val %= *seq_mod;
+            }
+          }
+          return val;
+        };
     for (size_t k = 0; k < n; k++) {
-      vals[k] = val;
+      vals[k] = next_val();
       val += seq_delta;
-      if (seq_mod != E(0)) {
-        if constexpr (std::is_floating_point<E>::value) {
-          val = std::fmod(val, seq_mod);
-        } else {
-          val %= seq_mod;
-        }
-      }
     }
   } // apply
 }; // arith_seq
@@ -796,18 +1045,18 @@ struct cyc_seq {
 //    e.g. E=half uses R=float;  E=int8_t uses R=int16_t
 template <typename E, typename R = E>
 struct rnd_seq {
-  const random_state rndst;
+  const mincu::random_state rndst;
   const E rnd_lo, rnd_hi;
 
   rnd_seq(
-      const random_state &_rndst,
+      const mincu::random_state &_rndst,
       E _rnd_lo = std::numeric_limits<E>::min(),
       E _rnd_hi = std::numeric_limits<E>::max())
     : rndst(_rndst), rnd_lo(_rnd_lo), rnd_hi(_rnd_hi) { }
 
   void apply(E *vals, size_t n) const {
-    random_state tmp = rndst; // make copy (randomize advances state)
-    random_state &tmpr = tmp;
+    mincu::random_state tmp = rndst; // make copy (randomize advances state)
+    mincu::random_state &tmpr = tmp;
     randomize<E,R>(tmpr, vals, n, rnd_lo, rnd_hi);
   }
 }; // rnd_seq
@@ -922,10 +1171,11 @@ public:
   void str(
     std::ostream &os = std::cout,
     int elems_per_line = -1,
-    int cols_per_elem = mc_type_info<E>::preferred_columns(),
+    int cols_per_elem = default_format_elem_preferred_columns<E>(),
     int prec = -1) const
   {
-    str(default_elem_formatter<E>(cols_per_elem, prec), os, elems_per_line);
+    fmt_opts fos{cols_per_elem, prec};
+    str(default_elem_formatter<E>(fos), os, elems_per_line);
   }
   std::string str(int elems_per_line = -1,
                   int cols_per_elem = 0,
@@ -1153,6 +1403,63 @@ static float time_dispatch_ms(std::function<void()> func)
 static float time_dispatch_s(std::function<void()> func) {
   return time_dispatch_ms(func) / 1000.0f;
 }
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// needs to be deferred until ostream << instances are created
+template <typename T, typename...Ts>
+static void format_to(std::ostream &os, T t, Ts...ts) {
+  if constexpr (std::is_pointer<T>()) {
+    if (t == nullptr) {
+      os << "nullptr";
+    } else {
+      os << t;
+    }
+  } else if constexpr (std::is_unsigned<T>()) {
+    os << fmt_hex(t, 0);
+  } else {
+    os << t;
+  }
+  format_to(os, ts...);
+}
+
+#ifdef _WIN32
+static void mincu_enable_colored_io()
+{
+  static bool enabled = false;
+  if (enabled)
+    return;
+  // TODO: should only do this on Windows 10 Threshold 2 (TH2),
+  // "November Update": version 1511 and has the build number 10586
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+  // https://docs.microsoft.com/en-us/windows/console/setconsolemode
+  // https://bugs.php.net/bug.php?id=72768
+  // https://docs.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences
+  auto enable_on_handle = [](DWORD H_CODE) {
+    DWORD mode;
+    HANDLE h = GetStdHandle(H_CODE);
+    GetConsoleMode(h, &mode);
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(h, mode);
+  };
+  enable_on_handle(STD_ERROR_HANDLE);
+  enable_on_handle(STD_OUTPUT_HANDLE);
+  enabled = true;
+}
+
+// This should only be expanded once, but it shouldn't hurt.
+// So if big projects have multiple copies, big deal.
+#define MINCU_ENABLE_COLOR_IO_VIA_STATIC_CONSTRUCTOR() \
+  struct mincu_dummy_enable_color { \
+    mincu_dummy_enable_color() {mincu_enable_colored_io();} \
+  }; \
+  static mincu_dummy_enable_color __mincu_dummy;
+#else // !_WIN32
+#define MINCU_ENABLE_COLOR_IO_VIA_STATIC_CONSTRUCTOR()
+#endif // !_WIN32
 
 } // namespace mincu::
 
