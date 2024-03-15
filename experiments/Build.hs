@@ -38,6 +38,7 @@ data Opts =
     oArtifacts :: ![Artifact]
   , oClean :: !Bool -- clean mode
   , oClobber :: !Bool
+  , oCmake :: !Bool
   , oDryRun :: !Bool
   , oVerbosity :: !Int
   , oWatch :: !(Maybe Float)
@@ -49,6 +50,7 @@ dft_opts =
     oArtifacts = []
   , oClean = False
   , oClobber = False
+  , oCmake = False
   , oDryRun = False
   , oVerbosity = 0
   , oWatch = Nothing
@@ -75,27 +77,39 @@ fmtArtifact (ak,path,sm) = path ++ ":" ++ fmtArtifactKind ak ++ sm
 
 
 parseOpts :: Opts -> [String] -> IO Opts
-parseOpts os [] = return os
+parseOpts os [] = do
+  when (null (oArtifacts os)) $
+    fatal "artifact expected (try -h)"
+  when (oClean os && oCmake os) $
+    fatal "--clean and --cmake are mutually exclusive"
+  return os
 parseOpts os (a:as)
   | a `elem` ["-h","--help"] = do
     putStrLn $
-      "usage: bexp OPTS COMMAND\n" ++
+      "usage: bexp OPTS TARGET\n" ++
       "Build Experiment\n" ++
       "where OPTS are:\n" ++
       "   -c/--clobber               overrides file time checks\n" ++
       "      --clean                 remove outputs from given targets\n" ++
+      "      --cmake                 setup cmake files and a VS solution for all target/architecture pairs\n" ++
+      "                              (clobber stomps old files here)\n" ++
       "   -d/--dry-run               don't actually execute the operation\n" ++
       "   -w/--watch=SECONDS         enable watch mode (iteratively builds)\n" ++
       "   -q/-v/-v2/-v=INT           sets the verbosity\n" ++
-      "where COMMANDs are of the form:\n" ++
+      "where TARGETs are of the form:\n" ++
       "  FILE(:(" ++ intercalate "|" (map fmtArtifactKind all_artifact_kinds) ++ "))?(SM)\n" ++
       "  SM = two digits (e.g. \"90\" would indicate sm_90)\n" ++
+      "    (last two digits from entries of nvcc --list-gpu-arch)\n" ++
       "EXAMPLES:\n" ++
 --      "  % bexp  foo.cu\n" ++
       "  % bexp  bar.cu:exe75\n" ++
       "    builds exe for sm_75 for file bar.cu\n" ++
       "  % bexp  bar.cu:90\n" ++
       "    builds all artifacts of bar.cu for sm_90\n" ++
+      "  % bexp  bar.cu:75 --clean\n" ++
+      "    cleans all artifacts of bar.cu for sm_75\n" ++
+      "  % bexp  bar.cu:75 --cmake\n" ++
+      "    Sets up cmake for bar.cu for sm_75\n" ++
       ""
     exitSuccess
   --
@@ -105,6 +119,7 @@ parseOpts os (a:as)
   | k == "-v=" = parseAsIntValue (\i -> os{oVerbosity = i})
   --
   | a`elem`["--clean"] = nextArg os {oClean = True}
+  | a`elem`["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["-d","--dry-run"] = nextArg os {oDryRun = True}
   | a `elem` ["-c","--clobber"] = nextArg os {oClobber = True}
   | k `elem` ["-w=","--watch"] = parseAsFloatValue (\f -> os{oWatch = Just f})
@@ -112,7 +127,7 @@ parseOpts os (a:as)
   | "-"`isPrefixOf`a = badArg "invalid option"
   --
   | otherwise = do
-    as <- parseArtifacts a
+    as <- parseTargets a
     nextArg os {oArtifacts = oArtifacts os ++ as}
   where (k,v) =
           case span (/='=') a of
@@ -122,25 +137,35 @@ parseOpts os (a:as)
         nextArg :: Opts -> IO Opts
         nextArg os = parseOpts os as
 
-        parseArtifacts  :: String -> IO [Artifact]
-        parseArtifacts a =
+        parseTargets  :: String -> IO [Artifact]
+        parseTargets a =
           case span (/=':') a of
             (path,':':sfx) -> do
               when (any (`elem`"/\\") path) $
                 putStrLn $ "WARNING: should be run from within local experiment directory"
               z <- doesFileExist path
+              (path,z) <-
+                if z || ".cu"`isSuffixOf`path then return (path,z)
+                  else do
+                    z <- doesFileExist (path ++ ".cu")
+                    return (path ++ ".cu",z) -- error will get the more specific path
               unless z $ badArg $ path ++ ": file not found"
               case span (not . isDigit) sfx of
                 (art_str,ds@(_:_)) -> do
-                  unless (all isDigit (take 2 ds)) $ -- allow trailing nondigits sm_90a ("90a")
-                    badArg $
-                      ds ++ ": suspicious looking SM architecture " ++
-                      "(e.g. expecting something like 75, 90, or 90a)"
+                  let archs = splitOnCommas ds
+                  -- ensure archs are sane looking at least
+                  -- take 2 allow trailing nondigits sm_90a ("90a")
+                  case filter (not . all isDigit . take 2) archs of
+                    [] -> return ()
+                    x:_ ->
+                      badArg $
+                        x ++ ": suspicious looking SM architecture " ++
+                        "(e.g. expecting something like 75, 90, or 90a)"
                   if null art_str
-                    then return $ map (\art -> (art,path,ds)) all_artifact_kinds
+                    then return [(ak,path,arch) | ak<-all_artifact_kinds, arch<-archs]
                     else
                       case find (\a -> fmtArtifactKind a == art_str) all_artifact_kinds of
-                        Just art -> return [(art,path,ds)]
+                        Just art -> return [(art,path,arch) | arch <- archs]
                         Nothing -> badArg $ art_str ++ ": unrecognized artifact"
                 _ -> badArg $ sfx ++ ": invalid (ARTIFACT)?SM_DIGITS suffix"
             _ -> badArg "malformed command; should be of form (PATH:(ARTIFACT)?SM_DIGITS)"
@@ -156,9 +181,11 @@ parseOpts os (a:as)
             [(x,"")] -> parseOpts (func x) as
             _ -> badArg "malformed float"
 
-
         badArg :: String -> IO a
         badArg msg = fatal (a ++ ": " ++ msg)
+
+splitOnCommas :: String -> [String]
+splitOnCommas = words . map (\c -> if c == ',' then ' ' else c)
 
 oNormalLn :: Opts -> String -> IO ()
 oNormalLn = oNormalLnH stdout
@@ -212,6 +239,59 @@ runWithOpts os
           oDebugLn os $ "  removing " ++ oup
           removeFile oup
 
+  | oCmake os = do
+    z <- doesFileExist "CMakeLists.txt"
+    when (z && not (oClobber os)) $
+      fatal "CMakeLists.txt already exists in this directory"
+    --
+    let exe_archs = nub $ map (\(_,fp,sm) -> (fp,sm)) (oArtifacts os)
+        addExe (cu_file,sm) =
+            -- TODO: sniff out headers (and conditionally include mincu as well)
+            "add_executable(" ++ show exe_prj ++ " " ++ cu_file ++ " " ++ mINCU_PATH ++ ")\n" ++
+            "target_compile_features(" ++ show exe_prj ++ " PUBLIC cxx_std_20)\n" ++
+            "set_target_properties(" ++ show exe_prj ++ " PROPERTIES CUDA_SEPARABLE_COMPILATION ON)\n" ++
+            -- "set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} \"-g -G\")  # enable cuda-gdb\n" ++
+            "set_target_properties(" ++ show exe_prj ++ " PROPERTIES CUDA_ARCHITECTURES " ++ show sm ++ ")\n" ++
+            "target_include_directories(" ++ show exe_prj ++ " PUBLIC \"" ++ takeDirectory mINCU_PATH ++ "\")\n" ++
+            ""
+          where exe_prj = dropExtension (takeFileName cu_file) ++ sm
+        vs_solution_name =
+          -- if it's single target (multiple archs okay), then use that
+          -- otherwise use this directory name
+          case nub (map fst exe_archs) of
+            [x] -> dropExtension x -- use the single cu-file
+            x:_ -> takeFileName (takeDirectory x)
+    --
+    writeFile "CMakeLists.txt" $
+      "cmake_minimum_required(VERSION 3.25.2) # CMAKE_CUDA_STANDARD 20 for C++20\n" ++
+      "project(" ++ show vs_solution_name ++ " LANGUAGES CXX CUDA)\n" ++
+      "\n" ++
+      "set(CUDA_NVCC_FLAGS \"${CUDA_NVCC_FLAGS}\" \"-g\" \"-G\")\n" ++
+      "set(CMAKE_CUDA_STANDARD 20)\n" ++
+      "set(CMAKE_CUDA_STANDARD_REQUIRED ON)\n" ++
+      "\n" ++
+      intercalate "\n\n" (map addExe exe_archs)
+    --
+    -- run cmake
+    let cmake_dir = "vs"
+    z <- doesDirectoryExist cmake_dir
+    when (z && not (oClobber os)) $
+      fatal $ cmake_dir ++ ": cmake builld dir alread exists"
+    when z $ do
+      oDebugLn os $ "nuking " ++ cmake_dir
+      removeDirectoryRecursive cmake_dir
+    --
+    createDirectoryIfMissing True cmake_dir
+    let cp =
+          (proc "cmake" ["-G","Visual Studio 17 2022","-A","x64",".."]) {
+            cwd  = Just cmake_dir
+          }
+    (Nothing,Nothing,Nothing,ph) <- createProcess cp
+    ec <- waitForProcess ph
+    case ec of
+      ExitSuccess -> oDebugLn os $ "cmake exited 0"
+      ExitFailure ec -> fatal $ "cmake exited " ++ show ec
+
   | otherwise = do -- mapM_ (runCommandWithOpts os) (oCommands os)
     let p = makePlan (oArtifacts os)
     when (oVerbosity os >= 2) $ do
@@ -237,7 +317,7 @@ runWithOpts os
           z <- loopForUpdate (concat p)
           when z $ executePlan os p
           watchForUpdate delay_s
-
+    --
     executePlan os p
     case oWatch os of
       Nothing -> return ()
@@ -306,15 +386,15 @@ a_inputs_outputs is_for_clean (ak,fp,sm) = do
         ArtifactKindSASS -> ([cubin_fp],[sass_fp])
         ArtifactKindSASSG -> ([cubin_fp],[sass_png_fp,dot_fp])
   where stem = dropExtension fp
-        sass_fp = stem ++ "-sm_"++sm++".sass"
-        sass_raw_fp = stem ++ "-raw-sm_"++sm++".sass"
-        sass_png_fp = stem ++ "-sm_"++sm++"-sass.png"
-        ptx_fp = stem ++ "-sm_"++sm++".ptx"
-        cubin_fp = stem ++ "-sm_"++sm++".cubin"
-        exe_fp = stem ++ "-sm_"++sm++".exe"
-        exe_lib_fp = stem ++ "-sm_"++sm++".lib"
-        exe_exp_fp = stem ++ "-sm_"++sm++".exp"
-        dot_fp = stem ++ "-" ++ "sm_" ++ sm ++ ".dot"
+        sass_fp = stem ++ "-sm_" ++ sm ++ ".sass"
+        sass_raw_fp = stem ++ "-raw-sm_" ++ sm ++ ".sass"
+        sass_png_fp = stem ++ "-sass-sm_" ++ sm ++ ".png"
+        ptx_fp = stem ++ "-sm_" ++ sm ++ ".ptx"
+        cubin_fp = stem ++ "-sm_" ++ sm ++ ".cubin"
+        exe_fp = stem ++ "-sm_" ++ sm ++ ".exe"
+        exe_lib_fp = stem ++ "-sm_" ++ sm ++ ".lib"
+        exe_exp_fp = stem ++ "-sm_" ++ sm ++ ".exp"
+        dot_fp = stem ++ "-sm_" ++ sm ++ ".dot"
 
         usesMincuHpp :: FilePath -> IO Bool
         usesMincuHpp fp = do
@@ -487,7 +567,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
       fp_rsass = fp_noext ++ "-raw-" ++ "sm_" ++ arch ++ ".sass"
       fp_sass = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".sass"
       fp_dot_sass = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".dot"
-      fp_sass_png = fp_noext ++ "-sm_" ++ arch ++"-sass.png"
+      fp_sass_png = fp_noext ++ "-sass-sm_" ++ arch ++".png"
       fp_ptx = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".ptx"
   case ak of
     ArtifactKindEXE -> do
