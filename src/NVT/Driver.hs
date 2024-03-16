@@ -147,7 +147,8 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.9" -- changed depbar id to match DEPBAR.LE
+nvt_version = "1.1.10" -- now map ptx lines / coloring binary sections
+-- nvt_version = "1.1.9" -- changed depbar id to match DEPBAR.LE
 -- nvt_version = "1.1.8" -- using -print-line-info-inline
 -- nvt_version = "1.1.7"
 

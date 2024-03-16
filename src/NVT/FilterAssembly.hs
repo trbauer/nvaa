@@ -18,7 +18,6 @@ import Text.Printf
 import qualified Data.Map.Strict as DM
 import qualified Data.IntMap.Strict as DIM
 
-type SrcDict = [(FilePath,Array Int String)]
 
 
 -- "//## File "D:\\dev\\nvaa\\cuda-tests/cf.cu", line 62"
@@ -62,6 +61,7 @@ tryParseLineMappingWithSfx ln
 --   "        /*0010*/                   S2R R0, SR_CTAID.X ;                                  /* 0xf0c8000002570000 */\n" ++
 --   "        /*0018*/                   S2R R2, SR_TID.X ;                                    /* 0xf0c8000002170002 */"
 --   "JUNK\n" ++
+type SrcDict = [(FilePath,Array Int String)]
 type FilterProcessorIO = SrcDict -> [(Int,String)] -> IO ()
 type Arch = String
 
@@ -93,11 +93,71 @@ isLabelStart c = isAlpha c || c`elem`"._$"
 isLabelChar :: Char -> Bool
 isLabelChar c = isAlphaNum c || c`elem`"._$"
 
+-- .byte 0x...""
+decodeAsciiSection :: [(Int,String)] -> Either String (String,[(Int,String)])
+decodeAsciiSection = loopLns ""
+  where loopLns :: String -> [(Int,String)] -> Either String (String,[(Int,String)])
+        loopLns rstr [] = return (reverse rstr,[])
+    -- /*0040*/ .byte	0x6c, 0x69, 0x67, 0x6e, 0x20, 0x34, 0x20, 0x2e, 0x62, 0x38, 0x20, 0x5f, 0x5a, 0x5a, 0x4e, 0x34
+        loopLns rstr ((lno,ln):lns)
+          | null (dropWhile isSpace ln) = return (reverse rstr,((lno,ln):lns))
+          | otherwise =
+            case tks of
+              ('/':'*':sfx):".byte":bs -> loopBs rstr bs
+              ".byte":bs -> loopBs rstr bs
+              _ -> Left $ show lno ++ ". expected line of bytes " ++ show tks
+          where tks = words (map (\c -> if c`elem`"," then ' ' else c) ln)
+                loopBs :: String -> [String] -> Either String (String,[(Int,String)])
+                loopBs rstr [] = loopLns rstr lns
+                loopBs rstr (tk:tks) =
+                  case reads tk of
+                    [(w,"")] | w <= 255 -> loopBs (chr w:rstr) tks
+                    _ -> Left $ show lno ++ ". invalid .byte (" ++ tk ++ ")"
+
+
+-- ptx ="\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL.version 8.3\NUL.target sm_90\NUL.address_size 64\NUL\NUL\NUL.global .align 4 .b8 _ZZN4cuda3std3__48__detail21__stronger_order_cudaEiiE7__xform[16] = {3, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 3};\NUL.global .align 1 .b8 _ZN56_INTERNAL_6d04214c_25_mbarrier_embarrassment_cu_954f22e24cuda3std3__48in_placeE[1];\NUL.global .align 1 .b8 _ZN56_INTERNAL_6d04214c_25_mbarrier_embarrassment_cu_954f22e24cuda3std6ranges3__45__cpo4swapE[1];\NUL\NUL.visible .entry _Z18mbarrier_test_waitPi(\NUL.param .u64 _Z18mbarrier_test_waitPi_param_0\NUL)\NUL{\NUL.reg .b32 \t%r<3>;\NUL.reg .b64 \t%rd<5>;\NUL\NUL\NUL\NULld.param.u64 \t%rd1, [_Z18mbarrier_test_waitPi_param_0];\NUL\NULcvta.to.global.u64 \t%rd2, %rd1;\NUL\NUL\NUL{\NUL\NUL\NUL.reg .b64 r1;\NUL.reg .pred complete;\NUL.shared .b64 shMem;\NUL\NULmbarrier.init.shared.b64 [shMem], 32;  // N threads participating in the mbarrier.\NUL\NULmbarrier.arrive.shared.b64  r1, [shMem]; // N threads executing mbarrier.arrive\NUL\NUL\NUL\NULwaitLoop:\NULmbarrier.test_wait.shared.b64    complete, [shMem], r1;\NUL@!complete nanosleep.u32 20;\NUL@!complete bra waitLoop;\NUL}\NUL\NUL\NUL\NULmov.u32 \t%r1, %tid.x;\NULmul.wide.u32 \t%rd3, %r1, 4;\NULadd.s64 \t%rd4, %rd2, %rd3;\NUL\NUL\NULred.global.add.u32 \t[%rd4], 1;\NUL\NULret;\NUL\NUL}\NUL\NUL.visible .entry _Z17mbarrier_try_waitPi(\NUL.param .u64 _Z17mbarrier_try_waitPi_param_0\NUL)\NUL{\NUL.reg .b32 \t%r<3>;\NUL.reg .b64 \t%rd<5>;\NUL\NUL\NUL\NULld.param.u64 \t%rd1, [_Z17mbarrier_try_waitPi_param_0];\NUL\NULcvta.to.global.u64 \t%rd2, %rd1;\NUL\NUL\NUL{\NUL\NUL\NUL.reg .b64 r1;\NUL.reg .pred complete;\NUL.shared .b64 shMem;\NUL\NULmbarrier.init.shared.b64 [shMem], 32;  // N threads participating in the mbarrier.\NUL\NULmbarrier.arrive.shared.b64  r1, [shMem]; // N threads executing mbarrier.arrive\NUL\NUL\NUL\NULwaitLoop:\NULmbarrier.try_wait.shared.b64    complete, [shMem], r1;\NUL@!complete bra waitLoop;\NUL}\NUL\NUL\NUL\NULmov.u32 \t%r1, %tid.x;\NULmul.wide.u32 \t%rd3, %r1, 4;\NULadd.s64 \t%rd4, %rd2, %rd3;\NUL\NUL\NULred.global.add.u32 \t[%rd4], 1;\NUL\NULret;\NUL\NUL}\NUL\NUL\NUL.section\t.debug_str\NUL{\NUL$L__info_string0:\NUL\NUL\NUL\NUL}\NUL"
+
+decodeNvDebugPtxSection :: SrcDict -> [(Int,String)] -> Either String (SrcDict,[(Int,String)])
+decodeNvDebugPtxSection dict lns =
+    case decodeAsciiSection lns of
+      Left err -> Left err
+      Right (str,lns_sfx) ->
+          return ((".nv_debug_ptx_txt",array):dict,lns_sfx)
+        where debugSectNulToLine :: String -> [String]
+              debugSectNulToLine = lines . map (\c -> if c == '\NUL' then '\n' else c)
+              dbg_lns = debugSectNulToLine str
+              array = listArray (1,length dbg_lns) dbg_lns
+
+-- .section ID,STRLIT,@ID
+{-
+tryParseSectionHeader :: [(Int,String)] -> Maybe (String,String,String)
+tryParseSectionHeader [] = Nothing
+tryParseSectionHeader ((lno,ln):lns) =
+    case splitAt (length ".section") (dropWhile isSpace ln) of
+      (".section",sfx) -> --ID,STRLIT,@ID
+        case span (/=',') (dropWhile isSpace sfx) of
+          (id,',':sfx) ->
+            case reads (dropWhile isSpace sfx) of
+              [(slit,sfx)] ->
+                case dropWhile isSpace sfx of
+                  ',':sfx -> return (id,slit,dropWhile isSpace sfx)
+                  _ -> Nothing
+              _ -> Nothing
+          _ -> Nothing
+      _ -> Nothing
+-}
+
+matchesSectionStart :: String -> String -> [(Int,String)] -> Bool
+matchesSectionStart sect_name sect_lbl ((_,ln0str):(_,ln1str):lns_sfx) =
+  case (words ln0str,words ln1str) of
+    (".section":sfx:_,[lbl]) -> sect_name`isPrefixOf`sfx && lbl == sect_lbl
+    _ -> False
+matchesSectionStart _ _ _ = False
+
 filterAssemblyWithInterleavedSrcIO :: FilterOpts -> Handle -> String -> IO ()
 filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
   where processLns :: [(Int,String)] -> IO ()
         processLns
-          -- | arch >= "sm_80" = hPutStr h_out . unlines . map snd
           | foArch fos >= "sm_70" = processLns128B    empty_dict
           | foArch fos >= "sm_50" = processLnsMaxwell empty_dict
           | otherwise = hPutStr h_out . unlines . map snd
@@ -107,10 +167,34 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
 
         emitLn :: String -> IO ()
         emitLn = hPutStrLn h_out
+        emit :: String -> IO ()
+        emit = hPutStr h_out
 
         -- Volta, Turing, and Ampere
         processLns128B :: FilterProcessorIO
         processLns128B _ [] = return ()
+        processLns128B dict lns
+          | matchesSectionStart ".nv_debug_ptx_txt" ".nv_debug_ptx_txt:" lns =
+              case decodeNvDebugPtxSection dict (drop 2 lns) of
+                Left err -> do
+                  putStrLn $ "filterAssemblyWithInterleavedSrcIO: ERROR " ++ err
+                  tryProcessLineMapping dict lns processLns128B
+                Right (dict,lns_sfx) -> do
+                  when (foVerbosity fos >= 2) $ do
+                    emitStyle fos h_out "c"  " /* filterAssemblyWithInterleavedSrcIO: successfully parsed .nv_debug_ptx_txt */\n"
+                  -- render the .nv_debug_ptx_txt as raw bytes anyway
+                  -- (we could use lns_sfx to skip it)
+                  tryProcessLineMapping dict lns processLns128B
+          | matchesSectionStart ".debug_str" ".debug_str:" lns =
+            case decodeAsciiSection (drop 2 lns) of
+              Left err -> do
+                putStrLn $ "filterAssemblyWithInterleavedSrcIO: ERROR " ++ err
+                tryProcessLineMapping dict lns processLns128B
+              Right (str,lns_sfx) -> do
+                emitStyle fos h_out "c" $  "/* " ++ show str ++ " */"
+                emitLn ""
+                tryProcessLineMapping dict lns processLns128B
+
         processLns128B dict lns@((_,ln0str):(_,ln1str):lns_sfx) =
           case parseSampleInst (ln0str ++ ln1str) of
             Right si -> do
@@ -119,6 +203,14 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
             Left _ -> tryProcessLineMapping dict lns processLns128B
         processLns128B dict (ln:lns) =
           tryProcessLineMapping dict lns processLns128B
+
+-- handle comments
+--        processBinarySection :: SrcDict -> [(Int,String)] -> FilterProcessorIO -> IO ()
+--        processBinarySection =
+-- debug_str:
+--        /*0000*/  .byte 0x5f, 0x5a, 0x4e, 0x35, 0x36, 0x5f, 0x49, 0x4e, 0x54, 0x45, 0x52, 0x4e, 0x41, 0x4c, 0x5f, 0x36
+--        /*004c*/ 	.dword	_Z18mbarrier_test_waitPi
+
 
         tryProcessLineMapping :: SrcDict -> [(Int,String)] -> FilterProcessorIO -> IO ()
         tryProcessLineMapping dict0 [] cont = return ()
@@ -135,7 +227,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
               Nothing
                 | isCommentLine lnstr && foColor fos ->
                     emitStyle fos h_out "c" lnstr >> hPutStr h_out "\n" >> cont dict0 lns
-                | otherwise -> emitLn lnstr >> cont dict0 lns
+                | otherwise -> emitGenericLine lnstr >> cont dict0 lns
               -- //## File "E:\\dev\\nvaa\\experiments\\asynccopy/micro.cu", line 57
               Just (file,lno,"") -> lookupMapping dict0
                 where lookupMapping :: SrcDict -> IO ()
@@ -179,6 +271,40 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                 -}
                 is_global_directive = False
                 global_demangled = ""
+
+
+        -- emit something else
+        --   * bytes in a raw section
+        --   * section header
+        emitGenericLine :: String -> IO ()
+        emitGenericLine ln = do
+            sfx <- emitTokens ln
+            emitLn sfx -- emit the leftovers
+          where emitSpaces sfx =
+                  case span isSpace sfx of
+                    (spcs,sfx) -> emit spcs >> return sfx
+                emitTokens :: String -> IO String
+                emitTokens sfx = do
+                  sfx <- emitSpaces sfx
+                  case sfx of
+                    '/':'*':sfx -> emitComm ("*/") sfx >>= emitTokens
+                    _ ->
+                      case find (`isPrefixOf`sfx) keywords of
+                        Just kw -> emitStyle fos h_out "CL" kw >> return (drop (length kw) sfx)
+                        Nothing ->
+                          case find (`isPrefixOf`sfx) data_types of
+                            Just dt -> emitStyle fos h_out "YL" dt >> return (drop (length dt) sfx)
+                            _ -> return sfx
+
+                keywords = [".section",".align"]
+                data_types = [".byte",".short",".word",".dword"]
+
+                emitComm rstr [] =
+                  emitStyle fos h_out "e" (reverse rstr) >> return ""
+                emitComm rstr ('*':'/':sfx) = do
+                  emitStyle fos h_out "c" (reverse rstr ++ "*/")
+                  return sfx
+                emitComm rstr (c:cs) = emitComm (c:rstr) cs
 
         -- Maxwell and Pascal
         processLnsMaxwell :: FilterProcessorIO
@@ -234,12 +360,14 @@ emitStyle fos h_out style
       "n" -> hPutStrDarkCyan h_out -- name (register, label, barrier)
       "c" -> hPutStrDarkGreen h_out -- comment
       "l" -> hPutStrBlue h_out -- label
+      "e" -> hPutStrRed h_out -- ERROR
       --
       -- explicit colors
       "ML" -> hPutStrMagenta h_out
       "MD" -> hPutStrDarkMagenta h_out
       "CL" -> hPutStrCyan h_out
       "CD" -> hPutStrDarkCyan h_out
+      "YL" -> hPutStrYellow h_out
       _ -> hPutStr h_out
 
 fmtSi :: FilterOpts -> SampleInst -> [FmtSpan]
