@@ -42,6 +42,8 @@ data Opts =
   , oDryRun :: !Bool
   , oVerbosity :: !Int
   , oWatch :: !(Maybe Float)
+  , oXnvcc :: ![String]
+  , oXnvdisasm :: ![String]
   } deriving (Show,Eq)
 
 dft_opts :: Opts
@@ -54,6 +56,8 @@ dft_opts =
   , oDryRun = False
   , oVerbosity = 0
   , oWatch = Nothing
+  , oXnvcc = []
+  , oXnvdisasm = []
   }
 
 -- relative to given directory
@@ -65,11 +69,15 @@ data ArtifactKind =
     ArtifactKindEXE
   | ArtifactKindSASS
   | ArtifactKindSASSG -- dot graph
+  | ArtifactKindSASSP -- dot graph
   | ArtifactKindPTX
   | ArtifactKindCUBIN
   deriving (Eq,Show,Ord,Enum)
 all_artifact_kinds :: [ArtifactKind]
 all_artifact_kinds = [a0 ..] where a0 = toEnum 0
+dft_artifact_kinds :: [ArtifactKind]
+dft_artifact_kinds = [ArtifactKindEXE,ArtifactKindSASS,ArtifactKindPTX]
+
 fmtArtifactKind :: ArtifactKind -> String
 fmtArtifactKind = drop (length "ArtifactKind") . map toLower . show
 fmtArtifact :: Artifact -> String
@@ -94,12 +102,16 @@ parseOpts os (a:as)
       "      --cmake                 setup cmake files and a VS solution for all target/architecture pairs\n" ++
       "                              (clobber stomps old files here)\n" ++
       "   -d/--dry-run               don't actually execute the operation\n" ++
-      "   -w/--watch=SECONDS         enable watch mode (iteratively builds)\n" ++
+      "   -k/--keep                  keep intermediate files (e.g. raw asm)\n" ++
       "   -q/-v/-v2/-v=INT           sets the verbosity\n" ++
+      "   -Xnvcc=..                  extra option to nvcc (can specify multiple times)\n" ++
+      "   -Xnvdisasm=..              extra option to nvdisasm (can specify multiple times)\n" ++
+      "   -w/--watch=SECONDS         enable watch mode (iteratively builds)\n" ++
       "where TARGETs are of the form:\n" ++
       "  FILE(:(" ++ intercalate "|" (map fmtArtifactKind all_artifact_kinds) ++ "))?(SM)\n" ++
       "  SM = two digits (e.g. \"90\" would indicate sm_90)\n" ++
       "    (last two digits from entries of nvcc --list-gpu-arch)\n" ++
+      "  If artifacts are absent; a default set is chosen to build.\n" ++
       "EXAMPLES:\n" ++
 --      "  % bexp  foo.cu\n" ++
       "  % bexp  bar.cu:exe75\n" ++
@@ -117,14 +129,16 @@ parseOpts os (a:as)
   --
   | a == "-q" = nextArg os{oVerbosity = -1}
   | a == "-v" = nextArg os{oVerbosity = 1}
-  | a`elem`["-v2"] = nextArg os{oVerbosity = 2}
+  | a `elem` ["-v2"] = nextArg os{oVerbosity = 2}
   | k == "-v=" = parseAsIntValue (\i -> os{oVerbosity = i})
   --
-  | a`elem`["--clean"] = nextArg os {oClean = True}
-  | a`elem`["--cmake"] = nextArg os {oCmake = True}
+  | a `elem` ["--clean"] = nextArg os {oClean = True}
+  | a `elem` ["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["-d","--dry-run"] = nextArg os {oDryRun = True}
   | a `elem` ["-c","--clobber"] = nextArg os {oClobber = True}
   | k `elem` ["-w=","--watch"] = parseAsFloatValue (\f -> os{oWatch = Just f})
+  | k `elem` ["-Xnvcc="] = nextArg os {oXnvcc = oXnvcc os ++ [v]}
+  | k `elem` ["-Xnvdisasm="] = nextArg os {oXnvdisasm = oXnvdisasm os ++ [v]}
   --
   | "-"`isPrefixOf`a = badArg "invalid option"
   --
@@ -156,7 +170,7 @@ parseOpts os (a:as)
                           x ++ ": suspicious looking SM architecture " ++
                           "(e.g. expecting something like 75, 90, or 90a)"
                     if null art_str
-                      then return [(ak,path,arch) | path<-paths, ak<-all_artifact_kinds, arch<-archs]
+                      then return [(ak,path,arch) | path<-paths, ak<-dft_artifact_kinds, arch<-archs]
                       else
                         case find (\a -> fmtArtifactKind a == art_str) all_artifact_kinds of
                           Just ak -> return [(ak,path,arch) | path <- paths, arch <- archs]
@@ -354,6 +368,7 @@ makePlan as =
             ArtifactKindEXE -> []
             ArtifactKindSASS -> [ArtifactKindCUBIN]
             ArtifactKindSASSG -> [ArtifactKindCUBIN]
+            ArtifactKindSASSP -> [ArtifactKindCUBIN]
             ArtifactKindPTX -> []
             ArtifactKindCUBIN -> []
 
@@ -395,9 +410,11 @@ a_inputs_outputs is_for_clean (ak,fp,sm) = do
           | otherwise -> (root_files,[exe_fp])
         ArtifactKindPTX -> (root_files,[ptx_fp])
         ArtifactKindSASS -> ([cubin_fp],[sass_fp])
+        ArtifactKindSASSP -> ([cubin_fp],[sassp_fp])
         ArtifactKindSASSG -> ([cubin_fp],[sass_png_fp,dot_fp])
   where stem = dropExtension fp
         sass_fp = stem ++ "-sm_" ++ sm ++ ".sass"
+        sassp_fp = stem ++ "-ptx-sm_" ++ sm ++ ".sass"
         sass_raw_fp = stem ++ "-raw-sm_" ++ sm ++ ".sass"
         sass_png_fp = stem ++ "-sass-sm_" ++ sm ++ ".png"
         ptx_fp = stem ++ "-sm_" ++ sm ++ ".ptx"
@@ -478,6 +495,7 @@ executeArtifactWithDefIo os a dio = do
   let runWith :: String -> IO TaskResult
       runWith why = do
         buildArtifact os dio a
+        -- TODO: if not no clobber check outputs are created?
         return $ TaskResultUPDATED why
   case sr of
     ShouldRebuildUPTODATE -> return TaskResultNOP
@@ -577,6 +595,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
       fp_exe = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".exe"
       fp_rsass = fp_noext ++ "-raw-" ++ "sm_" ++ arch ++ ".sass"
       fp_sass = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".sass"
+      fp_sassp = fp_noext ++ "-ptx-" ++ "sm_" ++ arch ++ ".sass"
       fp_dot_sass = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".dot"
       fp_sass_png = fp_noext ++ "-sass-sm_" ++ arch ++".png"
       fp_ptx = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".ptx"
@@ -585,15 +604,15 @@ buildArtifact os dio a@(ak,fp,arch) = do
       -- 	nvcc -std=c++20 -arch sm_${EXE_ARCH} -I ../../tools ${WORKLOAD}.cu
       --           -o ${WORKLOAD}${EXE_ARCH}.exe
       callExe os dio "nvcc"
-          [ "-std=c++20"
+          ([ "-std=c++20"
           , "-arch","sm_"++arch
           , "-I", takeDirectory mINCU_PATH
           , "-o", fp_exe
           , fp
-          ] ""
+          ] ++ oXnvcc os) ""
     ArtifactKindCUBIN -> do
       callExe os dio "nvcc"
-        [ "-std=c++20"
+        ([ "-std=c++20"
         , "-arch","sm_"++arch
         , "-I", takeDirectory mINCU_PATH
         , "--generate-line-info"
@@ -601,17 +620,17 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , "-cubin"
         , "-o", fp_cubin
         , fp
-        ] ""
+        ] ++ oXnvcc os) ""
     ArtifactKindSASS -> do
       callExeToFile os dio "nvdisasm"
-        [ "--print-instruction-encoding" -- for depinfo
-        -- , "--print-line-info-ptx" -- (TODO: need to decode .nv_debug_ptx_txt section to make that work)
+        ([ "--print-instruction-encoding" -- for depinfo
+        -- , "--print-line-info-ptx" -- use sassp
         , "--print-line-info" -- for lines
         , "--print-line-info-inline" -- for inline call sites
         -- , "--print-life-ranges"
         , "--print-code" -- only text sections
         , fp_cubin
-        ] fp_rsass ""
+        ] ++ oXnvdisasm os) fp_rsass ""
         -- just for filter assembly
       callExe os dio "nva.exe"
         [ "--arch=sm_" ++ arch
@@ -619,17 +638,37 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , fp_rsass
         , "-o=" ++ fp_sass
         ] ""
+      removeFile fp_rsass
+
+    ArtifactKindSASSP -> do
+      callExeToFile os dio "nvdisasm"
+        [ "--print-instruction-encoding" -- for depinfo
+        , "--print-line-info-ptx"
+        , "--print-line-info" -- for lines
+        , "--print-line-info-inline" -- for inline call sites
+        -- , "--print-life-ranges"
+        -- , "--print-code" -- only text sections (needed for PTX)
+        , fp_cubin
+        ] fp_rsass ""
+        -- just for filter assembly
+      callExe os dio "nva.exe"
+        [ "--arch=sm_" ++ arch
+        , "-lines"
+        , fp_rsass
+        , "-o=" ++ fp_sassp
+        ] ""
+      removeFile fp_rsass
 
     ArtifactKindSASSG -> do
       callExeToFile os dio "nvdisasm"
-        [ "--print-instruction-encoding" -- for depinfo
+        ([ "--print-instruction-encoding" -- for depinfo
         -- --print-line-info-ptx -- (TODO)
         , "--print-line-info" -- for lines
         , "--print-line-info-inline" -- for inline call sites
         , "--print-code" -- only text sections
         , "-cfg" -- for dot input
         , fp_cubin
-        ] fp_dot_sass ""
+        ] ++ oXnvdisasm os) fp_dot_sass ""
       callExe os dio "dot"
         [
           "-Tpng"
