@@ -26,6 +26,12 @@ import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 --       -v=1 shows success steps (e.g. skipped)
 -- TODO: -j=... parallelism for parallel build
 -- TODO: sniff out #include dependencies...
+-- TODO: cmake should be pseudo target
+--        - store in options oCmake :: [(FilePath,Arch)]
+--        - why not treat it like a regular target (non-default)?
+-- TODO: clean should be a pseudo target (which allows no SM)
+--        - oClean :: [(FilePath,[ArtifactKind],Arch)]
+--          should clean just clean all targets?
 
 main :: IO ()
 main = getArgs >>= run
@@ -40,6 +46,7 @@ data Opts =
   , oClobber :: !Bool
   , oCmake :: !Bool
   , oDryRun :: !Bool
+  , oKeep :: !Bool
   , oVerbosity :: !Int
   , oWatch :: !(Maybe Float)
   , oXnvcc :: ![String]
@@ -54,6 +61,7 @@ dft_opts =
   , oClobber = False
   , oCmake = False
   , oDryRun = False
+  , oKeep = False
   , oVerbosity = 0
   , oWatch = Nothing
   , oXnvcc = []
@@ -104,25 +112,29 @@ parseOpts os (a:as)
       "   -d/--dry-run               don't actually execute the operation\n" ++
       "   -k/--keep                  keep intermediate files (e.g. raw asm)\n" ++
       "   -q/-v/-v2/-v=INT           sets the verbosity\n" ++
+      "      --setup                 list/check setup\n" ++
       "   -Xnvcc=..                  extra option to nvcc (can specify multiple times)\n" ++
       "   -Xnvdisasm=..              extra option to nvdisasm (can specify multiple times)\n" ++
       "   -w/--watch=SECONDS         enable watch mode (iteratively builds)\n" ++
       "where TARGETs are of the form:\n" ++
-      "  FILE(:(" ++ intercalate "|" (map fmtArtifactKind all_artifact_kinds) ++ "))?(SM)\n" ++
+      "  FILE(:(" ++ intercalate "|" (map fmtArtifactKind all_artifact_kinds) ++ "))?(SM,SM,...)\n" ++
       "  SM = two digits (e.g. \"90\" would indicate sm_90)\n" ++
       "    (last two digits from entries of nvcc --list-gpu-arch)\n" ++
       "  If artifacts are absent; a default set is chosen to build.\n" ++
+      "  If FILE is '.' (current dir), then it matches all .cu files.\n" ++
       "EXAMPLES:\n" ++
 --      "  % bexp  foo.cu\n" ++
-      "  % bexp  bar.cu:exe75\n" ++
+      "  % bexp  bar.cu:exe:75\n" ++
       "    builds exe for sm_75 for file bar.cu\n" ++
-      "  % bexp  bar.cu:90\n" ++
+      "  % bexp  bar.cu::90\n" ++
       "    builds all artifacts of bar.cu for sm_90\n" ++
-      "  % bexp  bar.cu:75 --clean\n" ++
+      "  % bexp foo.cu:sass90 -Xnvcc=-rdc=true\n" ++
+      "    builds SASS code for sm_90 adding -rdc=true in the nvcc steps\n" ++
+      "  % bexp  bar.cu::75 --clean\n" ++
       "    cleans all artifacts of bar.cu for sm_75\n" ++
-      "  % bexp  foo.cu:75 bar.cu:75,86 --cmake\n" ++
+      "  % bexp  foo.cu::75 bar.cu::75,86 --cmake\n" ++
       "    Sets up cmake for foo.cu for sm_75 and bar.cu for sm_75 and sm_86\n" ++
-      "  % bexp  .:72,75 --cmake\n" ++
+      "  % bexp  .::72,75 --cmake\n" ++
       "    Set up cmake for *.cu for sm_72 and sm_75\n" ++
       ""
     exitSuccess
@@ -132,10 +144,13 @@ parseOpts os (a:as)
   | a `elem` ["-v2"] = nextArg os{oVerbosity = 2}
   | k == "-v=" = parseAsIntValue (\i -> os{oVerbosity = i})
   --
-  | a `elem` ["--clean"] = nextArg os {oClean = True}
+  | a `elem` ["--setup"] = checkTools True >> exitSuccess
+  --
+  | a `elem` ["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["-d","--dry-run"] = nextArg os {oDryRun = True}
   | a `elem` ["-c","--clobber"] = nextArg os {oClobber = True}
+  | a `elem` ["-k","--keep"] = nextArg os {oKeep = True}
   | k `elem` ["-w=","--watch"] = parseAsFloatValue (\f -> os{oWatch = Just f})
   | k `elem` ["-Xnvcc="] = nextArg os {oXnvcc = oXnvcc os ++ [v]}
   | k `elem` ["-Xnvdisasm="] = nextArg os {oXnvdisasm = oXnvdisasm os ++ [v]}
@@ -155,33 +170,23 @@ parseOpts os (a:as)
 
         parseTargets  :: String -> IO [Artifact]
         parseTargets a =
-            case span (/=':') a of
-              (path_str,':':sfx) -> do
-                paths <- getPaths path_str
-                case span (not . isDigit) sfx of
-                  (art_str,ds@(_:_)) -> do
-                    let archs = splitOnCommas ds
-                    -- ensure archs are sane looking at least
-                    -- take 2 allow trailing non-digits sm_90a ("90a")
-                    case filter (not . all isDigit . take 2) archs of
-                      [] -> return ()
-                      x:_ ->
-                        badArg $
-                          x ++ ": suspicious looking SM architecture " ++
-                          "(e.g. expecting something like 75, 90, or 90a)"
-                    if null art_str
-                      then return [(ak,path,arch) | path<-paths, ak<-dft_artifact_kinds, arch<-archs]
-                      else
-                        case find (\a -> fmtArtifactKind a == art_str) all_artifact_kinds of
-                          Just ak -> return [(ak,path,arch) | path <- paths, arch <- archs]
-                          Nothing -> badArg $ art_str ++ ": unrecognized artifact"
-                  _ -> badArg $ sfx ++ ": invalid (ARTIFACT)?SM_DIGITS suffix"
-              _ -> badArg "malformed command; should be of form (PATH:(ARTIFACT)?SM_DIGITS)"
-          where getPaths :: FilePath -> IO [FilePath]
-                getPaths "." = do
+            case splitOn ':' a of
+              [path_strs,targ_strs,arch_strs] -> do
+                ps <- parsePaths path_strs
+                aks <- parseArtifactKinds targ_strs
+                archs <- parseArchs arch_strs
+                return $ complete ps aks archs
+              _ -> badArg "malformed command; should be of form: FILE:(TARG(,TARG)*)?:SM_DIGITS(,SM_DIGITS)*"
+
+          where complete :: [FilePath] -> [ArtifactKind] -> [String] -> [Artifact]
+                complete paths aks archs =
+                   [(ak,path,arch) | path<-paths, ak<-aks, arch<-archs]
+
+                parsePaths :: FilePath -> IO [FilePath]
+                parsePaths "." = do
                   es <- listDirectory "."
                   return $ filter (".cu"`isSuffixOf`) es
-                getPaths path = do
+                parsePaths path = do
                   when (any (`elem`"/\\") path) $
                     putStrYellow $ "WARNING: should be run from within local experiment directory\n"
                   file_exists <- doesFileExist path
@@ -193,6 +198,28 @@ parseOpts os (a:as)
                   if not file_exists
                     then badArg $ path ++ ": file not found"
                     else return [path]
+
+                parseArtifactKinds :: String -> IO [ArtifactKind]
+                parseArtifactKinds "" = return dft_artifact_kinds
+                parseArtifactKinds s = loop [] (splitOnCommas s)
+                  where loop :: [ArtifactKind] -> [String] -> IO [ArtifactKind]
+                        loop raks [] = return (reverse raks)
+                        loop raks (s:ss) =
+                          case find (\a -> fmtArtifactKind a == s) all_artifact_kinds of
+                            Just ak -> loop (ak:raks) ss
+                            Nothing -> badArg $ s ++ ": unrecognized artifact"
+
+                parseArchs :: String -> IO [String]
+                parseArchs s = do
+                    case find shadyLooking strs of
+                      Nothing -> return ()
+                      Just s ->
+                        badArg $
+                          s ++ ": suspicious looking SM architecture " ++
+                          "(e.g. expecting something like 75, 90, or 90a)"
+                    return strs
+                  where strs = splitOnCommas s
+                        shadyLooking = not . all isDigit . take 2
 
 
         parseAsIntValue :: (Int -> Opts) -> IO Opts
@@ -210,7 +237,14 @@ parseOpts os (a:as)
         badArg msg = fatal (a ++ ": " ++ msg)
 
 splitOnCommas :: String -> [String]
-splitOnCommas = words . map (\c -> if c == ',' then ' ' else c)
+splitOnCommas = splitOn ','
+splitOn :: Char -> String -> [String]
+-- splitOn s = words . map (\c -> if c == s then ' ' else c)
+splitOn sep = loop ""
+  where loop rcurr [] = [reverse rcurr]
+        loop rcurr (c:cs)
+          | c == sep = reverse rcurr:loop "" cs
+          | otherwise = loop (c:rcurr) cs
 
 oNormalLn :: Opts -> String -> IO ()
 oNormalLn = oNormalLnH stdout
@@ -233,13 +267,13 @@ oIoLevel io lvl os
 fatal :: String -> IO a
 fatal = die
 
-checkTools :: IO ()
-checkTools = do
+checkTools :: Bool -> IO ()
+checkTools vrb = do
   let handler_cl :: SomeException -> IO ()
       handler_cl _ = do
-        fatal $ "cannot find cl.exe in %PATH%.  Did you run setupvs.bat?"
+        fatal $ "cannot find cl.exe in %PATH%.  Did you run setupvs.bat (or vcvarsall.bat)?"
         return ()
-  -- frickin cl.exe emits a banner to stderr!
+  -- frickin cl.exe emits a banner to stderr! /NOBANNER would've worked
   (readProcessWithExitCode "cl.exe" [] "" >> return ()) `catch` handler_cl
 
   let handler_nva :: SomeException -> IO ()
@@ -251,6 +285,18 @@ checkTools = do
         fatal $ "cannot find nvcc.exe in %PATH%"
   (readProcess "nvcc.exe" ["--version"] "" >> return ()) `catch` handler_nva
 
+  when vrb $ do
+    let checkTool exe = do
+          putStr $  "=== " ++ printf "%-24s" exe
+          mpath <- findExecutable exe
+          case mpath of
+            Just exe -> putStrGreen $ exe
+            Nothing -> putStrRed " ???"
+          putStrLn ""
+    checkTool "cmake.exe"
+    checkTool "cl.exe"
+    checkTool "nvcc.exe"
+    checkTool "nva.exe"
 
 runWithOpts :: Opts -> IO ()
 runWithOpts os
@@ -323,7 +369,7 @@ runWithOpts os
       putStrLn "============= PLAN =============="
       forM_ (zip [0..] p) $ \(ix,as) ->
         putStrLn $ "step " ++ show ix ++ ": " ++ intercalate "|" (map fmtArtifact as)
-    unless (oDryRun os) $ checkTools
+    unless (oDryRun os) $ checkTools (oVerbosity os >= 2)
     let loopForUpdate :: [Artifact] -> IO Bool
         loopForUpdate [] = return False
         loopForUpdate (a:as) = do
@@ -404,7 +450,6 @@ a_inputs_outputs is_for_clean (ak,fp,sm) = do
       case ak of
         -- what about mincu.hpp?
         ArtifactKindCUBIN -> (root_files,[cubin_fp])
-        -- ArtifactKindEXE -> (root_files,[exe_fp,exe_lib_fp,exe_exp_fp])
         ArtifactKindEXE
           | is_for_clean -> (root_files,[exe_fp,exe_lib_fp,exe_exp_fp])
           | otherwise -> (root_files,[exe_fp])
@@ -621,6 +666,18 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , "-o", fp_cubin
         , fp
         ] ++ oXnvcc os) ""
+
+    ArtifactKindPTX -> do
+      callExe os dio "nvcc"
+        ([ "-std=c++20"
+        , "-arch","sm_"++arch
+        , "-I", takeDirectory mINCU_PATH
+        , "--generate-line-info" -- .loc directives
+        , "--source-in-ptx" -- emits // lines with source (requires --generate-line-info)
+        , "--ptx"
+        , "-o", fp_ptx
+        , fp
+        ] ++ oXnvcc os) ""
     ArtifactKindSASS -> do
       callExeToFile os dio "nvdisasm"
         ([ "--print-instruction-encoding" -- for depinfo
@@ -638,7 +695,8 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , fp_rsass
         , "-o=" ++ fp_sass
         ] ""
-      removeFile fp_rsass
+      unless (oKeep os) $
+        removeFile fp_rsass
 
     ArtifactKindSASSP -> do
       callExeToFile os dio "nvdisasm"
@@ -657,7 +715,8 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , fp_rsass
         , "-o=" ++ fp_sassp
         ] ""
-      removeFile fp_rsass
+      unless (oKeep os) $
+        removeFile fp_rsass
 
     ArtifactKindSASSG -> do
       callExeToFile os dio "nvdisasm"
@@ -676,17 +735,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , fp_dot_sass
         ] ""
 
-    ArtifactKindPTX -> do
-      callExe os dio "nvcc"
-        [ "-std=c++20"
-        , "-arch","sm_"++arch
-        , "-I", takeDirectory mINCU_PATH
-        , "--generate-line-info" -- .loc directives
-        , "--source-in-ptx" -- emits // lines with source (requires --generate-line-info)
-        , "--ptx"
-        , "-o", fp_ptx
-        , fp
-        ] ""
+
 
 -- nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx -I .. -arch sm_${ARCH}
 -- # nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx --source-in-ptx -I .. -arch sm_${ARCH}
