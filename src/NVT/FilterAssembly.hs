@@ -269,6 +269,8 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                     _ -> ""
                 is_global_directive = not (null global_demangled)
                 -}
+                -- see: libcufilt: how to bind to this in Haskell? (safe foreign call to a DLL)
+                -- https://docs.nvidia.com/cuda/cuda-binary-utilities/index.html#library-availability
                 is_global_directive = False
                 global_demangled = ""
 
@@ -296,7 +298,17 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                             Just dt -> emitStyle fos h_out "YL" dt >> return (drop (length dt) sfx)
                             _ -> return sfx
 
-                keywords = [".section",".align"]
+                keywords = [
+                      ".align"
+                    , ".global"
+                    , ".other"
+                    , ".section"
+                    , ".sectionentsize"
+                    , ".sectionflags"
+                    , ".size"
+                    , ".text"
+                    , ".type"
+                    ]
                 data_types = [".byte",".short",".word",".dword"]
 
                 emitComm rstr [] =

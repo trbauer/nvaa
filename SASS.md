@@ -166,6 +166,28 @@ predicate destination.  The predicate output appears to be a non-zero flag.
 
 [ what're the extra arguments? Output non-zero or zero?? ]
 
+## `SHF` - Funnel Shifter
+
+`(SRC2|SRC0) >> SRC1`
+
+`U32` means zero fill.  The `.HI` means to take the high word of the result.
+
+```
+SHF.R.U32.HI  R3, RZ,     0xb,    R3               {!4,Y,^2};
+```
+This shifts `(R3:RZ) >> 0xB` with zero fill and takes the top.
+So it's really just `(R3>>0xB)`.
+
+If I picked the low word, we would get the junk shifted off the bottom of `SRC2`.
+
+Another example is the uniform variant.
+
+```
+USHF.R.S32.HI  UR7, URZ,  0x1f,   UR6
+```
+This is a sign-extension, it takes bit 31 and extends it down to 0.
+This is `((UR6:URZ) >>sx 31)` (sign extension of top bit).
+
 ## PRMT
 
 Permutes A pair of 32 values and does a byte select on them.
@@ -188,7 +210,6 @@ This is loading bytes `B[3,2,1,0] = {R4,R5,R6,R7}`.  The `PRMT` assembles these 
       PRMT      R6,     R6,     0x7604, R7               {!4,Y,^3};
       PRMT      R5,     R5,     0x7054, R6               {!4,Y,^4};
       PRMT      R6,     R4,     0x654,  R5               {!2,^5};
-
 
 The general form of `PRMT` is to byte select from the 8 bytes of `(SRC2<<32|SRC0)`.
 There are some throw-away values in the high selectors that should have no effect.

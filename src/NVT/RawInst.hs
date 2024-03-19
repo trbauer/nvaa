@@ -2,6 +2,7 @@ module NVT.RawInst where
 
 import NVT.Bits
 import NVT.CUDASDK
+import NVT.Floats
 import NVT.Lop3
 import NVT.Opts
 -- import NVT.Parsers.Parser
@@ -123,7 +124,7 @@ dft_fos =
 --  "c" -> comment
 fmtSpansRawInstWith :: FmtOpts -> RawInst -> [FmtSpan]
 fmtSpansRawInstWith fos ri = fssSimplify $
-   op_part_padded ++ maybe_dep_info ++ noFmt ";"
+   op_part_padded ++ maybe_dep_info ++ noFmt ";" ++ maybe_sanity_hint
   where op_part_padded
           | null maybe_dep_info = op_part
           | otherwise = fssPadR (foColsPerInstBody fos) op_part
@@ -131,6 +132,19 @@ fmtSpansRawInstWith fos ri = fssSimplify $
           where pred =
                   fssPadR (foColsPerPredicate fos)
                     [FmtSpan "p" (riPredication ri)]
+
+        -- ghetto move instruction on newer processors
+        maybe_sanity_hint :: [FmtSpan]
+        maybe_sanity_hint =
+          case (riMnemonic ri,riOperands ri) of
+            ("HFMA2.MMA",[_,"-RZ","RZ",hf_hi16,hf_lo16]) ->
+              case (reads hf_hi16,reads hf_lo16) of
+                ([(hi_f,"")], [(lo_f,"")]) ->
+                    [FmtSpan "c" $ printf " // 0x%08X" (to_hf16_w 16 hi_f .|. to_hf16_w 0 lo_f)]
+                  where to_hf16_w sh =
+                          (`shiftL`sh) . (fromIntegral :: Word16 -> Word32) .
+                            floatBitsToHalfBits RoundE . floatToBits
+            _ -> []
 
         fmtd_tokens :: [FmtSpan]
         fmtd_tokens
@@ -203,6 +217,9 @@ fmtOpnd fos o
   | "c[0x0]["`isPrefixOf`o = noFmt $ "c0" ++ drop 6 o
   | "c[0x1]["`isPrefixOf`o = noFmt $ "c1" ++ drop 6 o
   | "c[0x2]["`isPrefixOf`o = noFmt $ "c2" ++ drop 6 o
+  | "-c[0x0]["`isPrefixOf`o = noFmt $ "-c0" ++ drop 6 o
+  | "-c[0x1]["`isPrefixOf`o = noFmt $ "-c1" ++ drop 6 o
+  | "-c[0x2]["`isPrefixOf`o = noFmt $ "-c2" ++ drop 6 o
   | "`"`isPrefixOf`o = [FmtSpan "l" o]
   | "["`isPrefixOf`o = -- e.g. [R16.64+0x100] or [R88.X16+UR18+0x400]
     case splitAt 1 o of
@@ -241,6 +258,7 @@ regSpan s =
     'R':sfx -> tryReg "R" sfx
     'P':sfx -> tryReg "P" sfx
     'B':sfx -> tryReg "B" sfx
+    -- 'R':'p':'c':sfx -> Just ("Rpc",sfx)
     _ -> Nothing
   where tryReg pfx sfx =
           case span isDigit sfx of
