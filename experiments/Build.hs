@@ -32,6 +32,14 @@ import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 -- TODO: clean should be a pseudo target (which allows no SM)
 --        - oClean :: [(FilePath,[ArtifactKind],Arch)]
 --          should clean just clean all targets?
+-- TODO: the graph logic is not robust
+--     A `targ(X)` B
+--     B `targ(X)` C
+--    IF B is stale, then so is C
+--    I suspect I only check locally in the run.
+--    Since, we run serially, we are probably safe.
+--
+-- TODO: Eliminate up to date targets from the build plan
 
 main :: IO ()
 main = getArgs >>= run
@@ -47,6 +55,7 @@ data Opts =
   , oCmake :: !Bool
   , oDryRun :: !Bool
   , oKeep :: !Bool
+  , oKeepInlines :: !Bool
   , oVerbosity :: !Int
   , oWatch :: !(Maybe Float)
   , oXnvcc :: ![String]
@@ -62,6 +71,7 @@ dft_opts =
   , oCmake = False
   , oDryRun = False
   , oKeep = False
+  , oKeepInlines = True
   , oVerbosity = 0
   , oWatch = Nothing
   , oXnvcc = []
@@ -111,6 +121,7 @@ parseOpts os (a:as)
       "                              (clobber stomps old files here)\n" ++
       "   -d/--dry-run               don't actually execute the operation\n" ++
       "   -k/--keep                  keep intermediate files (e.g. raw asm)\n" ++
+      "   --keep-inlines             keeps inline info in SASS\n" ++
       "   -q/-v/-v2/-v=INT           sets the verbosity\n" ++
       "      --setup                 list/check setup\n" ++
       "   -Xnvcc=..                  extra option to nvcc (can specify multiple times)\n" ++
@@ -151,6 +162,7 @@ parseOpts os (a:as)
   | a `elem` ["-d","--dry-run"] = nextArg os {oDryRun = True}
   | a `elem` ["-c","--clobber"] = nextArg os {oClobber = True}
   | a `elem` ["-k","--keep"] = nextArg os {oKeep = True}
+  | a `elem` ["--keep-inlines"] = nextArg os {oKeepInlines = True}
   | k `elem` ["-w=","--watch"] = parseAsFloatValue (\f -> os{oWatch = Just f})
   | k `elem` ["-Xnvcc="] = nextArg os {oXnvcc = oXnvcc os ++ [v]}
   | k `elem` ["-Xnvdisasm="] = nextArg os {oXnvdisasm = oXnvdisasm os ++ [v]}
@@ -644,6 +656,8 @@ buildArtifact os dio a@(ak,fp,arch) = do
       fp_dot_sass = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".dot"
       fp_sass_png = fp_noext ++ "-sass-sm_" ++ arch ++".png"
       fp_ptx = fp_noext ++ "-" ++ "sm_" ++ arch ++ ".ptx"
+      maybe_opt f o = if f os then [] else [o]
+
   case ak of
     ArtifactKindEXE -> do
       -- 	nvcc -std=c++20 -arch sm_${EXE_ARCH} -I ../../tools ${WORKLOAD}.cu
@@ -690,11 +704,13 @@ buildArtifact os dio a@(ak,fp,arch) = do
         ] ++ oXnvdisasm os) fp_rsass ""
         -- just for filter assembly
       callExe os dio "nva.exe"
-        [ "--arch=sm_" ++ arch
+        ([ "--arch=sm_" ++ arch
         , "-lines"
-        , fp_rsass
+        ] ++ maybe_opt oKeepInlines "-Xinlined" ++
+        [
+          fp_rsass
         , "-o=" ++ fp_sass
-        ] ""
+        ]) ""
       unless (oKeep os) $
         removeFile fp_rsass
 
@@ -710,18 +726,19 @@ buildArtifact os dio a@(ak,fp,arch) = do
         ] fp_rsass ""
         -- just for filter assembly
       callExe os dio "nva.exe"
-        [ "--arch=sm_" ++ arch
+        ([ "--arch=sm_" ++ arch
         , "-lines"
-        , fp_rsass
+        ] ++ maybe_opt oKeepInlines "-Xinlined" ++
+        [
+          fp_rsass
         , "-o=" ++ fp_sassp
-        ] ""
+        ]) ""
       unless (oKeep os) $
         removeFile fp_rsass
 
     ArtifactKindSASSG -> do
       callExeToFile os dio "nvdisasm"
         ([ "--print-instruction-encoding" -- for depinfo
-        -- --print-line-info-ptx -- (TODO)
         , "--print-line-info" -- for lines
         , "--print-line-info-inline" -- for inline call sites
         , "--print-code" -- only text sections

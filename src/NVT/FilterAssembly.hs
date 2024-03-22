@@ -34,7 +34,7 @@ tryParseLineMapping ln =
 -- Will allow for the above
 tryParseLineMappingWithSfx :: String -> Maybe (FilePath,Int,String)
 tryParseLineMappingWithSfx ln
-  | lno_pfx `isPrefixOf` (dropWhile isSpace ln) =
+  | lno_pfx `isPrefixOf` dropWhile isSpace ln =
     case reads sfx_file :: [(String,String)] of
       [(file,sfx)] ->
         case reads (dropWhile (not . isDigit) sfx) :: [(Int,String)] of
@@ -46,8 +46,8 @@ tryParseLineMappingWithSfx ln
         sfx_file = dropWhile (/='"') ln
 
 
--- lm_test = "//## File \"D:\\\\dev\\\\nvaa\\\\cuda-tests/cf.cu\", line 62"
-
+lm_test = "//## File \"D:\\\\dev\\\\nvaa\\\\cuda-tests/cf.cu\", line 62"
+inl_test = "        //## File \"C:\\include\\include\\__cuda/barrier.h\", line 204 inlined at \"E:\\dev\\mbarrier-example.cu\", line 149"
 -- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 458 inlined at "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 471
 -- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 471 inlined at "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 396
 -- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 396 inlined at "E:\\dev\\nvaa\\experiments\\asynccopy/micro.cu", line 57
@@ -65,15 +65,21 @@ type SrcDict = [(FilePath,Array Int String)]
 type FilterProcessorIO = SrcDict -> [(Int,String)] -> IO ()
 type Arch = String
 
+data InlinedSource =
+    InlinedSourceDROP
+  | InlinedSourcePASSTHROUGH
+  deriving (Show,Eq)
+
 data FilterOpts =
   FilterOpts {
     foArch :: !String
   , foColor :: !Bool
   , foFmtOpts :: !FmtOpts
+  , foInlinedSource :: !InlinedSource
   , foVerbosity :: !Int
   } deriving Show
 fos_dft :: FilterOpts
-fos_dft = FilterOpts "" False dft_fos 0
+fos_dft = FilterOpts "" False dft_fos InlinedSourceDROP 0
 
 isCommentLine :: String -> Bool
 isCommentLine = (=="//") . take 2 . dropWhile isSpace
@@ -201,7 +207,8 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
               emitSpans fos h_out (fmtSi fos si)
               processLns128B dict lns_sfx
             Left _ -> tryProcessLineMapping dict lns processLns128B
-        processLns128B dict (ln:lns) =
+        processLns128B dict (ln@(_,lnstr):lns) = do
+          emitGenericLine lnstr
           tryProcessLineMapping dict lns processLns128B
 
 -- handle comments
@@ -210,7 +217,6 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
 -- debug_str:
 --        /*0000*/  .byte 0x5f, 0x5a, 0x4e, 0x35, 0x36, 0x5f, 0x49, 0x4e, 0x54, 0x45, 0x52, 0x4e, 0x41, 0x4c, 0x5f, 0x36
 --        /*004c*/ 	.dword	_Z18mbarrier_test_waitPi
-
 
         tryProcessLineMapping :: SrcDict -> [(Int,String)] -> FilterProcessorIO -> IO ()
         tryProcessLineMapping dict0 [] cont = return ()
@@ -226,7 +232,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
             case tryParseLineMappingWithSfx lnstr of
               Nothing
                 | isCommentLine lnstr && foColor fos ->
-                    emitStyle fos h_out "c" lnstr >> hPutStr h_out "\n" >> cont dict0 lns
+                    emitStyle fos h_out "c" lnstr >> emitLn "" >> cont dict0 lns
                 | otherwise -> emitGenericLine lnstr >> cont dict0 lns
               -- //## File "E:\\dev\\nvaa\\experiments\\asynccopy/micro.cu", line 57
               Just (file,lno,"") -> lookupMapping dict0
@@ -255,7 +261,15 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                             cont dict lns
               -- inlined at line source line
               -- -- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 458 inlined at "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 471
-              Just (_,_,_) -> cont dict0 lns
+              Just (_,_,sfx) | "inlined at"`isPrefixOf`dropWhile isSpace sfx -> do
+                when (foInlinedSource fos == InlinedSourcePASSTHROUGH) $ do
+                  emitStyle fos h_out "c" lnstr
+                  emitLn ""
+                cont dict0 lns
+              Just x@(_,_,_) -> do
+                -- print x
+                emitStyle fos h_out "e" ("MALFORMED LINE: " ++ show lnstr ++ "\n") -- ERROR unexpected
+                cont dict0 lns
           where {-
                 global_demangled =
                   -- .global _Z5add64PyPKyy
@@ -302,12 +316,13 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                       ".align"
                     , ".global"
                     , ".other"
-                    , ".section"
                     , ".sectionentsize"
                     , ".sectionflags"
+                    , ".section"
                     , ".size"
                     , ".text"
                     , ".type"
+                    , ".zero"
                     ]
                 data_types = [".byte",".short",".word",".dword"]
 
@@ -368,7 +383,7 @@ emitStyle fos h_out style
   | otherwise =
     case style of
       "o" -> hPutStrCyan h_out -- op
-      -- "s" -> hPutStrDarkCyan h_out -- subop
+      "s" -> hPutStrYellow h_out -- subop
       "n" -> hPutStrDarkCyan h_out -- name (register, label, barrier)
       "c" -> hPutStrDarkGreen h_out -- comment
       "l" -> hPutStrBlue h_out -- label
@@ -380,7 +395,12 @@ emitStyle fos h_out style
       "CL" -> hPutStrCyan h_out
       "CD" -> hPutStrDarkCyan h_out
       "YL" -> hPutStrYellow h_out
-      _ -> hPutStr h_out
+      --
+      -- unformatted
+      "" -> hPutStr h_out
+      --
+      -- INVALID color code
+      _ ->  \s -> hPutStrRed h_out ("<" ++ show style ++ "?>" ++ show s)
 
 fmtSi :: FilterOpts -> SampleInst -> [FmtSpan]
 fmtSi fos = fmtSampleInstToFmtSpans (foFmtOpts fos)

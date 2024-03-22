@@ -94,6 +94,9 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
     , PA.opt spec "Xnvdisasm" "" "ANYTHING"
         "sets an extra argument for the nvdiasm tool" ""
         (\a o -> (o {oExtraNvdisasmArgs = oExtraNvdisasmArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
+    , PA.optF spec "Xinlined" "retain inlined source annotations"
+        "retain inline source annotations" ""
+        (\o -> (o {oFilterAsmPassInlined = True})) # PA.OptAttrAllowUnset
     , PA.optF spec "v2" "debug"
         "the verbosity level" ""
         (\o -> (o {oVerbosity = 2})) # PA.OptAttrAllowUnset
@@ -404,6 +407,10 @@ runWithOpts os
                             , foPrintOffsets = oPrintOffsets os
                             , foPrintDeps = oPrintDeps os
                             }
+                        , foInlinedSource =
+                          -- find a better way to transmit this
+                          if oFilterAsmPassInlined os then InlinedSourcePASSTHROUGH
+                            else InlinedSourceDROP
                         , foVerbosity = oVerbosity os
                         }
             if not (null (oCollateListing os))

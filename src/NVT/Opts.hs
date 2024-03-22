@@ -13,6 +13,7 @@ data Opts =
   , oExtraNvccArgs :: ![String]
   , oExtraNvdisasmArgs :: ![String]
   , oFilterAssembly :: !Bool
+  , oFilterAsmPassInlined :: !Bool
   , oIncludePaths :: ![FilePath]
   , oInputFile :: !FilePath
   , oOutputFile :: !FilePath
@@ -40,6 +41,7 @@ dft_opts =
   , oExtraNvccArgs = []
   , oExtraNvdisasmArgs = []
   , oFilterAssembly = True
+  , oFilterAsmPassInlined = False
   , oIncludePaths = []
   , oInputFile = ""
   , oOutputFile = ""

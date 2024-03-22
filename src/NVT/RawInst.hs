@@ -129,9 +129,10 @@ fmtSpansRawInstWith fos ri = fssSimplify $
           | null maybe_dep_info = op_part
           | otherwise = fssPadR (foColsPerInstBody fos) op_part
         op_part = pred ++ noFmt " " ++ fmtd_tokens
-          where pred =
-                  fssPadR (foColsPerPredicate fos)
-                    [FmtSpan "p" (riPredication ri)]
+          where pred = fssPadR (foColsPerPredicate fos) ps
+                  where ps
+                          | null (riPredication ri) = []
+                          | otherwise = fmtOpnd fos (riPredication ri)
 
         -- ghetto move instruction on newer processors
         maybe_sanity_hint :: [FmtSpan]
@@ -152,8 +153,6 @@ fmtSpansRawInstWith fos ri = fssSimplify $
           | otherwise = mne_padded ++ noFmt "  " ++
             fmtOpnds 0 (fssLength mne_padded - cols_per_mne) (riOperands ri)
           where mne_padded = fssPadR cols_per_mne mne
-
-        needs_debug = riMnemonic ri == "RET.REL.NODEC"
 
         fmtOpnds :: Int -> Int -> [String] -> [FmtSpan]
         fmtOpnds ix debt (o:os) = -- trace (show debt) $
@@ -220,20 +219,8 @@ fmtOpnd fos o
   | "-c[0x0]["`isPrefixOf`o = noFmt $ "-c0" ++ drop 6 o
   | "-c[0x1]["`isPrefixOf`o = noFmt $ "-c1" ++ drop 6 o
   | "-c[0x2]["`isPrefixOf`o = noFmt $ "-c2" ++ drop 6 o
-  | "`"`isPrefixOf`o = [FmtSpan "l" o]
-  | "["`isPrefixOf`o = -- e.g. [R16.64+0x100] or [R88.X16+UR18+0x400]
-    case splitAt 1 o of
-      ("[",sfx) ->
-        case regSpan sfx of
-          Just (rnm,sfx) -> noFmt "[" ++ reg rnm  ++ rest
-            where rest =
-                    case span (/='U') sfx of
-                      (pfx,usfx) ->
-                        case regSpan usfx of
-                          Just (rn,sfx) -> noFmt pfx ++ reg rn ++ noFmt sfx
-                          _ -> noFmt sfx
-          _ -> noFmt o
-
+  | "`"`isPrefixOf`o = [FmtSpan "l" o] -- label
+  | "["`isPrefixOf`o || "desc["`isPrefixOf`o = highlightAddr o
   | otherwise =
     case regSpan o of
       Just (reg,sfx) -> FmtSpan "n" reg:rest
@@ -243,8 +230,49 @@ fmtOpnd fos o
                 case span (/='`') sfx of
                   (pfx,sfx@('`':_)) -> noFmt pfx ++ fmtOpnd fos sfx
                   _ -> noFmt sfx
-      _ -> noFmt o
+      _ -> highlightAllRegs o
   where reg r = [FmtSpan "n" r]
+
+     -- e.g. desc[UR6][R2.64]
+     -- e.g. [R16.64+0x100] or [R88.X16+UR18+0x400]
+        highlightAddr :: String -> [FmtSpan]
+        highlightAddr o =
+          case span (/='[') o of
+            -- pfx = "" or "desc"
+            ("",'[':sfx) ->
+                noFmt "[" ++ highlightAllRegs sfx
+            ("desc",'[':sfx) ->
+                [FmtSpan "s" "desc"] ++ noFmt "[" ++ highlightAllRegs sfx
+            _ -> noFmt o
+
+        highlightAllRegs :: String -> [FmtSpan]
+        highlightAllRegs = loop ""
+          where loop :: String -> String -> [FmtSpan]
+                loop rnofmt "" = noFmt (reverse rnofmt)
+                loop rnofmt s@(c:cs) =
+                    case s of
+                      -- e.g. [R16.64...]
+                      '.':'6':'4':sfx -> matchToken [FmtSpan "s" ".64"] sfx
+                      -- e.g. SLM scaling suffix
+                      '.':'X':'2':sfx -> matchToken [FmtSpan "s" ".X4"] sfx
+                      '.':'X':'4':sfx -> matchToken [FmtSpan "s" ".X4"] sfx
+                      '.':'X':'1':'6':sfx -> matchToken [FmtSpan "s" ".X16"] sfx
+                      _ ->
+                        case regSpan s of
+                          Just (rn,sfx) -> matchToken (reg rn) sfx
+                          Nothing ->
+                            case s of
+                              '0':'x':d0:sfx | isHexDigit d0 ->
+                                case span isHexDigit sfx of
+                                  (hex_ds,sfx) ->
+                                    matchToken [FmtSpan "l" ("0x"++d0:hex_ds)] sfx
+                              _ -> loop (c:rnofmt) cs
+                  where matchToken ::  [FmtSpan] -> String -> [FmtSpan]
+                        matchToken tks sfx = maybe_nfmt ++ tks ++ loop "" sfx
+                          where maybe_nfmt = if null rnofmt then [] else noFmt (reverse rnofmt)
+
+
+
 
 regSpan :: String -> Maybe (String,String)
 regSpan s =
@@ -266,6 +294,7 @@ regSpan s =
             _ -> Nothing
         notIdentChar "" = True
         notIdentChar (c:_) = not (isAlphaNum c || c == '_')
+
 
 
 fmtSampleInst :: SampleInst -> String
