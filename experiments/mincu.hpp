@@ -43,6 +43,7 @@
 namespace mincu
 {
 template <typename T>
+__device__ __host__
 static inline T align_up(T n, T a) {
     return (n + a - 1) - ((n + a - 1) % a);
 }
@@ -611,8 +612,16 @@ MAKE_MC_TYPE(double, double)
 template <typename V, typename E>
 concept is_vec_elem_pair = std::is_same_v<E,typename mc_vec_type<V>::elem_type>;
 
-
+// (Not sure how to do this)
+// Want to constrain generic things like == to my set of operations above.
+//  - I don't want to override == on int, for example.
+//  - I don't want std::string blowing up in the middle of this.
 template <typename V>
+concept is_mc_nontrivial_vec =
+  !std::is_same_v<V,typename mc_vec_type<V>::elem_type>;
+
+
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline bool operator==(const V &v1, const V &v2) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -633,7 +642,7 @@ template <typename V, typename E> requires is_vec_elem_pair<V, E>
 static inline bool operator==(const V &v1, const E &e2) {
   return v1 == default_broadcast<V,E>(e2);
 }
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline bool operator!=(const V &v1, const V &v2) {
   return !(v1 == v2);
 }
@@ -641,7 +650,7 @@ template <typename V, typename E> requires is_vec_elem_pair<V, E>
 static inline bool operator!=(const V &v1, const E &e2) {
   return !(v1 == e2);
 }
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V operator+(const V &v1, const V &v2) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -666,7 +675,7 @@ static inline V operator+(const E &e2, const V &v1) {
   return v1 + default_broadcast<V,E>(e2);
 }
 
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V operator-(const V &v1, const V &v2) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -691,7 +700,7 @@ static inline V operator-(const E &e2, const V &v1) {
   return v1 - default_broadcast<V,E>(e2);
 }
 
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V operator*(const V &v1, const V &v2) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -716,7 +725,7 @@ static inline V operator*(const V &v1, const E &e2) {
   return v1 * default_broadcast<V,E>(e2);
 }
 
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V operator/(const V &v1, const V &v2) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -741,7 +750,7 @@ static inline V operator/(const V &v1, const E &e2) {
   return v1 / default_broadcast<V,E>(e2);
 }
 
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V operator%(const V &v1, const V &v2) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -771,7 +780,7 @@ static inline V operator%(const E &e2, const V &v1) {
 }
 
 // negation
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V operator-(const V &v) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -786,7 +795,7 @@ static inline V operator-(const V &v) {
   }
 }
 
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V &operator+=(V &lhs, const V &v) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -803,7 +812,7 @@ template <typename V, typename E> requires is_vec_elem_pair<V, E>
 static inline V &operator+=(V &lhs, const E &e) {
   return lhs += default_broadcast<V,E>(e);
 }
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V &operator-=(V &lhs, const V &v) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -820,7 +829,7 @@ template <typename V, typename E> requires is_vec_elem_pair<V, E>
 static inline V &operator-=(V &lhs, const E &e) {
   return lhs -= default_broadcast<V,E>(e);
 }
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V &operator*=(V &lhs, const V &v) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -837,7 +846,7 @@ template <typename V, typename E> requires is_vec_elem_pair<V, E>
 static inline V &operator*=(V &lhs, const E &e) {
   return lhs *= default_broadcast<V,E>(e);
 }
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V &operator/=(V &lhs, const V &v) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
@@ -854,7 +863,7 @@ template <typename V, typename E> requires is_vec_elem_pair<V, E>
 static inline V &operator/=(V &lhs, const E &e) {
   return lhs /= default_broadcast<V,E>(e);
 }
-template <typename V>
+template <typename V> requires is_mc_nontrivial_vec<V>
 static inline V &operator%=(V &lhs, const V &v) {
   using E = typename mc_vec_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
