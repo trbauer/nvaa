@@ -3,6 +3,8 @@
 #include <iostream>
 #include <cstdio>
 #include <functional>
+#include <sstream>
+#include <vector>
 
 using namespace mincu;
 
@@ -15,12 +17,52 @@ MINCU_ENABLE_COLOR_IO_VIA_STATIC_CONSTRUCTOR();
 //  - place device tests to mincu-tests-device.cpp
 //  - mincu-tests.cu calls into both those
 //     (all this breaks bexp.exe! unless we do #include only or something)
+//  - non-fail fast behavior (fatal doesn't kill testing)
+//      * root main forks child
+//      * each test executed we write a file in CWD (or communicate with parent)
+//      * if a crash happens, parent sees it and restarts with --start-after=...
+//
+//
 struct opts {
-  int verbosity = 0;
+  std::vector<std::string>      filters;
+  int                           verbosity = 0;
+
+  bool verbose() const {return verbosity >= 1;}
+  bool debug() const {return verbosity >= 2;}
+
+  bool matches_any_filter(std::string test) const {
+    if (filters.empty()) {
+      return true;
+    }
+    for (auto f : filters) {
+      if (f.size() >= 2 && f[0] == '^' && f[f.size() - 1] == '$') { // "^foo$" matches "foo" only
+        f = f.substr(1);
+        f = f.substr(0, f.size() - 1);
+        if (test == f)
+          return true;
+      } else if (f.size() >= 1 && f[0] == '^') { // "^foo" matches "food" not "afood"
+        f = f.substr(1);
+        if (test.find(f) == 0) {
+          return true;
+        }
+      } else if (f.size() >= 1 && f[f.size() - 1] == '$') {
+        // "foo$" matches "afoo" not "food"
+        f = f.substr(0, f.size() - 1);
+        if (test.find(f) == 0) {
+          return true;
+        }
+      } else {
+        if (test.find(f) != std::string::npos) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 };
 
-static opts g_os;
 
+static opts g_os;
 
 template <typename T>
 static std::string mc_format(T t, fmt_opts fos = fmt_opts())
@@ -65,7 +107,7 @@ static std::string test_fmt(const T &t) {
 
 
 
-static const char *g_current_label = "?";
+static std::string g_current_label;
 
 static void test_fatal(
     int line, const char *macro,
@@ -73,11 +115,13 @@ static void test_fatal(
     const char *exp_expr, const std::string &exp_fmtd,
     std::string hint = "")
 {
-  mincu::fatal("test ", ansi_red(g_current_label), "; near line ",
-               ansi_yellow(line), ": ", macro, "(", sut_expr, ", ", exp_expr,
-               ")\n"
-               "    sut:",
-               sut_fmtd, ", exp:", exp_fmtd, (hint.empty() ? "" : "\n  "), hint);
+  mincu::fatal(
+      "test ", ansi_red(g_current_label.empty() ? "???" : g_current_label),
+      "; near line ", ansi_yellow(line), ": ", macro, "(", sut_expr, ", ",
+      exp_expr,
+      ")\n"
+      "    sut:",
+      sut_fmtd, ", exp:", exp_fmtd, (hint.empty() ? "" : "\n  "), hint);
 }
 
 template <typename T1, typename T2>
@@ -159,17 +203,21 @@ static void test_ge_impl(
 #define TEST_GE(SUT, EXP) \
   test_ge_impl(__LINE__, #SUT, SUT, #EXP, EXP)
 
-static void start_test(const char *lbl)
-{
-  g_current_label = lbl;
+static void TEST_GROUP(std::string lbl, std::function<void()> BLOCK) {
+  if (!g_current_label.empty())
+    fatal("INTERNAL ERROR: recursive/nested test detected ", lbl, " under ",
+          g_current_label);
   if (g_os.verbosity >= 0)
-    std::cout << "============= " << lbl << "\n";
-}
-
-static void TEST_GROUP(const char *LBL, std::function<void()> BLOCK) {
-  start_test(LBL);
-  BLOCK();
-  g_current_label = "?";
+  if (g_os.matches_any_filter(lbl)) {
+    g_current_label = lbl;
+    std::cout << "====== " << coll<std::string>(lbl + ":", 48) << "  ";
+    BLOCK();
+    std::cout << ansi_green<const char *>("PASSED") << "\n";
+    g_current_label = "";
+  } else {
+    std::cout << "====== " << coll<std::string>(lbl + ":", 48) << "  "
+              << ansi_yellow<const char *>("SKIPPING") << "\n";
+  }
 }
 
 
@@ -308,27 +356,41 @@ static void run_buf_init_tests()
     // (I *think* this is true.  I think the seeds are give in the spec.)
     TEST_GROUP("umem<unsigned>.rnd_seq(0, 10)",
       [] {
-        random_state rs {12007};
+        random_state rs {12007}; // can be shared by various rnd_seq's
         umem<unsigned> buf {4u, rnd_seq(rs, 0u, 10u)};
-        // buf.str(std::cout);
         TEST_EQ(buf[0], 1);
         TEST_EQ(buf[1], 7);
         TEST_EQ(buf[2], 8);
         TEST_EQ(buf[3], 1);
+
+        // should get a new sequence distinct from the first
+        buf.init(rnd_seq(rs, 0u, 10u));
+        TEST_EQ(buf[0], 6);
+        TEST_EQ(buf[1], 2);
+        TEST_EQ(buf[2], 9);
+        TEST_EQ(buf[3], 6);
+      });
+
+    TEST_GROUP("umem<uint2>.rnd_seq(0, 10)",
+      [] {
+        random_state rs {12007};
+        rnd_seq<uint2> rsq {rs, make_uint2(0u,1u), make_uint2(10u,9u)};
+        // umem<uint2> buf {4u, ...};
+        // buf.str(std::cout);
       });
 
   ///////////////////////////////////////////////
   // TODO: extra tests
-  // - init with lambda
-  // - init cyc
-  // - init with random (fix values), ensure random doesn't get clobbered
-  // - init with random int8_t
-  // - init float types (fmod in arith_seq)
-  //
   // - umem::str() (format_elem etc..)
   //
 } // test_inits
 
+template <typename T>
+static void run_compile_randoms(int)
+{
+  random_state rs {12007};
+  umem<T> buf {4u, rnd_seq(rs)}; // no args
+}
 
 static void run_format_tests()
 {
@@ -435,6 +497,340 @@ static void run_mc_derived_function_tests()
       });
 }
 
+
+
+template <typename T>
+static void shared_type_tests(std::stringstream &ss) {
+  using E = typename mc_type<T>::elem_type;
+
+  const T zero = mc_type<T>::bcast(0);
+  const T one = mc_type<T>::bcast(1);
+  const T two = mc_type<T>::bcast(2);
+  const T three = mc_type<T>::bcast(3);
+  const T four = mc_type<T>::bcast(4);
+  const T five = mc_type<T>::bcast(5);
+  const T six = mc_type<T>::bcast(6);
+  const T seven = mc_type<T>::bcast(7);
+  const T eight = mc_type<T>::bcast(8);
+  const T nine = mc_type<T>::bcast(9);
+  const T ten = mc_type<T>::bcast(10);
+  ss << "zero is: "; mincu::format_elem(ss, zero, fmt_opts()); ss << "\n";
+  ss << "one is:  "; mincu::format_elem(ss, one, fmt_opts()); ss << "\n";
+  if constexpr (std::is_signed_v<E>) {
+    ss << "negative two is:  "; mincu::format_elem(ss, -two, fmt_opts()); ss << "\n";
+  }
+
+  TEST_EQ(zero, zero);
+  TEST_EQ(ten, ten);
+  TEST_NE(zero, one);
+  TEST_EQ(zero + one, one);
+  TEST_EQ(two + E(3), five);
+  TEST_EQ(E(3) + two, five);
+  TEST_EQ(four - one, three);
+  TEST_EQ(four - E(2), two);
+  TEST_EQ(E(4) - one, three);
+  TEST_EQ(two * three, six);
+  TEST_EQ(E(2) * four, eight);
+  TEST_EQ(two * E(4), eight);
+  TEST_EQ(four / two, two);
+  TEST_EQ(four / E(2), two);
+  TEST_EQ(E(4) / two, two);
+  if constexpr (std::is_floating_point_v<E>) {
+    TEST_EQ(five / two, mc_type<T>::bcast(E(2.5)));
+  }
+  // float/double lack native operator support for %
+  // mc_mod will use std::fmod
+  TEST_EQ(mc_mod(five, three), two);
+  TEST_EQ(mc_mod(five, E(3)), two);
+  TEST_EQ(mc_mod(E(5), three), two);
+  if constexpr (!std::is_floating_point_v<E> || is_mc_type_vec<T>) {
+    // vector types (int and float) and scalar ints will support these
+    TEST_EQ(five % three, two);
+    TEST_EQ(five % E(3), two);
+    TEST_EQ(E(5) % three, two);
+  }
+  TEST_EQ(mc_max(five, three), five);
+  TEST_EQ(mc_max(five, E(3)), five);
+  TEST_EQ(mc_max(E(5), three), five);
+  TEST_EQ(mc_min(five, three), three);
+  TEST_EQ(mc_min(five, E(3)), three);
+  TEST_EQ(mc_min(E(5), three), three);
+
+  // TODO: need a more general way to test non-uniform channels
+  // variant of bcast...
+  //   mc_type<T>::make(...) with variable number of arguments
+  // Write the channels with a lambda...
+  // Order is:
+  // X =   1, 5, 3, 2
+  // Y =   3, 2, 3, 4
+  // max = 3  5  3  4
+  // min = 1  2  3  2
+  static const int seq_xs [] {1, 5, 3, 2};
+  static const int seq_ys [] {3, 2, 3, 4};
+  T x = mc_cons<T,E>([&](size_t i) {
+      if (i >= sizeof(seq_xs) / sizeof(seq_xs[0])) {
+        fatal("INTERNAL ERROR: test sequences are too short");
+      }
+      return E(seq_xs[i]);
+    });
+  T y = mc_cons<T,E>([&](size_t i) {
+      if (i >= sizeof(seq_ys) / sizeof(seq_ys[0])) {
+        fatal("INTERNAL ERROR: test sequences are too short");
+      }
+      return E(seq_ys[i]);
+    });
+  T min_xy = mc_cons<T,E>([&](size_t i) {
+      return std::min(E(seq_xs[i]), E(seq_ys[i]));
+    });
+  T max_xy = mc_cons<T,E>([&](size_t i) {
+      return std::max(E(seq_xs[i]), E(seq_ys[i]));
+    });
+  TEST_EQ(mc_min(x, y), min_xy);
+  TEST_EQ(mc_min(E(1), y), one);
+  TEST_EQ(mc_min(y, E(1)), one);
+  TEST_EQ(mc_max(x, y), max_xy);
+  TEST_EQ(mc_max(x, E(5)), five);
+  TEST_EQ(mc_max(E(5), x), five);
+
+  if constexpr (mc_type<T>::N == 1) {
+    // <, <=, ... only defined on the basic types
+    // (this mostly tests the testing framework...)
+    TEST_LE(zero, one);
+    TEST_LE(one, one);
+    TEST_LT(zero, one);
+    TEST_GT(one, zero);
+    TEST_GE(one, one);
+    TEST_GE(one, zero);
+    TEST_EQ(one < zero, false);
+  }
+  if constexpr (std::is_signed_v<E>) {
+    T neg_two = -two;
+    TEST_EQ(neg_two, mc_type<T>::bcast(-2));
+  }
+
+  T m = zero;
+  m += E(3); // 3
+  m += two;  // 5
+  m -= E(1); // 4
+  m -= two;  // 2
+  m *= E(4); // 8
+  m *= two;  // 16
+  m /= E(2); // 8
+  m /= two;  // 4
+  TEST_EQ(m, four);
+  if constexpr (!std::is_floating_point<E>()) {
+    // no %= for scalar floats
+    m %= E(3); // 1
+    TEST_EQ(m, one);
+    m = eight; // 8
+    m %= three; // 2
+    TEST_EQ(m, two);
+  }
+
+  umem<T> buf{4u};
+
+  ////////////////////////////////////
+  // constant sequence
+  buf.init(const_seq(one));
+  TEST_EQ(buf[0], one);
+  TEST_EQ(buf[1], one);
+  TEST_EQ(buf[2], one);
+  TEST_EQ(buf[3], one);
+
+  ////////////////////////////////////
+  // arithmetic sequence
+  buf.init(arith_seq<T>());
+  TEST_EQ(buf[0], zero);
+  TEST_EQ(buf[1], one);
+  TEST_EQ(buf[2], two);
+  TEST_EQ(buf[3], three);
+
+  buf.init(arith_seq(one, two));
+  TEST_EQ(buf[0], one);
+  TEST_EQ(buf[1], three);
+  TEST_EQ(buf[2], five);
+  TEST_EQ(buf[3], seven);
+
+  buf.init(arith_seq(zero, two, three));
+  TEST_EQ(buf[0], zero);
+  TEST_EQ(buf[1], two);
+  TEST_EQ(buf[2], one);
+  TEST_EQ(buf[3], zero);
+
+  ////////////////////////////////////
+  // cycle sequence
+  buf.init(cyc_seq({one, three}));
+  TEST_EQ(buf[0], one);
+  TEST_EQ(buf[1], three);
+  TEST_EQ(buf[2], one);
+  TEST_EQ(buf[3], three);
+
+  ////////////////////////////////////
+  // lambda function
+  buf.init([](size_t i){ return mc_type<T>::bcast(2 * i);});
+  TEST_EQ(buf[0], zero);
+  TEST_EQ(buf[1], two);
+  TEST_EQ(buf[2], four);
+  TEST_EQ(buf[3], six);
+
+  ////////////////////////////////////
+  // random sequence
+  random_state rs {12007}; // can be shared by various rnd_seq's
+  buf.init(rnd_seq(rs, zero, ten));
+  ss << "some random values are: "; buf.str(ss);
+  if constexpr (std::is_same_v<T,uint32_t>) {
+    // these are hardcoded based on type
+    TEST_EQ(buf[0], one);
+    TEST_EQ(buf[1], seven);
+    TEST_EQ(buf[2], eight);
+    TEST_EQ(buf[3], one);
+  } else if constexpr (std::is_same_v<T,uint2>) {
+    TEST_EQ(buf[0], make_uint2(1, 7));
+    TEST_EQ(buf[1], make_uint2(8, 1));
+    TEST_EQ(buf[2], make_uint2(6, 2));
+    TEST_EQ(buf[3], make_uint2(9, 6));
+  } // else: no checking on other types
+}
+
+template <typename T>
+static void test_base_type() {
+  using E = typename mc_type<T>::elem_type;
+  static_assert(std::is_same_v<T,E>); // since we are a base type
+  static_assert(mc_type<T>::N == 1);
+
+  using V1 = typename mc_elem_type<T,1>::vec_type;
+  using V2 = typename mc_elem_type<T,1>::vec_type;
+  using V3 = typename mc_elem_type<T,1>::vec_type;
+  using V4 = typename mc_elem_type<T,1>::vec_type;
+  static_assert(std::is_same_v<T,typename mc_type<V1>::elem_type>); // all our vector variants' inner types should be us
+  static_assert(std::is_same_v<T,typename mc_type<V2>::elem_type>);
+  static_assert(std::is_same_v<T,typename mc_type<V3>::elem_type>);
+  static_assert(std::is_same_v<T,typename mc_type<V4>::elem_type>);
+
+  std::stringstream ss;
+  ss << "base type " << type_name<T>() << ":\n";
+  ss << "vector versions:\n" <<
+      "V1: " << type_name<V1>() << "\n"
+      "V2: " << type_name<V2>() << "\n"
+      "V3: " << type_name<V3>() << "\n"
+      "V4: " << type_name<V4>() << "\n"
+      "";
+
+  shared_type_tests<T>(ss);
+
+  if (g_os.verbose())
+    std::cout << ss.str();
+}
+template <typename T>
+static void test_vec_type() {
+  std::stringstream ss;
+  using E = typename mc_type<T>::elem_type;
+  ss << "type: " << type_name<T>() << " is " <<
+      type_name<E>() << "[" << mc_type<T>::N << "]\n";
+
+  shared_type_tests<T>(ss);
+
+  if (g_os.verbose())
+    std::cout << ss.str();
+}
+template <typename T>
+static void test_type(int) {
+    TEST_GROUP(format("mc_type.", type_name<T>()),
+        [] {
+          if constexpr (mc_type<T>::N >= 1) {
+            test_vec_type<T>();
+          } else {
+            test_base_type<T>();
+          }
+        });
+}
+
+
+/*
+#define ON_ALL_MC_BASE_TYPES(DO, X) \
+  DO<uint8_t>(X); \
+  DO<uint16_t>(X); \
+  DO<uint32_t>(X); \
+  DO<uint64_t>(X); \
+  DO<int8_t>(X); \
+  DO<int16_t>(X); \
+  DO<int32_t>(X); \
+  DO<int64_t>(X); \
+  DO<float>(X); \
+  DO<double>(X);
+*/
+
+#define ON_ALL_MC_STYPES(T, DO, X) \
+  DO<typename mc_elem_type<T,1>>(X); \
+  DO<typename mc_elem_type<T,2>>(X); \
+  DO<typename mc_elem_type<T,3>>(X); \
+  DO<typename mc_elem_type<T,4>>(X);
+#define ON_ALL_MC_TYPES(DO, X) \
+  ON_ALL_MC_STYPES(uint8_t, DO, X); \
+  ON_ALL_MC_STYPES(int16_t, DO, X); \
+  ON_ALL_MC_STYPES(int32_t, DO, X); \
+  ON_ALL_MC_STYPES(int64_t, DO, X); \
+  ON_ALL_MC_STYPES(uint8_t, DO, X); \
+  ON_ALL_MC_STYPES(uint16_t, DO, X); \
+  ON_ALL_MC_STYPES(uint32_t, DO, X); \
+  ON_ALL_MC_STYPES(uint64_t, DO, X); \
+  ON_ALL_MC_STYPES(float, DO, X); \
+  ON_ALL_MC_STYPES(double, DO, X);
+
+static void run_type_tests()
+{
+  const int arg = 0;
+  // === TO debug tests on specific types
+  // test_type<int32_t>(arg);
+  // test_type<uint32_t>(arg);
+  // test_type<uint2>(arg);
+  // test_type<int2>(arg);
+  // test_type<float2>(arg);
+
+  test_type<uint8_t>(arg);
+  test_type<uchar2>(arg);
+  test_type<uchar3>(arg);
+  test_type<uchar4>(arg);
+  test_type<int8_t>(arg);
+  test_type<char2>(arg);
+  test_type<char3>(arg);
+  test_type<char4>(arg);
+  test_type<int16_t>(arg);
+  test_type<short2>(arg);
+  test_type<short3>(arg);
+  test_type<short4>(arg);
+  test_type<uint16_t>(arg);
+  test_type<ushort2>(arg);
+  test_type<ushort3>(arg);
+  test_type<ushort4>(arg);
+  test_type<int32_t>(arg);
+  test_type<int2>(arg);
+  test_type<int3>(arg);
+  test_type<int4>(arg);
+  test_type<uint32_t>(arg);
+  test_type<uint2>(arg);
+  test_type<uint3>(arg);
+  test_type<uint4>(arg);
+  test_type<int64_t>(arg);
+  test_type<longlong2>(arg);
+  test_type<longlong3>(arg);
+  test_type<longlong4>(arg);
+  test_type<uint64_t>(arg);
+  test_type<ulonglong2>(arg);
+  test_type<ulonglong3>(arg);
+  test_type<ulonglong4>(arg);
+
+  test_type<float>(arg);
+  test_type<float2>(arg);
+  test_type<float3>(arg);
+  test_type<float4>(arg);
+  test_type<double>(arg);
+  test_type<double2>(arg);
+  test_type<double3>(arg);
+  test_type<double4>(arg);
+//  ON_ALL_MC_TYPES(test_type, 0);
+}
+
 int main(int argc, char **argv)
 {
   for (int i = 1; i < argc; i++) {
@@ -451,11 +847,20 @@ int main(int argc, char **argv)
 
     if (arg == "-h" || arg == "--help") {
       std::cout <<
-        "usage: mincu-tests.exe OPTS TEST+\n"
+        "usage: mincu-tests.exe OPTS FILTERS+\n"
         "where OPTS are:\n"
         "  -v/-v2                  sets verbosity\n"
+        "and FILTERS are:"
+        "   FILTER         TEST NAME MUST:\n"
+        "   ^STRING$       be exactly STRING\n"
+        "   ^STRING        begin with STRING\n"
+        "   STRING$        end with STRING\n"
+        "   STRING         contain STRING\n"
         "EXAMPLES:\n"
-        " % ...\n"
+        " % mincu-tests\n"
+        "   runs all tests"
+        " % mincu-tests FOO\n"
+        "   runs all tests with FOO in the TEST_GROUP name\n"
         "";
       return EXIT_SUCCESS;
     } else if (arg == "-v") {
@@ -465,7 +870,7 @@ int main(int argc, char **argv)
     } else if (!arg.empty() && arg[0] == '-') {
       bad_opt("unexpected option");
     } else {
-      bad_opt("unexpected argument");
+      g_os.filters.push_back(arg);
     }
   } // for args
 
@@ -476,6 +881,8 @@ int main(int argc, char **argv)
   run_buf_init_tests();
   // TODO: run_format_umem_tests()
   //  test_add_float_k();
+
+  run_type_tests();
 
   return EXIT_SUCCESS;
 }
@@ -542,5 +949,4 @@ static void micro_test()
   std::cout << "uint2 " << xformat(i2) << "\n";
   std::cout << "uint2 " << mincu::format(i2) << "\n";
 }
-// */
-
+*/

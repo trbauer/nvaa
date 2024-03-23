@@ -4,6 +4,12 @@
 *.exe
 _scrap
 examples
+experiments/*/*.sass
+experiments/*/*.ptx
+experiments/*/*.cubin
+experiments/*/*.obj
+experiments/*/*.exp
+experiments/*/*.lib
 dist
 dist-*
 cabal-dev

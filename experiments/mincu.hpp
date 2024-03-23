@@ -187,95 +187,6 @@ static void fatal(Ts...ts) {
 
 
 ///////////////////////////////////////////////////////////////////////////////
-// random number generation
-
-struct random_state {
-  std::mt19937 gen;
-
-  random_state() : gen(std::random_device()()) { }
-  random_state(unsigned seed) : gen(seed) { }
-  random_state(const char *seed) {
-    std::string str = seed;
-    std::seed_seq ss(str.begin(), str.end());
-    gen.seed(ss);
-  }
-}; // random_state
-
-template <typename T,typename R = T>
-static void randomize_integral(
-  random_state &rnd,
-  T *vals,
-  size_t nelems,
-  T lo = std::numeric_limits<T>::min(),
-  T hi = std::numeric_limits<T>::max())
-{
-  std::uniform_int_distribution<R> d {R(lo), R(hi)};
-  for (size_t i = 0; i < nelems; i++) {
-    vals[i] = T(d(rnd.gen));
-  }
-}
-
-template <typename T, typename R = T>
-static void randomize_real(
-  random_state &rnd,
-  T *vals,
-  size_t nelems,
-  T lo = T(0.0f),
-  T hi = T(1.0f))
-{
-  std::uniform_real_distribution<R> d {R(lo), R(hi)};
-  for (size_t i = 0; i < nelems; i++) {
-    vals[i] = T(d(rnd.gen));
-  }
-}
-
-// T is the type of the buffer
-// R is the type of the random sequence;
-//   we use a conversion operator to take R to T;
-//
-// Normally R = T, initialize a buffer of floats to
-// random float values, but this enables things like
-// randomizing floats to an integer sequence (each converted to float)
-// for example.
-//
-// In addition, int8_t doesn't have a std::uniform_int_distribution
-// instance.  Hence, one would need to use int16_t or something as
-// the random sequence.
-// template <typename T,typename R = T>
-// static void randomize(random_state &rs, T *vals, size_t elems, R lo, R hi);
-
-//
-// E.g. for float
-//   template <typename T>
-//   static void randomize(T *vals, size_t elems, float lo, float hi) {
-//     randomize_real<T,float>(vals, elems, lo, hi);
-//   }
-
-template <typename T, typename R>
-static void randomize(random_state &rs, T *vals, size_t elems, T lo, T hi);
-
-#define RANDOMIZE_INSTANCE2(T,R,DELEGATE)\
-  template <>\
-  static void randomize<T,R>(random_state &rs, T *vals, size_t elems, T lo, T hi) { \
-    DELEGATE<T,R>(rs, vals, elems, lo, hi); \
-  }
-#define RANDOMIZE_INSTANCE(T,DELEGATE)\
-  RANDOMIZE_INSTANCE2(T,T,DELEGATE)
-
-RANDOMIZE_INSTANCE(float, randomize_real)
-RANDOMIZE_INSTANCE(double, randomize_real)
-
-RANDOMIZE_INSTANCE2(int8_t, int16_t, randomize_integral)
-RANDOMIZE_INSTANCE(int16_t, randomize_integral)
-RANDOMIZE_INSTANCE(int32_t, randomize_integral)
-RANDOMIZE_INSTANCE(int64_t, randomize_integral)
-RANDOMIZE_INSTANCE2(uint8_t, uint16_t, randomize_integral)
-RANDOMIZE_INSTANCE(uint16_t, randomize_integral)
-RANDOMIZE_INSTANCE(uint32_t, randomize_integral)
-RANDOMIZE_INSTANCE(uint64_t, randomize_integral)
-
-
-/////////////////////////////////////////////////
 // vector instances
 //   e.g. int2, int3, int4, float2, float3, float4
 //
@@ -530,7 +441,7 @@ static inline void format_elem_v(
 }
 
 template <typename V, typename E>
-static V default_broadcast(E e) {
+static constexpr V default_broadcast(E e) {
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     V v;
@@ -550,25 +461,39 @@ template <typename T>
 static void format_elem(std::ostream &os, const T &t, const fmt_opts &fos);
 template <typename T>
 static T zero();
+// template <typename T> static T min_val();
+// template <typename T> static T max_val();
 // static inline V broadcast(const E &e);
 
 // Relations for mincu vector types and elements
 template <typename V>
-struct mc_vec_type {
+struct mc_type {
 //  using elem_type = E;
 //  static const int N = #;
-//  static const V zero {...};
+//  static const V bcast(E) {...};
+//  static const V zero() {...};
+//  static const V min_value {...};
+//  static const V max_value {...};
 };
 template <typename E,int N>
 struct mc_elem_type {
 //  using vec_type = V;
 };
 
-
+// TODO: remove broadcast() and zero() (use mc_type functions)
 #define MAKE_MC_TYPE_V(ST, VT, VN) \
   template <> static const char *type_name<VT ## VN>() { return #VT #VN; } \
-  template <> struct mc_vec_type<VT ## VN> {using elem_type = ST; static const int N = VN;}; \
-  template <> struct mc_elem_type<ST,VN> {using vec_type = VT ## VN;}; \
+  template <> struct mc_type<VT ## VN> {\
+    using elem_type = ST; \
+    static const int N = VN; \
+    static constexpr VT ## VN bcast(ST s) {return default_broadcast<VT ## VN, ST>(s);}; \
+    static constexpr VT ## VN zero() {return default_broadcast<VT ## VN, ST>(ST(0));}; \
+    static constexpr VT ## VN min() {return default_broadcast<VT ## VN, ST>(std::numeric_limits<ST>::min());}; \
+    static constexpr VT ## VN max() {return default_broadcast<VT ## VN, ST>(std::numeric_limits<ST>::max());}; \
+  }; \
+  template <> struct mc_elem_type<ST,VN> { \
+    using vec_type = VT ## VN; \
+  }; \
   template <> static void format_elem<VT ## VN>(\
       std::ostream & os, const VT##VN &v, const fmt_opts &fos) \
   { \
@@ -578,13 +503,25 @@ struct mc_elem_type {
   template <> static VT ## VN zero<VT ## VN>() {return broadcast<VT ## VN>(ST(0));} \
   static inline std::ostream &operator<<(std::ostream &os, const VT ## VN &v) { \
     format_elem<VT ## VN>(os, v, fmt_opts()); return os; \
-  }
+  } \
+
 
 #define MAKE_MC_TYPE(ST, VT) \
   template <> static const char *type_name<ST>() {return #ST;} \
-  template <> struct mc_vec_type<ST> {using elem_type = ST; static const int N = 1;}; \
-  template <> struct mc_elem_type<ST,1> {using vec_type = ST;}; \
-  template <> static void format_elem<ST>(std::ostream &os, const ST &v, const fmt_opts &fos) { \
+  template <> struct mc_type<ST> { \
+    using elem_type = ST; \
+    static constexpr int N = 1;\
+    static constexpr ST bcast(ST s) {return ST(s);}; \
+    static constexpr ST zero() {return ST(0);}; \
+    static constexpr ST min() {return std::numeric_limits<ST>::min();}; \
+    static constexpr ST max() {return std::numeric_limits<ST>::max();}; \
+  }; \
+  template <> struct mc_elem_type<ST,1> { \
+    using vec_type = ST; \
+  }; \
+  template <> static void format_elem<ST>(\
+    std::ostream &os, const ST &v, const fmt_opts &fos) \
+  { \
     format_elem_v<ST,ST>(os, v, fos); \
   } \
   template <typename V> static V broadcast(ST x); \
@@ -594,7 +531,8 @@ struct mc_elem_type {
   MAKE_MC_TYPE_V(ST, VT, 3) \
   MAKE_MC_TYPE_V(ST, VT, 4)
 
-
+////////////////////////////////////////////////
+//
 
 MAKE_MC_TYPE(uint8_t, uchar)
 MAKE_MC_TYPE(uint16_t, ushort)
@@ -609,21 +547,28 @@ MAKE_MC_TYPE(int64_t, longlong)
 MAKE_MC_TYPE(float, float)
 MAKE_MC_TYPE(double, double)
 
+
 template <typename V, typename E>
-concept is_vec_elem_pair = std::is_same_v<E,typename mc_vec_type<V>::elem_type>;
+concept is_mc_vec_elem_pair = std::is_same_v<E,typename mc_type<V>::elem_type>;
 
 // (Not sure how to do this)
 // Want to constrain generic things like == to my set of operations above.
 //  - I don't want to override == on int, for example.
 //  - I don't want std::string blowing up in the middle of this.
 template <typename V>
-concept is_mc_nontrivial_vec =
-  !std::is_same_v<V,typename mc_vec_type<V>::elem_type>;
+concept is_mc_type_vec =
+  !std::is_same_v<V,typename mc_type<V>::elem_type>;
+template <typename V>
+concept is_mc_trivial_type =
+  std::is_same_v<V,typename mc_type<V>::elem_type>;
+template <typename V>
+concept is_mc_type =
+  is_mc_trivial_type<V> || is_mc_type_vec<V>;
 
 
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline bool operator==(const V &v1, const V &v2) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
@@ -638,21 +583,21 @@ static inline bool operator==(const V &v1, const V &v2) {
   }
 }
 
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline bool operator==(const V &v1, const E &e2) {
   return v1 == default_broadcast<V,E>(e2);
 }
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline bool operator!=(const V &v1, const V &v2) {
   return !(v1 == v2);
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline bool operator!=(const V &v1, const E &e2) {
   return !(v1 == e2);
 }
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V operator+(const V &v1, const V &v2) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     V r;
@@ -666,18 +611,18 @@ static inline V operator+(const V &v1, const V &v2) {
     return v1 + v2;
   }
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V operator+(const V &v1, const E &e2) {
   return v1 + default_broadcast<V,E>(e2);
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V operator+(const E &e2, const V &v1) {
   return v1 + default_broadcast<V,E>(e2);
 }
 
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V operator-(const V &v1, const V &v2) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     V r;
@@ -691,18 +636,18 @@ static inline V operator-(const V &v1, const V &v2) {
     return v1 - v2;
   }
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V operator-(const V &v1, const E &e2) {
   return v1 - default_broadcast<V,E>(e2);
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V operator-(const E &e2, const V &v1) {
-  return v1 - default_broadcast<V,E>(e2);
+  return default_broadcast<V,E>(e2) - v1;
 }
 
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V operator*(const V &v1, const V &v2) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     V r;
@@ -716,18 +661,18 @@ static inline V operator*(const V &v1, const V &v2) {
     return v1 * v2;
   }
 }
-template <typename E, typename V> requires is_vec_elem_pair<V, E>
+template <typename E, typename V> requires is_mc_vec_elem_pair<V, E>
 static inline V operator*(const E &e1, const V &v2) {
   return default_broadcast<V,E>(e1) * v2;
 }
-template <typename E, typename V> requires is_vec_elem_pair<V, E>
+template <typename E, typename V> requires is_mc_vec_elem_pair<V, E>
 static inline V operator*(const V &v1, const E &e2) {
   return v1 * default_broadcast<V,E>(e2);
 }
 
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V operator/(const V &v1, const V &v2) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     V r;
@@ -741,48 +686,66 @@ static inline V operator/(const V &v1, const V &v2) {
     return v1 / v2;
   }
 }
-template <typename E, typename V> requires is_vec_elem_pair<V, E>
+template <typename E, typename V> requires is_mc_vec_elem_pair<V, E>
 static inline V operator/(const E &e1, const V &v2) {
   return default_broadcast<V,E>(e1) / v2;
 }
-template <typename E, typename V> requires is_vec_elem_pair<V, E>
+template <typename E, typename V> requires is_mc_vec_elem_pair<V, E>
 static inline V operator/(const V &v1, const E &e2) {
   return v1 / default_broadcast<V,E>(e2);
 }
 
-template <typename V> requires is_mc_nontrivial_vec<V>
-static inline V operator%(const V &v1, const V &v2) {
-  using E = typename mc_vec_type<V>::elem_type;
+template <typename E>
+  requires is_mc_trivial_type<E>
+static inline E mc_mod_helper(E e0, E e1)
+{
+  if constexpr (std::is_floating_point_v<E>) {
+    return std::fmod(e0, e1);
+  } else {
+    return e0 % e1;
+  }
+}
+template <typename V> requires is_mc_type<V>
+static inline V mc_mod(const V &v1, const V &v2) {
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     V r;
     const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
     E *er = (E *)&r;
     for (int i = 0; i < channels; i++) {
-      if constexpr (std::is_floating_point<E>()) {
-        er[i] = std::fmod(e1[i], e2[i]);
-      } else {
-        er[i] = e1[i] % e2[i];
-      }
+      er[i] = mc_mod_helper(e1[i], e2[i]);
     }
     return r;
-  } else{
-    return v1 + v2;
+  } else {
+    return mc_mod_helper(v1, v2);
   }
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
+static inline V mc_mod(const V &v1, const E &e2) {
+  return mc_mod(v1, default_broadcast<V,E>(e2));
+}
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
+static inline V mc_mod(const E &e1, const V &v2) {
+  return mc_mod(default_broadcast<V,E>(e1), v2);
+}
+template <typename V> requires is_mc_type_vec<V>
+static inline V operator%(const V &v1, const V &v2) {
+  return mc_mod(v1, v2);
+}
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V operator%(const V &v1, const E &e2) {
   return v1 % default_broadcast<V,E>(e2);
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V operator%(const E &e2, const V &v1) {
   return default_broadcast<V,E>(e2) % v1;
 }
 
 // negation
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V operator-(const V &v) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     V r;
@@ -795,9 +758,9 @@ static inline V operator-(const V &v) {
   }
 }
 
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V &operator+=(V &lhs, const V &v) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     for (int i = 0; i < channels; i++) {
@@ -808,13 +771,13 @@ static inline V &operator+=(V &lhs, const V &v) {
   }
   return lhs;
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V &operator+=(V &lhs, const E &e) {
   return lhs += default_broadcast<V,E>(e);
 }
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V &operator-=(V &lhs, const V &v) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     for (int i = 0; i < channels; i++) {
@@ -825,13 +788,13 @@ static inline V &operator-=(V &lhs, const V &v) {
   }
   return lhs;
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V &operator-=(V &lhs, const E &e) {
   return lhs -= default_broadcast<V,E>(e);
 }
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V &operator*=(V &lhs, const V &v) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     for (int i = 0; i < channels; i++) {
@@ -842,13 +805,13 @@ static inline V &operator*=(V &lhs, const V &v) {
   }
   return lhs;
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V &operator*=(V &lhs, const E &e) {
   return lhs *= default_broadcast<V,E>(e);
 }
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V &operator/=(V &lhs, const V &v) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     for (int i = 0; i < channels; i++) {
@@ -859,39 +822,274 @@ static inline V &operator/=(V &lhs, const V &v) {
   }
   return lhs;
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V &operator/=(V &lhs, const E &e) {
   return lhs /= default_broadcast<V,E>(e);
 }
-template <typename V> requires is_mc_nontrivial_vec<V>
+template <typename V> requires is_mc_type_vec<V>
 static inline V &operator%=(V &lhs, const V &v) {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   constexpr auto channels = sizeof(V) / sizeof(E);
   if constexpr (channels > 1) {
     for (int i = 0; i < channels; i++) {
-      if constexpr (std::is_floating_point<E>()) {
-        ((E *)&lhs)[i] = std::fmod(((E *)&lhs)[i], ((const E *)&v)[i]);
-      } else {
-        ((E *)&lhs)[i] %= ((const E *)&v)[i];
-      }
+      ((E *)&lhs)[i] = mc_mod_helper<E>(((E *)&lhs)[i], ((const E *)&v)[i]);
     }
   } else{
     lhs %= v;
   }
   return lhs;
 }
-template <typename V, typename E> requires is_vec_elem_pair<V, E>
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
 static inline V &operator%=(V &lhs, const E &e) {
   return lhs %= default_broadcast<V,E>(e);
 }
-//////////////////////////
-// V(+,-,*,/,%,==,!=,<,<=,>,>=)(V,E)
-// E(+,-,*,/,%,==,!=,<,<=,>,>=)V
 
+template <typename V> requires is_mc_type<V>
+static inline V mc_max(const V &v1, const V &v2) {
+  using E = typename mc_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = std::max<E>(e1[i], e2[i]);
+    }
+    return r;
+  } else{
+    return std::max<V>(v1, v2);
+  }
+}
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
+static inline V mc_max(const V &v1, const E &e2) {
+  return mc_max(v1, default_broadcast<V,E>(e2));
+}
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
+static inline V mc_max(const E &e1, const V &v2) {
+  return mc_max(default_broadcast<V,E>(e1), v2);
+}
+template <typename V> requires is_mc_type<V>
+static inline V mc_min(const V &v1, const V &v2) {
+  using E = typename mc_type<V>::elem_type;
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    const E *e1 = (const E *)&v1, *e2 = (const E *)&v2;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = std::min<E>(e1[i], e2[i]);
+    }
+    return r;
+  } else{
+    return std::min<V>(v1, v2);
+  }
+}
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
+static inline V mc_min(const V &v1, const E &e2) {
+  return mc_min(v1, default_broadcast<V,E>(e2));
+}
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
+static inline V mc_min(const E &e1, const V &v2) {
+  return mc_min(default_broadcast<V,E>(e1), v2);
+}
+template <typename OT, typename IT>
+  requires is_mc_type<OT> && is_mc_type<IT> &&
+           (mc_type<OT>::N == mc_type<IT>::N) &&
+           std::is_convertible_v<typename mc_type<IT>::elem_type, typename mc_type<OT>::elem_type>
+static inline OT mc_cvt(const OT &in) {
+  using OTE = typename mc_type<OT>::elem_type;
+  using ITE = typename mc_type<IT>::elem_type;
+  constexpr auto channels = sizeof(OT) / sizeof(OTE);
+  if constexpr (channels > 1) {
+    OT r;
+    const ITE *ein = (const ITE *)&in;
+    OTE *er = (OTE *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = OTE(ein);
+    }
+    return r;
+  } else{
+    return OTE(in);
+  }
+}
+
+template <typename V, typename E> requires is_mc_vec_elem_pair<V, E>
+static inline V mc_cons(std::function<E(size_t)> func) {
+  constexpr auto channels = sizeof(V) / sizeof(E);
+  if constexpr (channels > 1) {
+    V r;
+    E *er = (E *)&r;
+    for (int i = 0; i < channels; i++) {
+      er[i] = func((size_t)i);
+    }
+    return r;
+  } else{
+    return V(func(0));
+  }
+}
+///////////////////////////////////////////////////////////////////////////////
+// random number generation
+
+struct random_state {
+  std::mt19937 gen;
+
+  explicit random_state() : gen(std::random_device()()) { }
+  explicit random_state(unsigned seed) : gen(seed) { }
+  explicit random_state(const char *seed) {
+    std::string str = seed;
+    std::seed_seq ss(str.begin(), str.end());
+    gen.seed(ss);
+  }
+}; // random_state
+
+// T - element type
+// R - representation type (must be convertible to T)
+//
+// T != R since where missing instances of std::uniform_int_distribution
+// (like int8_t => we use int16_t and convert down)
+template <typename T,typename R = T>
+static void randomize_integral(
+  random_state &rnd,
+  T *vals,
+  size_t nelems,
+  T lo = std::numeric_limits<T>::min(),
+  T hi = std::numeric_limits<T>::max())
+{
+  std::uniform_int_distribution<R> d {R(lo), R(hi)};
+  for (size_t i = 0; i < nelems; i++) {
+    vals[i] = T(d(rnd.gen));
+  }
+}
+
+
+
+
+template <typename T, typename R = T>
+static void randomize_real(
+  random_state &rnd,
+  T *vals,
+  size_t nelems,
+  T lo = T(0.0f),
+  T hi = T(1.0f))
+{
+  std::uniform_real_distribution<R> d {R(lo), R(hi)};
+  for (size_t i = 0; i < nelems; i++) {
+    vals[i] = T(d(rnd.gen));
+  }
+}
+
+// T is the type of the buffer
+// R is the type of the random sequence;
+//   we use a conversion operator to take R to T;
+//
+// Normally R = T, initialize a buffer of floats to
+// random float values, but this enables things like
+// randomizing floats to an integer sequence (each converted to float)
+// for example.
+//
+// In addition, int8_t doesn't have a std::uniform_int_distribution
+// instance.  Hence, one would need to use int16_t or something as
+// the random sequence.
+// template <typename T,typename R = T>
+// static void randomize(random_state &rs, T *vals, size_t elems, R lo, R hi);
+
+//
+// E.g. for float
+//   template <typename T>
+//   static void randomize(T *vals, size_t elems, float lo, float hi) {
+//     randomize_real<T,float>(vals, elems, lo, hi);
+//   }
+
+// TODO: remove this once we have mc_randomize working
+template <typename T, typename R>
+static void randomize(random_state &rs, T *vals, size_t elems, T lo, T hi);
+
+#define RANDOMIZE_INSTANCE2(T,R,DELEGATE)\
+  template <>\
+  static void randomize<T,R>(random_state &rs, T *vals, size_t elems, T lo, T hi) { \
+    DELEGATE<T,R>(rs, vals, elems, lo, hi); \
+  }
+#define RANDOMIZE_INSTANCE(T,DELEGATE)\
+  RANDOMIZE_INSTANCE2(T,T,DELEGATE)
+
+RANDOMIZE_INSTANCE(float, randomize_real)
+RANDOMIZE_INSTANCE(double, randomize_real)
+
+RANDOMIZE_INSTANCE2(int8_t, int16_t, randomize_integral)
+RANDOMIZE_INSTANCE(int16_t, randomize_integral)
+RANDOMIZE_INSTANCE(int32_t, randomize_integral)
+RANDOMIZE_INSTANCE(int64_t, randomize_integral)
+RANDOMIZE_INSTANCE2(uint8_t, uint16_t, randomize_integral)
+RANDOMIZE_INSTANCE(uint16_t, randomize_integral)
+RANDOMIZE_INSTANCE(uint32_t, randomize_integral)
+RANDOMIZE_INSTANCE(uint64_t, randomize_integral)
+
+//////////////////////////////////////////////////////////////
+// generic randomization function for all mincu types
+// D - distribution e.g. std::uniform_int_distribution<int16_t>
+// V - is vector type; e.g. int8_t and int16_t will use above D
+// ER - representation element type
+template <typename V, typename ER, typename D>
+  requires is_mc_type<V>
+static void mc_randomize_with(
+  random_state &rnd,
+  V *vs,
+  size_t nvs,
+  V lo,
+  V hi)
+{
+  using E = typename mc_type<V>::elem_type;
+  const E *los = (const E *)&lo;
+  const E *his = (const E *)&hi;
+
+  // creates per channel std::uniform_{int,real}_distribution<RE>
+  D dists[mc_type<V>::N];
+  for (size_t i = 0; i < mc_type<V>::N; i++) {
+    dists[i] = D(E(los[i]), ER(his[i]));
+  }
+
+  for (size_t i = 0; i < nvs; i++) {
+    E *val_chans = (E *)(vs + i);
+    for (size_t i = 0; i < mc_type<V>::N; i++) {
+      val_chans[i] = E(dists[i](rnd.gen));
+    }
+  }
+}
+
+template <typename V>
+  requires is_mc_type<V>
+static void mc_randomize(
+  random_state &rs,
+  V *vs,
+  size_t nvs,
+  V lo = mc_type<V>::min(),
+  V hi = mc_type<V>::max())
+{
+  using E = typename mc_type<V>::elem_type;
+
+  if constexpr (std::is_same<E,int8_t>()) {
+    // int8_t use rep type of int16_t
+    //   case handles int8_t, char2, char3, char4
+    mc_randomize_with<V, int16_t, std::uniform_int_distribution<int16_t>>(
+        rs, vs, nvs, lo, hi);
+  } else if constexpr (std::is_same<E,uint8_t>()) {
+    // uint8_t use rep type of uint16_t
+    //   case handles uint8_t, uchar2, uchar3, uchar4
+    mc_randomize_with<V, uint16_t, std::uniform_int_distribution<uint16_t>>(
+        rs, vs, nvs, lo, hi);
+  } else if constexpr (std::is_floating_point<E>()) {
+    mc_randomize_with<V, E, std::uniform_real_distribution<E>>(rs, vs, nvs, lo, hi);
+  } else {
+    mc_randomize_with<V, E, std::uniform_int_distribution<E>>(rs, vs, nvs, lo, hi);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// buffer formatting
 
 template <typename V>
 static int default_format_elem_preferred_columns() {
-  using E = typename mc_vec_type<V>::elem_type;
+  using E = typename mc_type<V>::elem_type;
   if constexpr (std::is_floating_point<E>()) {
     return std::numeric_limits<E>::max_digits10;
   } else if constexpr (std::is_signed<E>()) {
@@ -901,10 +1099,6 @@ static int default_format_elem_preferred_columns() {
   }
 }
 
-
-
-///////////////////////////////////////////////////////////////////////////////
-// buffer formatting
 
 template <typename T>
 static void format_buffer(
@@ -994,7 +1188,9 @@ template <typename E>
 struct arith_seq {
   const E seq_init, seq_delta;
   const std::optional<E> seq_mod;
-  arith_seq(E _init, E _delta = E(broadcast<E>(mc_vec_type<E>::elem_type(1))), std::optional<E> mod = std::nullopt)
+  arith_seq(E _init = mc_type<E>::bcast(0),
+            E _delta = mc_type<E>::bcast(1),
+            std::optional<E> mod = std::nullopt)
       : seq_init(_init), seq_delta(_delta), seq_mod(mod)
   {
     if (mod && *mod == zero<E>())
@@ -1008,12 +1204,7 @@ struct arith_seq {
     auto next_val =
         [&]() {
           if (seq_mod) {
-            if constexpr (std::is_floating_point<E>::value) {
-              // FIXME: need float vector mod support
-              val = std::fmod(val, *seq_mod);
-            } else {
-              val %= *seq_mod;
-            }
+            val = mc_mod<E>(val, *seq_mod);
           }
           return val;
         };
@@ -1052,24 +1243,31 @@ struct cyc_seq {
 // E - the element type
 // R - representation type (usually the same)
 //    e.g. E=half uses R=float;  E=int8_t uses R=int16_t
-template <typename E, typename R = E>
+template <typename E>
+  requires is_mc_type<E>
 struct rnd_seq {
-  const mincu::random_state rndst;
+  mincu::random_state &rndst;
   const E rnd_lo, rnd_hi;
 
   rnd_seq(
-      const mincu::random_state &_rndst,
-      E _rnd_lo = std::numeric_limits<E>::min(),
-      E _rnd_hi = std::numeric_limits<E>::max())
+      mincu::random_state &_rndst,
+      E _rnd_lo = mc_type<E>::min(),
+      E _rnd_hi = mc_type<E>::max())
     : rndst(_rndst), rnd_lo(_rnd_lo), rnd_hi(_rnd_hi) { }
 
   void apply(E *vals, size_t n) const {
-    mincu::random_state tmp = rndst; // make copy (randomize advances state)
-    mincu::random_state &tmpr = tmp;
-    randomize<E,R>(tmpr, vals, n, rnd_lo, rnd_hi);
+    mc_randomize<E>(rndst, vals, n, rnd_lo, rnd_hi);
   }
 }; // rnd_seq
 
+// TODO: other possible sequences.
+//  - derived seqs:
+//     * alt_seq(seq1,seq2) flips between them
+//     * sub_seq
+//     * map_seq
+//     * fold_seq
+//  - file_seq reads from a file with optional (stoff, len)
+//
 
 ///////////////////////////////////////////////////////////////////////////////
 // umem - unified memory buffer
