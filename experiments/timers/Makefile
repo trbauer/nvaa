@@ -1,7 +1,7 @@
 ARCH=sm_75
 WORKLOAD=timers
 # NVCC_EXTRA_FLAGS=--expt-relaxed-constexpr
-NVCC_EXTRA_FLAGS=
+NVCC_EXTRA_FLAGS=-std=c++20
 
 help:
 	@echo make  exe

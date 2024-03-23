@@ -107,13 +107,16 @@ static inline std::string fmt_hex(T t, int digs = -1) {
   fmt_hex(ss, t, digs);
   return ss.str();
 }
+
 template <typename T>
+concept is_not_fp = !std::is_floating_point_v<T>;
+
+template <typename T>
+  requires is_not_fp<T>
 static inline std::string fmt_dec(T t, int cw = -1) {
   if (sizeof(t) == 1) {
     if constexpr (std::is_signed<T>()) {
       return fmt_dec((int16_t)t, cw); // avoid alphachar
-    } else if constexpr (std::is_floating_point<T>()) {
-      static_assert("whoops: fmt_dec called on a floating point type");
     } else {
       return fmt_dec((uint16_t)t, cw); // avoid alphachar
     }
@@ -1136,7 +1139,8 @@ struct cyc_seq {
 // R - representation type (usually the same)
 //    e.g. E=half uses R=float;  E=int8_t uses R=int16_t
 template <typename E>
-  requires is_mc_type<E>
+// the requires breaks umem of custom types (e.g. tstamps)
+//  requires is_mc_type<E>
 struct rnd_seq {
   mincu::random_state &rndst;
   const E rnd_lo, rnd_hi;

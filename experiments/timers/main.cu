@@ -332,6 +332,10 @@ static int query_nsmid()
 {
   umem<int> nsmid_buf(1);
   glob_get_nsmid<<<1,1>>>(nsmid_buf);
+  auto e = cudaDeviceSynchronize();
+  if (e != cudaSuccess) {
+    fatal(cudaGetErrorName(e), " (" ,cudaGetErrorString(e), "): unexpected error");
+  }
   return nsmid_buf[0];
 }
 
@@ -522,12 +526,15 @@ static void test_delayed_clock64(int s)
   std::cout << "clock64(): " << std::setw(18) << ts[0].ticks << "\n";
 }
 
-static void test_print_clocks(int startup_delay)
+static void test_print_clocks(int startup_delay_s)
 {
-  // stall, then init and call clock64
-  // we should see about the same satartup time
-  if (startup_delay > 0)
-    std::this_thread::sleep_for(std::chrono::seconds(startup_delay));
+  // Execute this exe multiple times via script to show that the device clock is
+  // counting coherently across processes.
+  //
+  // Stall, then init and call clock64
+  // we should see about the same startup time
+  if (startup_delay_s > 0)
+    std::this_thread::sleep_for(std::chrono::seconds(startup_delay_s));
 
   umem<tstamps> ts(1);
   glob_get_times<<<1,1>>>(ts);
