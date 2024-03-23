@@ -185,29 +185,6 @@ static void fatal(Ts...ts) {
     } \
   } while(0)
 
-
-///////////////////////////////////////////////////////////////////////////////
-// vector instances
-//   e.g. int2, int3, int4, float2, float3, float4
-//
-// This is harder becuase our bounds were our overload ranges.
-// template <typename T>
-// static void randomize(T ## N *vals, size_t elems, RCAST_TO lo, RCAST_TO hi) {...}
-// splicing T ## N creates nonsensical T4 for float 4.
-// We need RCAST_TO to be float4 to follow the pattern.
-//
-// E.g. float2 is RANDOMIZE_VECTOR_INSTANCE(float,2,randomize_real)
-// #define RANDOMIZE_VECTOR_INSTANCE2(RCAST_TO,RSEQ,N,DELEGATE)\
-//   template <typename T>\
-//   static void randomize(T ## N *vals, size_t elems, RCAST_TO lo, RCAST_TO hi) {\
-//     DELEGATE<T,RSEQ>(&vals[0].x, N*elems, lo, hi); \
-//   }
-// #define RANDOMIZE_VECTOR_INSTANCE(R,N,DELEGATE)\
-//   RANDOMIZE_VECTOR_INSTANCE2(R,R,N,DELEGATE)
-//
-// float2
-// RANDOMIZE_VECTOR_INSTANCE(float,2,randomize_real)
-
 // broadcast conversion
 // static inline operator float2(float x) const { return make_float2(x, x); }
 struct frac {
@@ -533,7 +510,6 @@ struct mc_elem_type {
 
 ////////////////////////////////////////////////
 //
-
 MAKE_MC_TYPE(uint8_t, uchar)
 MAKE_MC_TYPE(uint16_t, ushort)
 MAKE_MC_TYPE(uint32_t, uint)
@@ -548,13 +524,11 @@ MAKE_MC_TYPE(float, float)
 MAKE_MC_TYPE(double, double)
 
 
+//////////////////////////////////////////////////////////
+// My first attempt at using concepts.
 template <typename V, typename E>
 concept is_mc_vec_elem_pair = std::is_same_v<E,typename mc_type<V>::elem_type>;
 
-// (Not sure how to do this)
-// Want to constrain generic things like == to my set of operations above.
-//  - I don't want to override == on int, for example.
-//  - I don't want std::string blowing up in the middle of this.
 template <typename V>
 concept is_mc_type_vec =
   !std::is_same_v<V,typename mc_type<V>::elem_type>;
@@ -942,88 +916,6 @@ struct random_state {
   }
 }; // random_state
 
-// T - element type
-// R - representation type (must be convertible to T)
-//
-// T != R since where missing instances of std::uniform_int_distribution
-// (like int8_t => we use int16_t and convert down)
-template <typename T,typename R = T>
-static void randomize_integral(
-  random_state &rnd,
-  T *vals,
-  size_t nelems,
-  T lo = std::numeric_limits<T>::min(),
-  T hi = std::numeric_limits<T>::max())
-{
-  std::uniform_int_distribution<R> d {R(lo), R(hi)};
-  for (size_t i = 0; i < nelems; i++) {
-    vals[i] = T(d(rnd.gen));
-  }
-}
-
-
-
-
-template <typename T, typename R = T>
-static void randomize_real(
-  random_state &rnd,
-  T *vals,
-  size_t nelems,
-  T lo = T(0.0f),
-  T hi = T(1.0f))
-{
-  std::uniform_real_distribution<R> d {R(lo), R(hi)};
-  for (size_t i = 0; i < nelems; i++) {
-    vals[i] = T(d(rnd.gen));
-  }
-}
-
-// T is the type of the buffer
-// R is the type of the random sequence;
-//   we use a conversion operator to take R to T;
-//
-// Normally R = T, initialize a buffer of floats to
-// random float values, but this enables things like
-// randomizing floats to an integer sequence (each converted to float)
-// for example.
-//
-// In addition, int8_t doesn't have a std::uniform_int_distribution
-// instance.  Hence, one would need to use int16_t or something as
-// the random sequence.
-// template <typename T,typename R = T>
-// static void randomize(random_state &rs, T *vals, size_t elems, R lo, R hi);
-
-//
-// E.g. for float
-//   template <typename T>
-//   static void randomize(T *vals, size_t elems, float lo, float hi) {
-//     randomize_real<T,float>(vals, elems, lo, hi);
-//   }
-
-// TODO: remove this once we have mc_randomize working
-template <typename T, typename R>
-static void randomize(random_state &rs, T *vals, size_t elems, T lo, T hi);
-
-#define RANDOMIZE_INSTANCE2(T,R,DELEGATE)\
-  template <>\
-  static void randomize<T,R>(random_state &rs, T *vals, size_t elems, T lo, T hi) { \
-    DELEGATE<T,R>(rs, vals, elems, lo, hi); \
-  }
-#define RANDOMIZE_INSTANCE(T,DELEGATE)\
-  RANDOMIZE_INSTANCE2(T,T,DELEGATE)
-
-RANDOMIZE_INSTANCE(float, randomize_real)
-RANDOMIZE_INSTANCE(double, randomize_real)
-
-RANDOMIZE_INSTANCE2(int8_t, int16_t, randomize_integral)
-RANDOMIZE_INSTANCE(int16_t, randomize_integral)
-RANDOMIZE_INSTANCE(int32_t, randomize_integral)
-RANDOMIZE_INSTANCE(int64_t, randomize_integral)
-RANDOMIZE_INSTANCE2(uint8_t, uint16_t, randomize_integral)
-RANDOMIZE_INSTANCE(uint16_t, randomize_integral)
-RANDOMIZE_INSTANCE(uint32_t, randomize_integral)
-RANDOMIZE_INSTANCE(uint64_t, randomize_integral)
-
 //////////////////////////////////////////////////////////////
 // generic randomization function for all mincu types
 // D - distribution e.g. std::uniform_int_distribution<int16_t>
@@ -1182,7 +1074,7 @@ struct const_seq {
 };
 
 // bounded linear arithmetic sequence
-//   x[i] = (x[i-1] + seq_delta)            [ when seq_mod == 0 ]
+//   x[i] = (x[i-1] + seq_delta)            [ when seq_mod absent ]
 //   x[i] = (x[i-1] + seq_delta) % seq_mod  [ when seq_mod != 0 ]
 template <typename E>
 struct arith_seq {
