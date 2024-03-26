@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head><title>Matrix Multiply</title></head>
+<style>
+span.nt { /* variable */
+  color:rgb(128,92,255);
+  font:italic large monospace;
+}
+span.te { /* terminal */
+  color:rgb(128,32,92);
+  font:large monospace;
+}
+span.me { /* meta */
+  color:rgb(128,192,255);
+  font:italic large monospace;
+}
+</style>
+
+
+<body onload="addPanel()">
+
+
+<div id="main-panel">
+<!-- JS adds panels here -->
+</div>
+
+
+
+<script>
+function buildSvg(dims)
+{
+  // TODO:
+  // https://developer.nvidia.com/blog/cutlass-linear-algebra-cuda/
+
+  // D = A * B + D
+  // D = A * B
+  //
+  //       D      =      A    x      B
+  //
+  //  M             M
+  //  ^ ........     ^ .....     K
+  //  | ........     | .....     ^ ........
+  //  | ........  =  | .....     | ........
+  //  | ........     | .....  x  | ........
+  //  | ........     | .....     v ........
+  //  v ........     v .....       <------> N
+  //    <------> N     <---> K
+
+
+  // NEW LAYOUT
+  //
+  //             <------> N
+  //           ^ ........
+  //           | ........
+  //           | ........
+  //           v ........
+  //           K
+  //                ||
+  //                vv
+  //  M
+  //  ^ .....    ........
+  //  | .....    ........
+  //  | ..... => ........
+  //  | ..... => ........
+  //  | .....    ........
+  //  v .....    ........
+  //    <---> K
+
+  console.log(dims)
+
+  const elem_px = 16, ind = 16, mat_spacing = 32
+  const Dw = dims.M * elem_px
+  const Dh = dims.N * elem_px
+  const Aw = dims.K * elem_px
+  const Ah = dims.M * elem_px
+  const Bw = dims.N * elem_px
+  const Bh = dims.K * elem_px
+
+  function elem(id, x_off, y_off, fill) {
+    const s =
+      "<rect" +
+      " id=\"" + id + "\"" +
+      " x=\"" + x_off + "\"" +
+      " y=\"" + y_off + "\"" +
+      " width=\"" + (elem_px - 1) + "\"" +
+      " height=\"" + (elem_px - 1) + "\"" +
+      " fill=\"" + fill + "\"" +
+      " stroke=\"black\"" +
+      ">" +
+      "<title>" + id + "</title>" +
+      "</rect>\n"
+    return s
+  }
+
+  function drawText(str, x_off, y_off, style, height) {
+    let s =
+      "<text" +
+      " x=\"" + x_off + "\"" +
+      " y=\"" + (y_off + height + 1) + "\"" +
+      " style=\"" + style + ";font-size:" + height + "\">" + str + "</text>"
+    return s
+  }
+
+  var svg = ""
+
+  // D matrix
+  for (var m = 0; m < dims.M; m++) {
+    for (var n = 0; n < dims.N; n++) {
+      const x_off = n * elem_px + ind
+      const y_off = m * elem_px + ind
+      const id = "D." + n + "." + m
+      svg += elem(id, x_off, y_off, "rgb(224,224,255)")
+    }
+  }
+
+  svg += drawText("=",
+                  ind + Dw + mat_spacing / 2 - 4,
+                  Dh / 2, "font-family:monospace", 16)
+
+  // A matrix
+  for (var m = 0; m < dims.M; m++) {
+    for (var k = 0; k < dims.K; k++) {
+      const x_off = k * elem_px + ind + Dw + mat_spacing
+      const y_off = m * elem_px + ind
+      const id = "A." + m + "." + k
+      svg += elem(id, x_off, y_off, "rgb(255,224,224)")
+    }
+  }
+
+  svg += drawText("x",
+                  ind + Dw + mat_spacing + Aw + mat_spacing / 2 - 4,
+                  Dh / 2, "font-family:monospace", 16)
+
+  // B matrix
+  for (var k = 0; k < dims.K; k++) {
+    for (var n = 0; n < dims.N; n++) {
+      const x_off = n * elem_px + ind + Dw + mat_spacing + Aw + mat_spacing
+      const y_off = k * elem_px + ind
+      const id = "B." + k + "." + n
+      svg += elem(id, x_off, y_off, "rgb(224,255,224)")
+    }
+  }
+
+  const W = ind + Dw + mat_spacing + Aw + mat_spacing + Bw + ind
+  const H = ind + Math.max(Dh, Ah, Bh) + ind
+  const full_svg =
+    "<svg " +
+      "width=\"" + W + "\" " +
+      "height=\"" + H + "\">\n"
+    + svg +
+    "</svg>\n"
+
+  return {src:full_svg, bind_listeners:function() {
+            console.log("TODO: bind listeners")
+            for (var m = 0; m < dims.M; m++) {
+              for (var n = 0; n < dims.N; n++) {
+                const d_id = "D." + n + "." + m
+                const d_elem = document.getElementById(d_id)
+                d_elem.a_row = []
+                for (var k = 0; k < dims.K; k++) {
+                  const a_id = "A." + m + "." + k
+                  const a_elem = document.getElementById(a_id)
+                  d_elem.a_row.push(a_elem)
+                }
+                d_elem.b_col = []
+
+                for (var k = 0; k < dims.K; k++) {
+                  const b_id = "B." + k + "." + n
+                  const b_elem = document.getElementById(b_id)
+                  d_elem.b_col.push(b_elem)
+                }
+
+                d_elem.addEventListener("mouseenter", function(e) {
+                  e.currentTarget.style.stroke = "red"
+                  e.currentTarget.a_row.forEach(function(a_elem) {
+                     a_elem.style.stroke = "red";
+                   });
+                  e.currentTarget.b_col.forEach(function(b_elem) {
+                     b_elem.style.stroke = "red";
+                   });
+                })
+                d_elem.addEventListener("mouseleave", function(e) {
+                  e.currentTarget.style.stroke = "black"
+                  e.currentTarget.a_row.forEach(function(a_elem) {
+                     a_elem.style.stroke = "black";
+                   });
+                  e.currentTarget.b_col.forEach(function(b_elem) {
+                     b_elem.style.stroke = "black";
+                   });
+                })
+              }
+            }
+          }}
+} // buildSvg()
+
+// m512n512k512,m64n256k16
+// input {m:512,k:512,n:512}
+function parseDims(input)
+{
+  // console.log(input)
+  //
+  var off = 0
+  function eof() {return off >= input.length}
+  function skip(n) {off += n}
+  function parseError(msg) {
+    throw Error(input.substr(off) + ": " + msg)
+  }
+  function lookingAt(pfx) {
+    return input.indexOf(pfx, off) == off
+  }
+  function consumeIf(pfx) {
+    if (lookingAt(pfx)) {
+      skip(pfx.length)
+      return true
+    }
+    return false
+  }
+  function consume(pfx) {
+    if (!consumeIf(pfx)) {
+      parseError("expected " + pfx)
+    }
+  }
+  function consumeInt() {
+    var i = 0
+    if (eof() || !(input[off + i] >= '0' && input[off + i] <= '9')) {
+      parseError("expected int")
+    }
+    i++
+    while (off + i < input.length &&
+        (input[off + i] >= '0' && input[off + i] <= '9'))
+    {
+      i++
+    }
+    var s = input.substr(off, i)
+    skip(i)
+    return parseInt(s)
+  }
+  consume("m")
+  const m = consumeInt()
+  consume("n")
+  const n = consumeInt()
+  consume("k")
+  const k = consumeInt()
+  return {"M":m,"N":n,"K":k}
+}
+
+var next_id = 0
+
+// m64n256k16
+const GOOD_EXAMPLES = [
+  {input:"m16n16k8"},
+  {input:"m16n16k24"},
+  {input:"m16n16k16"},
+//  {input:"m32n32k32"},
+//  {input:"m64n64k64"},
+//  {input:"m512n512k512,m64n256k16"} (blows up my machine)
+];
+
+function addPanel()
+{
+  const main = document.getElementById("main-panel")
+
+  const our_id = next_id++
+  const example = GOOD_EXAMPLES[our_id % GOOD_EXAMPLES.length].input
+
+  var new_input =
+    "<hr />\n" +
+    "<input type=\"text\" id=\"input" + our_id + "\" value=\"" + example + "\"></input>\n" +
+    "<input type=\"button\" onclick='writeSvgTo(\"" + our_id + "\",false)' value=\"Draw Matrix\"/>\n" +
+    "<input type=\"button\" onclick='writeSvgTo(\"" + our_id + "\",true)' value=\"Draw Matrix Source\"/>\n" +
+    "<div id=\"img-output" + our_id + "\" style=\"border:solid black 1px\">\n" +
+    "Output " + our_id + "\n" +
+    "</div>\n" +
+    "<pre id=\"svg-output" + our_id + "\">SVG</pre>\n"
+  var new_div = document.createElement("div")
+  new_div.innerHTML = new_input
+
+  main.appendChild(new_div);
+
+  var inp = document.getElementById("input" + our_id)
+  const arg = "" + our_id;
+  inp.addEventListener("keyup", function(e) {
+    if (e.keyCode === 13) { // enter key
+      e.preventDefault();
+      writeSvgTo(arg, false)
+    }
+  });
+}
+
+function writeSvgTo(our_id, show_src) {
+  // console.log("writeSvgTo("+our_id+","+show_src+")")
+  // var check_restrictions = document.getElementById("check-restrictions" + our_id).checked
+  var input = document.getElementById("input" + our_id)
+  var img_output = document.getElementById("img-output" + our_id)
+  var svg_output = document.getElementById("svg-output" + our_id)
+
+  img_output.innerHTML = ""
+  svg_output.innerText = ""
+
+  const input_str = input.value
+  if (input.length == 0) {
+    return;
+  }
+
+  var svg_obj = null
+  var svg_src = "?";
+  try {
+    const dims = parseDims(input_str)
+    svg_obj = buildSvg(dims)
+    svg_src = svg_obj.src
+  } catch (e) {
+    if (e instanceof Error) {
+      svg_src = "<span style=\"color:red\">" + e.message + "</span>"
+      console.log(e.stack)
+    } else {
+      svg_src = "" + e
+    }
+  }
+
+  if (show_src) {
+    svg_output.innerText = svg_src
+  } else {
+    img_output.innerHTML = svg_src
+    if (svg_obj != null) {
+      svg_obj.bind_listeners()
+    }
+  }
+}
+
+</script>
+
+</body>
+</html>
