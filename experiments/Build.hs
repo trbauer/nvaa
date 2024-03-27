@@ -18,9 +18,12 @@ import System.IO
 import System.Process
 import Text.Printf
 import qualified Data.Set as DS
+import qualified Data.Map.Strict as DM
 import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 
--- TODO: extra args to nvcc or args to exe (override things like C++ std if present)
+-- TODO: abort later targets if dependent target fails
+-- TODO: honor config files in dir (instead of .cu)
+--       to allow for multiple targets in a directory
 -- TODO: -q hides everything except errors
 --       -v=0 shows only modified changes
 --       -v=1 shows success steps (e.g. skipped)
@@ -54,6 +57,7 @@ data Opts =
   , oClobber :: !Bool
   , oCmake :: !Bool
   , oDryRun :: !Bool
+  , oFailFast :: !Bool
   , oKeep :: !Bool
   , oKeepInlines :: !Bool
   , oVerbosity :: !Int
@@ -70,6 +74,7 @@ dft_opts =
   , oClobber = False
   , oCmake = False
   , oDryRun = False
+  , oFailFast = True
   , oKeep = False
   , oKeepInlines = True
   , oVerbosity = 0
@@ -99,7 +104,7 @@ dft_artifact_kinds = [ArtifactKindEXE,ArtifactKindSASS,ArtifactKindPTX]
 fmtArtifactKind :: ArtifactKind -> String
 fmtArtifactKind = drop (length "ArtifactKind") . map toLower . show
 fmtArtifact :: Artifact -> String
-fmtArtifact (ak,path,sm) = path ++ ":" ++ fmtArtifactKind ak ++ sm
+fmtArtifact (ak,path,sm) = path ++ ":" ++ fmtArtifactKind ak ++ ":" ++ sm
 
 
 parseOpts :: Opts -> [String] -> IO Opts
@@ -120,6 +125,7 @@ parseOpts os (a:as)
       "      --cmake                 setup cmake files and a VS solution for all target/architecture pairs\n" ++
       "                              (clobber stomps old files here)\n" ++
       "   -d/--dry-run               don't actually execute the operation\n" ++
+      "   -F/--no-fail-fast          don't fail fast\n" ++
       "   -k/--keep                  keep intermediate files (e.g. raw asm)\n" ++
       "   --keep-inlines             keeps inline info in SASS\n" ++
       "   -q/-v/-v2/-v=INT           sets the verbosity\n" ++
@@ -160,6 +166,7 @@ parseOpts os (a:as)
   | a `elem` ["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["-d","--dry-run"] = nextArg os {oDryRun = True}
+  | a `elem` ["-F","--no-fail-fast"] = nextArg os {oFailFast = False}
   | a `elem` ["-c","--clobber"] = nextArg os {oClobber = True}
   | a `elem` ["-k","--keep"] = nextArg os {oKeep = True}
   | a `elem` ["--keep-inlines"] = nextArg os {oKeepInlines = True}
@@ -285,7 +292,7 @@ checkTools vrb = do
       handler_cl _ = do
         fatal $ "cannot find cl.exe in %PATH%.  Did you run setupvs.bat (or vcvarsall.bat)?"
         return ()
-  -- frickin cl.exe emits a banner to stderr! /NOBANNER would've worked
+  -- frickin cl.exe emits a banner to stderr!
   (readProcessWithExitCode "cl.exe" [] "" >> return ()) `catch` handler_cl
 
   let handler_nva :: SomeException -> IO ()
@@ -417,22 +424,7 @@ makePlan as =
   where collect_implicit :: DS.Set Artifact -> [Artifact] -> [Artifact]
         collect_implicit s [] = DS.toList s
         collect_implicit s (a:as) = collect_implicit s1 as
-          where s1 = s`DS.union`DS.fromList (artifact_dependents_tc a)
-
-        -- tc is transitive closure
-        dependents_tc :: ArtifactKind -> [ArtifactKind]
-        dependents_tc a =
-          case a of
-            ArtifactKindEXE -> []
-            ArtifactKindSASS -> [ArtifactKindCUBIN]
-            ArtifactKindSASSG -> [ArtifactKindCUBIN]
-            ArtifactKindSASSP -> [ArtifactKindCUBIN]
-            ArtifactKindPTX -> []
-            ArtifactKindCUBIN -> []
-
-        artifact_dependents_tc :: Artifact -> [Artifact]
-        artifact_dependents_tc (ak,fp,sm) =
-          map (\ak1 -> (ak1,fp,sm)) (dependents_tc ak)
+          where s1 = s`DS.union`DS.fromList (a_dependents_tc a)
 
         build_ordering :: DS.Set Artifact -> [[Artifact]] -> [Artifact] -> [[Artifact]]
         build_ordering s_done rsteps [] = reverse rsteps
@@ -445,8 +437,21 @@ makePlan as =
                 where s_done1 = s_done`DS.union`DS.fromList this_phase
             where a_ready :: Artifact -> Bool
                   a_ready a = all (`DS.member`s_done) deps
-                      where deps = artifact_dependents_tc a
+                      where deps = a_dependents_tc a
 
+a_dependents_tc :: Artifact -> [Artifact]
+a_dependents_tc (ak,fp,sm) =
+    map (\ak1 -> (ak1,fp,sm)) (dependents_tc ak)
+  -- tc is transitive closure
+  where dependents_tc :: ArtifactKind -> [ArtifactKind]
+        dependents_tc a =
+          case a of
+            ArtifactKindEXE -> []
+            ArtifactKindSASS -> [ArtifactKindCUBIN]
+            ArtifactKindSASSG -> [ArtifactKindCUBIN]
+            ArtifactKindSASSP -> [ArtifactKindCUBIN]
+            ArtifactKindPTX -> []
+            ArtifactKindCUBIN -> []
 
 -- (inputs, outputs) of a phase
 -- is_for_clean means to include stuff that might not matter like .lib files
@@ -484,38 +489,34 @@ a_inputs_outputs is_for_clean (ak,fp,sm) = do
         usesMincuHpp :: FilePath -> IO Bool
         usesMincuHpp fp = do
           flns <- lines <$> readFile fp
-          let incl_pfx = ["#include","\"mincu.hpp\""] -- other crap could follow
+          let incl_pfx = ["#include", "\"mincu.hpp\""] -- other crap could follow
           return $ any ((incl_pfx`isPrefixOf`) . words) flns
 
 
+
+type BuildMap = DM.Map Artifact TaskResult
+
 executePlan :: Opts -> [[Artifact]] -> IO ()
-executePlan os ass = executeStep 0 ass
-  where executeStep :: Int -> [[Artifact]] -> IO ()
-        executeStep _ [] = return ()
-        executeStep n (as:ass) = do
+executePlan os ass = executeStep DM.empty 0 ass
+  where executeStep :: BuildMap -> Int -> [[Artifact]] -> IO ()
+        executeStep _ _ [] = return ()
+        executeStep bm n (as:ass) = do
             when (oVerbosity os >= 1) $
               putStrLn $ "========== executing step " ++ show n ++ " ..."
-            mapM_ execSerial as
-            executeStep (n + 1) ass
-        execSerial a = do
-          emitTitle a >> hFlush stdout
-          (tr,dio) <- executeArtifact os a
-          processTaskResult (tr,dio)
+            trs <- mapM (execSerial bm) as
+            let bm1 = foldl' (\bm (a,tr) -> DM.insert a tr bm) bm (zip as trs)
+            executeStep bm1 (n + 1) ass
 
-        emitTitle :: Artifact -> IO ()
-        emitTitle a = putStr $ printf "%-48s" (fmtArtifact a ++ ":")
-
-        processTaskResult :: (TaskResult,IORef (IO ())) -> IO ()
-        processTaskResult (tr,dio) = do
-          case tr of
-            TaskResultNOP -> putStrGreen "up to date" >> putStrLn ""
-            TaskResultUPDATED msg -> putStrGreen ("success") >> putStrLn maybe_verb
-              where maybe_verb
-                      | oVerbosity os >= 1 = " (" ++ msg ++ ")"
-                      | otherwise = ""
-            TaskResultERROR err -> putStrRed ("error: " ++ err) >> putStrLn ""
-          io <- readIORef dio
-          io
+        execSerial :: BuildMap -> Artifact -> IO TaskResult
+        execSerial bm a = do
+          when (oVerbosity os >= 0) $
+            emitTitle a >> hFlush stdout
+          (tr,dio) <- executeArtifact os bm a
+          emitTaskResult a (tr,dio)
+          when (oFailFast os && trFailed tr) $ do
+            putStrRed "(failing fast)\n"
+            exitFailure
+          return tr
 
         -- execParallel as = do
         --    mvs <- mapM newEmptyMVar [0 .. length as - 1]
@@ -524,26 +525,73 @@ executePlan os ass = executeStep 0 ass
         --    a_trs <- zip as <$> mapM takeMVar mvs
         --  iterate the results
         --  for each \(a,(tr,dio))
-        --    emitTitle a >> processTaskResult (tr,dio)
+        --    emitTitle a >> emitTaskResult (tr,dio)
+        --  if any of the tr is TaskResultERROR, then exitFailure
+
+        emitTitle :: Artifact -> IO ()
+        emitTitle a = putStrCyan $ printf "%-48s" (fmtArtifact a ++ ":")
+
+        -- emit the deferred I/O and list the result
+        emitTaskResult :: Artifact -> (TaskResult,IORef (IO ())) -> IO ()
+        emitTaskResult a (tr,dio) = do
+          when (oVerbosity os >= 0 || trFailed tr) $ do
+            when (oVerbosity os < 0) $ -- parent won't print it otherwise
+              emitTitle a
+            case tr of
+              TaskResultNOP -> putStrGreen "up to date" >> putStrLn ""
+              TaskResultUPDATED msg -> putStrGreen ("success") >> putStrLn maybe_verb
+                where maybe_verb
+                        | oVerbosity os >= 1 = " (" ++ msg ++ ")"
+                        | otherwise = ""
+              TaskResultABORTED err -> putStrDarkRed ("aborted: " ++ err) >> putStrLn ""
+              TaskResultERROR err -> putStrRed ("error: " ++ err) >> putStrLn ""
+              TaskResultINTERNAL err -> putStrDarkRed ("internal error: " ++ err) >> putStrLn ""
+          io <- readIORef dio
+          io
+
 
 data TaskException = TaskException !String deriving (Show,Typeable)
 instance Exception TaskException
 
 data TaskResult =
     TaskResultNOP
-  | TaskResultUPDATED !String
-  | TaskResultERROR !String
+  | TaskResultUPDATED   !String
+  | TaskResultABORTED   !String
+  | TaskResultERROR     !String
+  | TaskResultINTERNAL  !String -- internal error
   deriving (Show,Eq)
+trFailed :: TaskResult -> Bool
+trFailed tr =
+  case tr of
+    TaskResultERROR _ -> True
+    TaskResultABORTED _ -> True
+    TaskResultINTERNAL _ -> True
+    _ -> False
 
-executeArtifact :: Opts -> Artifact -> IO (TaskResult,IORef (IO ()))
-executeArtifact os a = do
+
+executeArtifact :: Opts -> BuildMap -> Artifact -> IO (TaskResult,IORef (IO ()))
+executeArtifact os bm a = do
   dio <- newIORef (return ())
-  let handle_te :: TaskException -> IO TaskResult
-      handle_te (TaskException msg) = return $ TaskResultERROR msg
-  let handle_other :: SomeException -> IO TaskResult
-      handle_other se = return $ TaskResultERROR (show se)
-  tr <- executeArtifactWithDefIo os a dio `catch` handle_te `catch` handle_other
-  return (tr,dio)
+  case aFailedPrereqs bm a of
+    [] -> do
+      let handle_te :: TaskException -> IO TaskResult
+          handle_te (TaskException msg) = return $ TaskResultERROR msg
+      let handle_other :: SomeException -> IO TaskResult
+          handle_other se = return $ TaskResultERROR (show se)
+      tr <- executeArtifactWithDefIo os a dio `catch` handle_te `catch` handle_other
+      return (tr,dio)
+    as -> return (TaskResultABORTED failed,dio)
+      where failed = "prereqs failed: " ++ intercalate ", " (map fmtArtifact as)
+
+aFailedPrereqs :: BuildMap -> Artifact -> [Artifact]
+aFailedPrereqs bm a =
+    filter aFailed (a_dependents_tc a)
+  where aFailed a =
+          case a`DM.lookup`bm of
+            Just tr -> trFailed tr
+            Nothing -> error "INTERNAL ERROR: no TaskResult for prereq!"
+
+
 
 executeArtifactWithDefIo :: Opts -> Artifact -> IORef (IO ()) -> IO TaskResult
 executeArtifactWithDefIo os a dio = do
@@ -641,9 +689,7 @@ callExeG os dio exe as m_oup_fp inp = do
                 "  >> exited " ++ show ec ++ "\n" ++
                 "ERR:\n" ++ err ++ "\n" ++
                 "OUT:\n" ++ out ++ "\n"
-        io <- readIORef dio
-        io
-        throwIO $ TaskException "error calling child process"
+        throwIO $ TaskException (takeFileName exe ++ " failed")
 
 buildArtifact :: Opts -> IORef (IO ()) -> Artifact -> IO ()
 buildArtifact os dio a@(ak,fp,arch) = do
@@ -760,10 +806,14 @@ buildArtifact os dio a@(ak,fp,arch) = do
 
 putStrRed :: String -> IO ()
 putStrRed = hPutVivid SCA.Red stdout
+putStrDarkRed :: String -> IO ()
+putStrDarkRed = hPutDull SCA.Red stdout
 putStrGreen :: String -> IO ()
 putStrGreen = hPutVivid SCA.Green stdout
 putStrYellow :: String -> IO ()
 putStrYellow = hPutVivid SCA.Yellow stdout
+putStrCyan :: String -> IO ()
+putStrCyan = hPutVivid SCA.Cyan stdout
 --
 hPutVivid :: SCA.Color -> Handle -> String -> IO ()
 hPutVivid = hPutColor SCA.Vivid
