@@ -3,6 +3,7 @@ module NVT.RawInst where
 import NVT.Bits
 import NVT.CUDASDK
 import NVT.Floats
+import NVT.Fmt
 import NVT.Lop3
 import NVT.Opts
 -- import NVT.Parsers.Parser
@@ -46,35 +47,6 @@ data SampleInst =
   } deriving Show
 
 
-
-data FmtSpan =
-  FmtSpan {
-    fsStyle :: !String
-  , fsText :: !String
-  } deriving Show
--- infixl 5 <+>
--- (<+>) :: FmtSpan -> FmtSpan -> [FmtSpan]
--- (<+>) = \a b -> [a,b]
-
-fssSimplify :: [FmtSpan] -> [FmtSpan]
-fssSimplify [] = []
-fssSimplify (FmtSpan "" "":fss) = fss
-fssSimplify (FmtSpan s1 t1:FmtSpan s2 t2:fss)
-  | s1 == s2 = fssSimplify (FmtSpan s1 (t1++t2):fss)
-fssSimplify (fs:fss) = fs:fssSimplify fss
-
-fssToString :: [FmtSpan] -> String
-fssToString = concatMap fsText
-
-fssLength :: [FmtSpan] -> Int
-fssLength = sum . map (length . fsText)
-
-fssPadR :: Int -> [FmtSpan] -> [FmtSpan]
-fssPadR k fss
-  | len >= k = fss
-  | otherwise = fss ++ [FmtSpan "" (replicate (k - len) ' ')]
-  where len = fssLength fss
-
 fmtRawInst :: RawInst -> String
 fmtRawInst = fmtRawInstWith dft_fos
 fmtRawInstWith :: FmtOpts -> RawInst -> String
@@ -115,20 +87,51 @@ dft_fos =
   , foShortHand = True
   }
 
--- currently returns formats
---  "o" -> the mnemonic
---  "s" -> subop (options)
---  "n" -> name (register, label, or otherwise)
---  "p" -> predication
---  "l" -> label
---  "c" -> comment
+--------------------------------------------------------------------------------
+-- comments
+fs_comm :: String -> FmtSpan
+fs_comm = FmtSpan fmt_sty_comm
+fmt_sty_comm :: FmtStyle
+fmt_sty_comm = FmtGD
+
+-- registers
+fs_reg :: String -> FmtSpan
+fs_reg = FmtSpan fmt_sty_reg
+fmt_sty_reg :: FmtStyle
+fmt_sty_reg = FmtCL
+
+-- mnemonics
+fs_kw0 :: String -> FmtSpan
+fs_kw0 = FmtSpan fmt_sty_kw0
+fmt_sty_kw0 :: FmtStyle
+fmt_sty_kw0 = FmtYL
+
+-- controls, subops, etc...
+fs_kw1 :: String -> FmtSpan
+fs_kw1 = FmtSpan fmt_sty_kw1
+fmt_sty_kw1 :: FmtStyle
+fmt_sty_kw1 = FmtCD
+
+-- literals, labels, immediates
+fs_lit :: String -> FmtSpan
+fs_lit = FmtSpan fmt_sty_lit
+fmt_sty_lit :: FmtStyle
+fmt_sty_lit = FmtBL
+
+fmt_sty_err :: FmtStyle
+fmt_sty_err = FmtRL
+
+fs_none :: String -> [FmtSpan]
+fs_none = (\c -> [c]) . FmtSpan FmtNONE
+
+--------------------------------------------------------------------------------
 fmtSpansRawInstWith :: FmtOpts -> RawInst -> [FmtSpan]
 fmtSpansRawInstWith fos ri = fssSimplify $
-   op_part_padded ++ maybe_dep_info ++ noFmt ";" ++ maybe_sanity_hint
+   op_part_padded ++ maybe_dep_info ++ fs_none ";" ++ maybe_sanity_hint
   where op_part_padded
           | null maybe_dep_info = op_part
           | otherwise = fssPadR (foColsPerInstBody fos) op_part
-        op_part = pred ++ noFmt " " ++ fmtd_tokens
+        op_part = pred ++ fs_none " " ++ fmtd_tokens
           where pred = fssPadR (foColsPerPredicate fos) ps
                   where ps
                           | null (riPredication ri) = []
@@ -141,7 +144,7 @@ fmtSpansRawInstWith fos ri = fssSimplify $
             ("HFMA2.MMA",[_,"-RZ","RZ",hf_hi16,hf_lo16]) ->
               case (reads hf_hi16,reads hf_lo16) of
                 ([(hi_f,"")], [(lo_f,"")]) ->
-                    [FmtSpan "c" $ printf " // 0x%08X" (to_hf16_w 16 hi_f .|. to_hf16_w 0 lo_f)]
+                    [fs_comm $ printf " // 0x%08X" (to_hf16_w 16 hi_f .|. to_hf16_w 0 lo_f)]
                   where to_hf16_w sh =
                           (`shiftL`sh) . (fromIntegral :: Word16 -> Word32) .
                             floatBitsToHalfBits RoundE . floatToBits
@@ -150,14 +153,14 @@ fmtSpansRawInstWith fos ri = fssSimplify $
         fmtd_tokens :: [FmtSpan]
         fmtd_tokens
           | null (riOperands ri) = mne
-          | otherwise = mne_padded ++ noFmt "  " ++
+          | otherwise = mne_padded ++ fs_none "  " ++
             fmtOpnds 0 (fssLength mne_padded - cols_per_mne) (riOperands ri)
           where mne_padded = fssPadR cols_per_mne mne
 
         fmtOpnds :: Int -> Int -> [String] -> [FmtSpan]
         fmtOpnds ix debt (o:os) = -- trace (show debt) $
             fmtd_o ++ fmtOpnds (ix + 1) new_debt os
-          where maybe_comma = if null os then [] else noFmt ", "
+          where maybe_comma = if null os then [] else fs_none ", "
                 fmtd_o = fssPadR (cols_per_opnd - debt) (o_simplified ++ maybe_comma)
                 new_debt = debt - (cols_per_opnd - fssLength fmtd_o)
 
@@ -172,16 +175,16 @@ fmtSpansRawInstWith fos ri = fssSimplify $
         mne :: [FmtSpan]
         mne
           | foDecodeLop3 fos && is_lop =
-              [FmtSpan "o" lop, FmtSpan "s" ("." ++ lop_func)]
+              [fs_kw0 lop, fs_kw1 ("." ++ lop_func)]
           | otherwise =
               case span (/='.') (riMnemonic ri) of
                 (op,'.':sfx)
                   | foShortHand fos && sfx == "MOV.U32" -> fmt "MOV"
                   | foShortHand fos && sfx == "SHL.U32" -> fmt ""
                   | otherwise -> fmt sfx
-                  where fmt "" = [FmtSpan "o" op]
-                        fmt so = [FmtSpan "o" op,FmtSpan "s" ('.':so)]
-                _ -> [FmtSpan "o" (riMnemonic ri)]
+                  where fmt "" = [fs_kw0 op]
+                        fmt so = [fs_kw0 op,fs_kw1 ('.':so)]
+                _ -> [fs_kw0 (riMnemonic ri)]
           where is_lop :: Bool
                 is_lop = any (`isPrefixOf`riMnemonic ri)
                   ["LOP3","PLOP3","ULOP3","UPLOP3"]
@@ -203,15 +206,13 @@ fmtSpansRawInstWith fos ri = fssSimplify $
         maybe_dep_info :: [FmtSpan]
         maybe_dep_info
           | not (null (riDepInfo ri)) && foPrintDeps fos =
-            noFmt (" {" ++ intercalate "," (riDepInfo ri) ++ "}")
+            fs_none (" {" ++ intercalate "," (riDepInfo ri) ++ "}")
           | otherwise = []
 
-noFmt :: String -> [FmtSpan]
-noFmt = (\c -> [c]) . FmtSpan ""
 
 fmtOpnd :: FmtOpts -> String -> [FmtSpan]
 fmtOpnd fos o
-  | not (foShortHand fos) = noFmt o
+  | not (foShortHand fos) = fs_none o
   | ".reuse"`isSuffixOf`o = fmtOpnd fos $ take (length o - 2) o
   | "c[0x0]["`isPrefixOf`o = highlightConst o
   | "c[0x1]["`isPrefixOf`o = highlightConst o
@@ -219,31 +220,30 @@ fmtOpnd fos o
   | "-c[0x0]["`isPrefixOf`o = highlightConst o
   | "-c[0x1]["`isPrefixOf`o = highlightConst o
   | "-c[0x2]["`isPrefixOf`o = highlightConst o
-  | "`"`isPrefixOf`o = [FmtSpan "l" o] -- label
+  | "`"`isPrefixOf`o = [fs_lit o] -- label
   | "["`isPrefixOf`o || "desc["`isPrefixOf`o = highlightAddr o
   | otherwise =
     case regSpan o of
-      Just (reg,sfx) -> FmtSpan "n" reg:rest
+      Just (reg,sfx) -> fs_reg reg:rest
          -- RET.REL.NODEC  R2 `(run_query_space) ... ;
          -- this is "one" operand (no comma)
         where rest =
                 case span (/='`') sfx of
-                  (pfx,sfx@('`':_)) -> noFmt pfx ++ fmtOpnd fos sfx
-                  _ -> noFmt sfx
+                  (pfx,sfx@('`':_)) -> fs_none pfx ++ fmtOpnd fos sfx
+                  _ -> fs_none sfx
       _ -> highlightAllRegs o
-  where reg r = [FmtSpan "n" r]
+  where reg r = [fs_reg r]
 
         highlightConst :: String -> [FmtSpan]
-        highlightConst ('-':cs) = noFmt "-" ++ highlightConst cs
+        highlightConst ('-':cs) = fs_none "-" ++ highlightConst cs
         highlightConst s@('|':cs) =
           case span (/='|') cs of
-            (body,"|") -> noFmt "|" ++ highlightConst body ++ noFmt "|"
-            _ -> noFmt s
+            (body,"|") -> fs_none "|" ++ highlightConst body ++ fs_none "|"
+            _ -> fs_none s
         highlightConst s
-          | "c[0x0]["`isPrefixOf`s = [FmtSpan "l" $ "c0" ++ drop 6 s]
-          | "c[0x1]["`isPrefixOf`s = [FmtSpan "l" $ "c1" ++ drop 6 s]
-          | "c[0x2]["`isPrefixOf`s = [FmtSpan "l" $ "c2" ++ drop 6 s]
-
+          | "c[0x0]["`isPrefixOf`s = [fs_lit $ "c0" ++ drop 6 s]
+          | "c[0x1]["`isPrefixOf`s = [fs_lit $ "c1" ++ drop 6 s]
+          | "c[0x2]["`isPrefixOf`s = [fs_lit $ "c2" ++ drop 6 s]
 
      -- e.g. desc[UR6][R2.64]
      -- e.g. [R16.64+0x100] or [R88.X16+UR18+0x400]
@@ -252,23 +252,23 @@ fmtOpnd fos o
           case span (/='[') o of
             -- pfx = "" or "desc"
             ("",'[':sfx) ->
-                noFmt "[" ++ highlightAllRegs sfx
+                fs_none "[" ++ highlightAllRegs sfx
             ("desc",'[':sfx) ->
-                [FmtSpan "s" "desc"] ++ noFmt "[" ++ highlightAllRegs sfx
-            _ -> noFmt o
+                [fs_kw1 "desc"] ++ fs_none "[" ++ highlightAllRegs sfx
+            _ -> fs_none o
 
         highlightAllRegs :: String -> [FmtSpan]
         highlightAllRegs = loop ""
           where loop :: String -> String -> [FmtSpan]
-                loop rnofmt "" = noFmt (reverse rnofmt)
-                loop rnofmt s@(c:cs) =
+                loop rfs_none "" = fs_none (reverse rfs_none)
+                loop rfs_none s@(c:cs) =
                     case s of
                       -- e.g. [R16.64...]
-                      '.':'6':'4':sfx -> matchToken [FmtSpan "s" ".64"] sfx
+                      '.':'6':'4':sfx -> matchToken [fs_kw1 ".64"] sfx
                       -- e.g. SLM scaling suffix
-                      '.':'X':'2':sfx -> matchToken [FmtSpan "s" ".X2"] sfx
-                      '.':'X':'4':sfx -> matchToken [FmtSpan "s" ".X4"] sfx
-                      '.':'X':'1':'6':sfx -> matchToken [FmtSpan "s" ".X16"] sfx
+                      '.':'X':'2':sfx -> matchToken [fs_kw1 ".X2"] sfx
+                      '.':'X':'4':sfx -> matchToken [fs_kw1 ".X4"] sfx
+                      '.':'X':'1':'6':sfx -> matchToken [fs_kw1 ".X16"] sfx
                       _ ->
                         case regSpan s of
                           Just (rn,sfx) -> matchToken (reg rn) sfx
@@ -277,11 +277,11 @@ fmtOpnd fos o
                               '0':'x':d0:sfx | isHexDigit d0 ->
                                 case span isHexDigit sfx of
                                   (hex_ds,sfx) ->
-                                    matchToken [FmtSpan "l" ("0x"++d0:hex_ds)] sfx
-                              _ -> loop (c:rnofmt) cs
+                                    matchToken [fs_lit ("0x"++d0:hex_ds)] sfx
+                              _ -> loop (c:rfs_none) cs
                   where matchToken ::  [FmtSpan] -> String -> [FmtSpan]
                         matchToken tks sfx = maybe_nfmt ++ tks ++ loop "" sfx
-                          where maybe_nfmt = if null rnofmt then [] else noFmt (reverse rnofmt)
+                          where maybe_nfmt = if null rfs_none then [] else fs_none (reverse rfs_none)
 
 -- e.g. RZ, R2, R2+0x100, R2+UR6, R2+UR6+0x100
 regSpan :: String -> Maybe (String,String)
@@ -341,11 +341,11 @@ fmtSampleInstToFmtSpans :: FmtOpts -> SampleInst -> [FmtSpan]
 fmtSampleInstToFmtSpans fos si =
     ln_pfx ++ fmtSpansRawInstWith fos (siRawInst si) ++ bits
   where ln_pfx
-          | foPrintOffsets fos = [FmtSpan "c" $ printf "  /*%04X*/ " (riOffset (siRawInst si))]
+          | foPrintOffsets fos = [fs_comm $ printf "  /*%04X*/ " (riOffset (siRawInst si))]
           | otherwise = []
 
         bits
-          | foPrintEncoding fos = [FmtSpan "c" $ printf "  /* %016X`%016X */" (wHi64 (siBits si)) (wLo64 (siBits si))]
+          | foPrintEncoding fos = [fs_comm $ printf "  /* %016X`%016X */" (wHi64 (siBits si)) (wLo64 (siBits si))]
           | otherwise = []
 
 

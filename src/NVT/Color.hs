@@ -6,70 +6,72 @@ import Control.Exception
 import System.IO
 
 putStrYellow :: String -> IO ()
-putStrYellow = hPutStrColored SCA.Yellow stdout
+putStrYellow = hPutStrVividColor SCA.Yellow stdout
 putStrLnYellow :: String -> IO ()
 putStrLnYellow = putStrYellow . (++"\n")
 putStrDarkYellow :: String -> IO ()
-putStrDarkYellow = hPutStrColoredI SCA.Dull SCA.Yellow stdout
+putStrDarkYellow = hPutStrDullColor SCA.Yellow stdout
 putStrLnDarkYellow :: String -> IO ()
 putStrLnDarkYellow = putStrDarkYellow . (++"\n")
 hPutStrYellow :: Handle -> String -> IO ()
-hPutStrYellow = hPutStrColored SCA.Yellow
+hPutStrYellow = hPutStrVividColor SCA.Yellow
 hPutStrDarkYellow :: Handle -> String -> IO ()
-hPutStrDarkYellow = hPutStrColoredI SCA.Dull SCA.Yellow
+hPutStrDarkYellow = hPutStrDullColor SCA.Yellow
 --
 putStrGreen :: String -> IO ()
-putStrGreen = hPutStrColored SCA.Green stdout
+putStrGreen = hPutStrVividColor SCA.Green stdout
 putStrLnGreen :: String -> IO ()
 putStrLnGreen = putStrGreen . (++"\n")
 putStrDarkGreen :: String -> IO ()
-putStrDarkGreen = hPutStrColoredI SCA.Dull SCA.Green stdout
+putStrDarkGreen = hPutStrDullColor SCA.Green stdout
 hPutStrGreen :: Handle -> String -> IO ()
-hPutStrGreen = hPutStrColored SCA.Green
+hPutStrGreen = hPutStrVividColor SCA.Green
 hPutStrDarkGreen :: Handle -> String -> IO ()
-hPutStrDarkGreen = hPutStrColoredI SCA.Dull SCA.Green
+hPutStrDarkGreen = hPutStrDullColor SCA.Green
 --
 hPutStrBlue :: Handle -> String -> IO ()
-hPutStrBlue = hPutStrColored SCA.Blue
+hPutStrBlue = hPutStrVividColor SCA.Blue
 hPutStrDarkBlue :: Handle -> String -> IO ()
-hPutStrDarkBlue = hPutStrColoredI SCA.Dull SCA.Blue
+hPutStrDarkBlue = hPutStrDullColor SCA.Blue
 --
 putStrRed :: String -> IO ()
-putStrRed = hPutStrColored SCA.Red stdout
+putStrRed = hPutStrVividColor SCA.Red stdout
 putStrLnRed :: String -> IO ()
 putStrLnRed = putStrRed . (++"\n")
 hPutStrRed :: Handle -> String -> IO ()
-hPutStrRed = hPutStrColored SCA.Red
+hPutStrRed = hPutStrVividColor SCA.Red
 hPutStrDarkRed :: Handle -> String -> IO ()
-hPutStrDarkRed = hPutStrColoredI SCA.Dull SCA.Red
+hPutStrDarkRed = hPutStrDullColor SCA.Red
 --
 putStrWhite :: String -> IO ()
-putStrWhite = hPutStrColored SCA.White stdout
+putStrWhite = hPutStrVividColor SCA.White stdout
 putStrLnWhite :: String -> IO ()
 putStrLnWhite = putStrWhite . (++"\n")
 hPutStrWhite :: Handle -> String -> IO ()
-hPutStrWhite = hPutStrColored SCA.White
+hPutStrWhite = hPutStrVividColor SCA.White
 --
 putStrCyan :: String -> IO ()
-putStrCyan = hPutStrColored SCA.Cyan stdout
+putStrCyan = hPutStrVividColor SCA.Cyan stdout
 putStrLnCyan :: String -> IO ()
 putStrLnCyan = putStrCyan . (++"\n")
 hPutStrCyan :: Handle -> String -> IO ()
-hPutStrCyan = hPutStrColored SCA.Cyan
+hPutStrCyan = hPutStrVividColor SCA.Cyan
 hPutStrDarkCyan :: Handle -> String -> IO ()
-hPutStrDarkCyan = hPutStrColoredI SCA.Dull SCA.Cyan
+hPutStrDarkCyan = hPutStrDullColor SCA.Cyan
 --
 putStrMagenta :: String -> IO ()
-putStrMagenta = hPutStrColored SCA.Magenta stdout
+putStrMagenta = hPutStrVividColor SCA.Magenta stdout
 putStrLnMagenta :: String -> IO ()
 putStrLnMagenta = putStrMagenta . (++"\n")
 hPutStrMagenta :: Handle -> String -> IO ()
-hPutStrMagenta = hPutStrColored SCA.Magenta
+hPutStrMagenta = hPutStrVividColor SCA.Magenta
 hPutStrDarkMagenta :: Handle -> String -> IO ()
-hPutStrDarkMagenta = hPutStrColoredI SCA.Dull SCA.Magenta
+hPutStrDarkMagenta = hPutStrDullColor SCA.Magenta
 --
-hPutStrColored :: SCA.Color -> Handle -> String -> IO ()
-hPutStrColored = hPutStrColoredI SCA.Vivid
+hPutStrDullColor :: SCA.Color -> Handle -> String -> IO ()
+hPutStrDullColor = hPutStrColoredI SCA.Dull
+hPutStrVividColor :: SCA.Color -> Handle -> String -> IO ()
+hPutStrVividColor = hPutStrColoredI SCA.Vivid
 hPutStrColoredI :: SCA.ColorIntensity -> SCA.Color -> Handle -> String -> IO ()
 hPutStrColoredI i c h str = bracket_ acq rel act
   where acq = hFlush h >> SCA.hSetSGR h [SCA.SetColor SCA.Foreground i c]

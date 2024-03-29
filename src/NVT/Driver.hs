@@ -150,7 +150,8 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
             _ -> fatal $ "--color=" ++ inp ++ ": invalid color value"
 
 nvt_version :: String
-nvt_version = "1.1.10" -- now map ptx lines / coloring binary sections
+nvt_version = "1.1.11" -- refactored coloring
+-- nvt_version = "1.1.10" -- now map ptx lines / coloring binary sections
 -- nvt_version = "1.1.9" -- changed depbar id to match DEPBAR.LE
 -- nvt_version = "1.1.8" -- using -print-line-info-inline
 -- nvt_version = "1.1.7"
@@ -171,6 +172,11 @@ getTemporaryFile sfx = try 0
 
 runWithOpts :: Opts -> IO ()
 runWithOpts os
+  | null (oArch os) && maybe_inferred_sm /= Nothing =
+    case maybe_inferred_sm of
+      Just inferred_sm -> do
+        debugLn os $ "inferred --arch=" ++ inferred_sm
+        runWithOpts (os {oArch = inferred_sm})
   | null (oInputFile os) = getContents >>= processStdin (oStdinIs os)
   | otherwise = processFile (oInputFile os)
   where processStdin :: StdinIs -> String -> IO ()
@@ -191,6 +197,14 @@ runWithOpts os
                  writeFile tmp_fp stdin_str
                  runWithOpts (os{oInputFile = tmp_fp})
                  removeFile tmp_fp
+
+        -- foo/bar-sm_90.cu implies sm_90
+        maybe_inferred_sm :: Maybe String
+        maybe_inferred_sm =
+            case reverse . takeWhile (/='-') . reverse . dropExtension . takeFileName $ oInputFile os of
+              s@('s':'m':'_':d0:d1:sfx)
+                | isDigit d0 && isDigit d1 -> Just s
+              _ -> Nothing
 
         -- given a .cu input, this gives the stem for .ptx or .cubin
         deriveFileName :: String -> FilePath

@@ -1,6 +1,6 @@
 module NVT.FilterAssembly where
 
-import NVT.Color
+import NVT.Fmt
 -- import NVT.Demangle
 import NVT.RawInst
 
@@ -187,7 +187,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                   tryProcessLineMapping dict lns processLns128B
                 Right (dict,lns_sfx) -> do
                   when (foVerbosity fos >= 2) $ do
-                    emitStyle fos h_out "c"  " /* filterAssemblyWithInterleavedSrcIO: successfully parsed .nv_debug_ptx_txt */\n"
+                    emitStyle fos h_out fmt_sty_comm  " /* filterAssemblyWithInterleavedSrcIO: successfully parsed .nv_debug_ptx_txt */\n"
                   -- render the .nv_debug_ptx_txt as raw bytes anyway
                   -- (we could use lns_sfx to skip it)
                   tryProcessLineMapping dict lns processLns128B
@@ -197,7 +197,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                 putStrLn $ "filterAssemblyWithInterleavedSrcIO: ERROR " ++ err
                 tryProcessLineMapping dict lns processLns128B
               Right (str,lns_sfx) -> do
-                emitStyle fos h_out "c" $  "/* " ++ show str ++ " */"
+                emitStyle fos h_out fmt_sty_comm $  "/* " ++ show str ++ " */"
                 emitLn ""
                 tryProcessLineMapping dict lns processLns128B
 
@@ -223,16 +223,16 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
         tryProcessLineMapping dict0 ((_,lnstr):lns) cont
           | is_global_directive = do
               hPutStr h_out lnstr
-              emitStyle fos h_out "c" (" // " ++ global_demangled)
+              emitStyle fos h_out fmt_sty_comm (" // " ++ global_demangled)
               hPutStrLn h_out ""
               cont dict0 lns
           | isLabelLine lnstr && foColor fos = do
-              emitStyle fos h_out "n" lnstr >> emitLn "" >> cont dict0 lns
+              emitStyle fos h_out fmt_sty_lit lnstr >> emitLn "" >> cont dict0 lns
           | otherwise =
             case tryParseLineMappingWithSfx lnstr of
               Nothing
                 | isCommentLine lnstr && foColor fos ->
-                    emitStyle fos h_out "c" lnstr >> emitLn "" >> cont dict0 lns
+                    emitStyle fos h_out fmt_sty_comm lnstr >> emitLn "" >> cont dict0 lns
                 | otherwise -> emitGenericLine lnstr >> cont dict0 lns
               -- //## File "E:\\dev\\nvaa\\experiments\\asynccopy/micro.cu", line 57
               Just (file,lno,"") -> lookupMapping dict0
@@ -255,7 +255,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                                   where ln_str
                                           | lno <= snd (bounds arr) = arr ! lno
                                           | otherwise = ": ???"
-                            emitStyle fos h_out "c" src_line
+                            emitStyle fos h_out fmt_sty_comm src_line
                             emitLn ""
                             -- emitLn $ lnstr ++ "\n" ++ src_line
                             cont dict lns
@@ -263,12 +263,12 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
               -- -- //## File "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 458 inlined at "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin/../include\\cuda/pipeline", line 471
               Just (_,_,sfx) | "inlined at"`isPrefixOf`dropWhile isSpace sfx -> do
                 when (foInlinedSource fos == InlinedSourcePASSTHROUGH) $ do
-                  emitStyle fos h_out "c" lnstr
+                  emitStyle fos h_out fmt_sty_comm lnstr
                   emitLn ""
                 cont dict0 lns
               Just x@(_,_,_) -> do
                 -- print x
-                emitStyle fos h_out "e" ("MALFORMED LINE: " ++ show lnstr ++ "\n") -- ERROR unexpected
+                emitStyle fos h_out fmt_sty_err ("MALFORMED LINE: " ++ show lnstr ++ "\n") -- ERROR unexpected
                 cont dict0 lns
           where {-
                 global_demangled =
@@ -306,10 +306,10 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                     '/':'*':sfx -> emitComm ("*/") sfx >>= emitTokens
                     _ ->
                       case find (`isPrefixOf`sfx) keywords of
-                        Just kw -> emitStyle fos h_out "CL" kw >> return (drop (length kw) sfx)
+                        Just kw -> emitStyle fos h_out FmtCL kw >> return (drop (length kw) sfx)
                         Nothing ->
                           case find (`isPrefixOf`sfx) data_types of
-                            Just dt -> emitStyle fos h_out "YL" dt >> return (drop (length dt) sfx)
+                            Just dt -> emitStyle fos h_out FmtYL dt >> return (drop (length dt) sfx)
                             _ -> return sfx
 
                 keywords = [
@@ -327,9 +327,9 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                 data_types = [".byte",".short",".word",".dword"]
 
                 emitComm rstr [] =
-                  emitStyle fos h_out "e" (reverse rstr) >> return ""
+                  emitStyle fos h_out fmt_sty_err (reverse rstr) >> return ""
                 emitComm rstr ('*':'/':sfx) = do
-                  emitStyle fos h_out "c" (reverse rstr ++ "*/")
+                  emitStyle fos h_out fmt_sty_comm (reverse rstr ++ "*/")
                   return sfx
                 emitComm rstr (c:cs) = emitComm (c:rstr) cs
 
@@ -368,39 +368,15 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                         shifted_word = dep `shiftL` (64 - 23)
         processLnsMaxwell dict lns = tryProcessLineMapping dict lns processLnsMaxwell
 
+emitStyle :: FilterOpts -> Handle -> FmtStyle -> String -> IO ()
+emitStyle fos h sty str
+  | foColor fos = fsEmitStyle h sty str
+  | otherwise = hPutStrLn h str
+
 emitSpans :: FilterOpts -> Handle -> [FmtSpan] -> IO ()
 emitSpans fos h_out
-  | foColor fos = loopColor
+  | foColor fos = fsEmit h_out
   | otherwise = hPutStrLn h_out . fssToString
-  where loopColor [] = hPutStrLn h_out ""
-        loopColor (fs:fss) = do
-          emitStyle fos h_out (fsStyle fs) (fsText fs)
-          loopColor fss
-
-emitStyle :: FilterOpts -> Handle -> String -> String -> IO ()
-emitStyle fos h_out style
-  | not (foColor fos) = hPutStr h_out
-  | otherwise =
-    case style of
-      "o" -> hPutStrCyan h_out -- op
-      "s" -> hPutStrYellow h_out -- subop
-      "n" -> hPutStrDarkCyan h_out -- name (register, label, barrier)
-      "c" -> hPutStrDarkGreen h_out -- comment
-      "l" -> hPutStrBlue h_out -- label
-      "e" -> hPutStrRed h_out -- ERROR
-      --
-      -- explicit colors
-      "ML" -> hPutStrMagenta h_out
-      "MD" -> hPutStrDarkMagenta h_out
-      "CL" -> hPutStrCyan h_out
-      "CD" -> hPutStrDarkCyan h_out
-      "YL" -> hPutStrYellow h_out
-      --
-      -- unformatted
-      "" -> hPutStr h_out
-      --
-      -- INVALID color code
-      _ ->  \s -> hPutStrRed h_out ("<" ++ show style ++ "?>" ++ show s)
 
 fmtSi :: FilterOpts -> SampleInst -> [FmtSpan]
 fmtSi fos = fmtSampleInstToFmtSpans (foFmtOpts fos)
@@ -551,8 +527,7 @@ emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms = do
     mapM_ emitSrcFile all_src_fs
   where emitFileHeader :: FilePath -> IO ()
         emitFileHeader src_f = do
-          let hPutHeader = if foColor fos then hPutStrWhite else hPutStr
-          hPutHeader h_out $
+          emitStyle fos h_out FmtLW  $
             "// " ++ replicate 72 '=' ++ "\n" ++
             "// " ++ src_f ++ "\n"
 
@@ -581,8 +556,8 @@ emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms = do
                           case span (\c -> isAlphaNum c || c == '.') str of
                             (op,sfx) -> [opText op, text sfx]
 
-                text = FmtSpan "MD"
-                opText = FmtSpan "ML"
+                text = FmtSpan FmtMD
+                opText = FmtSpan FmtML
         --
         -- set of mapped ptx listing lines
         toListingMap :: DM.Map SrcLoc [(Int,a)] -> DIM.IntMap ()
@@ -606,19 +581,17 @@ emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms = do
 
         emitSassInstLn :: Int -> SampleInst -> Bool -> IO ()
         emitSassInstLn llno si ooo =
-            emitSpans fos h_out $ ooo_span : lloc_span : fmtSi fos si
-          where ooo_span = if ooo then FmtSpan "" "!" else FmtSpan "" " "
+            emitSpans fos h_out $ ooo_span : lloc_span ++ fmtSi fos si
+          where ooo_span = if ooo then FmtSpan FmtRD "!" else FmtSpan FmtNONE " "
                 lloc_span
                   -- emit listing line number (no PCs)
-                  | off < 0 = FmtSpan "" (printf "[line %4d]" llno)
+                  | off < 0 = fs_none (printf "[line %4d]" llno)
                   -- use the PC
-                  | otherwise = FmtSpan "" (printf "[%05X] " off)
+                  | otherwise = fs_none (printf "[%05X] " off)
                   where off = riOffset (siRawInst si)
 
         emitSrcLn :: String -> IO ()
-        emitSrcLn s
-          | foColor fos = hPutStrDarkGreen h_out s >> hPutStrLn h_out ""
-          | otherwise = hPutStr h_out s >> hPutStrLn h_out ""
+        emitSrcLn s = emitStyle fos h_out fmt_sty_comm s >> hPutStrLn h_out ""
 
         -- true if there's an instruction between these two listing lines
         -- areSassDiscontinuous :: Int -> Int -> Bool
