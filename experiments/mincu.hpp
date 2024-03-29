@@ -1374,98 +1374,190 @@ static inline float hf_to_f(uint16_t u16) {
 ///////////////////////////////////////////////////////////////////////////////
 // integer parsing
 template <typename T>
-static T parse_uintT(
-  const std::string &s,
-  bool allow_suffix,
-  const char *what)
+struct presult {
+  T value;
+  std::string error; // error diagnostic
+
+  presult() : value(T(0)) { }
+  presult(T t) : value(t) { }
+
+  static presult<T> make_error(std::string s0) {
+    presult<T> p;
+    p.error = s0;
+    return p;
+  }
+  // presult(std::string s0, std::string s1) : value(0), error(s0 + s1) { }
+  // presult(const char *s0, const char *s1) : presult(std::string(s0) + s1) { }
+
+  operator bool() const {return error.empty();}
+};
+
+template <typename T>
+static presult<T> try_parse_integral(
+  const std::string &s, bool allow_suffix, const char *what)
 {
-  try {
-    if (s.size() >= 1 && s[0] == '-')
-      mincu::fatal(s,": must be positive ", what);
+  // For any signed type T we parse as the equivalently sized unsigned
+  // (e.g. int16_t uses uint16_t to parse the value)
+  // Then, we range check it and convert back to signed, if needed.
+  using U = typename std::make_unsigned_t<T>;
 
-    const char *str = s.c_str();
+  const char *str0 = s.c_str();
+  const char *str = str0;
+  auto error = [](const char *s0, const char *s1 = "", const char *s2 = "") {
+    return presult<T>::make_error(format(s0, s1, s2));
+  };
 
-    T sign = 1;
-    if (std::is_signed<T>::value) {
-      if (s.size() > 0 && s[0] == '-') {
-        str++;
-        sign = T(-1);
-      }
+  bool negate = false;
+  if (str[0] == '-') {
+    if (!std::is_signed_v<T>) {
+      return error(what, " must be positive");
     }
-    T val = 0;
+    negate = true;
+    str++;
+  }
 
-    // std::strtoull saturates at max value; so we do our own parsing here
-    if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-      str += 2;
-      int nds = 0;
-      while (isxdigit(*str)) {
-        nds++;
-        T d =
-          *str >= 'A' && *str <= 'F' ? *str - 'A' + 10 :
-          *str >= 'a' && *str <= 'f' ? *str - 'a' + 10 :
-          *str - '0';
-        T new_val = 16 * val + d;
-        if (new_val < val) {
-          mincu::fatal(s, ": overflows ", what);
-        }
-        val = new_val;
-        str++;
-      }
-      if (nds == 0) {
-        mincu::fatal(s, ": malformed ", what);
-      }
-    } else {
-      int nds = 0;
-      while (isdigit(*str)) {
-        nds++;
-        T new_val = 10 * val + *str - '0';
-        if (new_val < val) {
-          mincu::fatal(s, ": overflows ", what);
-        }
-        val = new_val;
-        str++;
-      }
-      if (nds == 0) {
-        mincu::fatal(s, ": malformed ", what);
-      }
-    }
-    while (*str == ' ')
-      str++;
-    if (allow_suffix && *str) {
-      T scale = 1;
-      if (*str == 'K' || *str == 'k')
-        scale = 1024;
-      else if (*str == 'M' || *str == 'm')
-        scale = 1024*1024;
-      else if (*str == 'G' || *str == 'g')
-        scale = 1024*1024*1024;
-      else
-        mincu::fatal(s, ": malformed ", what, " suffix (expected K, M, or G)");
-      str++;
+  U val {0};
 
-      T new_val = val * scale;
+  // std::strtoull saturates at max value; so we do our own parsing here
+  bool is_hex = str[0] == '0' && (str[1] == 'x' || str[1] == 'X');
+  if (is_hex) {
+    str += 2;
+    int nds = 0;
+    while (isxdigit(*str)) {
+      nds++;
+      U d =
+        *str >= 'A' && *str <= 'F' ? *str - 'A' + 10 :
+        *str >= 'a' && *str <= 'f' ? *str - 'a' + 10 :
+        *str - '0';
+      if (std::numeric_limits<U>::max() / 16 < val) {
+        return error("value overflows ", what);
+      }
+      U new_val = 16 * val + d;
       if (new_val < val) {
-        fatal(s, ": value overflows type size");
+        return error("overflows ", what);
       }
       val = new_val;
+      str++;
     }
-    if (*str)
-      mincu::fatal(s, ": malformed ", what);
-    if (val == std::numeric_limits<T>::min() && sign == T(-1))
-      mincu::fatal(s, ": negation of min value has no effect");
-
-    return sign * val;
-  } catch (...) {
-    mincu::fatal(s, ": malformed ", what);
-    return T(-1);
+    if (nds == 0) {
+      return error("invalid hex digit ", what);
+    }
+  } else {
+    int nds = 0;
+    while (isdigit(*str)) {
+      nds++;
+      // e.g. 1234 on uint8_t
+      // 123*10 = 1230`mod`256 = 206 (need to check divide on overflow)
+      if (std::numeric_limits<U>::max() / 10 < val) {
+        return error("value overflows ", what);
+      }
+      U new_val = 10 * val + *str - '0';
+      if (new_val < val) {
+        return error("value overflows ", what);
+      }
+      val = new_val;
+      str++;
+    }
+    if (nds == 0) {
+      return error("invalid ", what);
+    }
   }
+  while (*str == ' ')
+    str++;
+  if (allow_suffix) {
+
+    // test if: val * scale overflows
+    auto scale_overflows = [](U val, int scale) -> bool {
+      if (val == U(0))
+        return false; // 0 * x = 0
+      else { // val > 0
+        if (scale > std::numeric_limits<U>::max() / val) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // scaling multiplication needs to be done carefully to detect overflow
+    U scale {1};
+    if (*str == 'K' || *str == 'k') {
+      if (scale_overflows(val, 1024))
+        return error("scale overflows value");
+      scale = U(1024);
+      str++;
+    } else if (*str == 'M' || *str == 'm') {
+      if (scale_overflows(val, 1024 * 1024))
+        return error("scale overflows value");
+      scale = U(1024 * 1024); // T() suppresses overflow on T = int8_t
+      str++;
+    } else if (*str == 'G' || *str == 'g') {
+      if (scale_overflows(val, 1024 * 1024 * 1024)) // e.g. int8
+        return error("scale overflows value");
+      scale = U(1024*1024*1024);
+      str++;
+    } else if (*str) {
+      return error("malformed suffix (expected K, M, or G)", "");
+    }
+
+    U new_val = val * scale;
+    if (new_val < val) {
+      error("value overflows ", what);
+    }
+    val = new_val;
+  }
+  if (*str)
+    return error(str, ": trailing characters after ", what);
+
+  T t_val;
+  if constexpr (std::is_signed<T>()) {
+    // must range check and convert back to signed
+    // special handling needed for min value (signed)
+    if (is_hex) {
+      // raw bitbast from unsigned to signed
+      // 0xFFFFFFFF is -1 for int32
+      t_val = T(val);
+      if (negate && t_val == std::numeric_limits<T>::min()) {
+        // -maxval is invalid
+        return error("negating min value overflows ", what);
+      }
+    } else if (negate) { // e.g. int8_t can be -1...-128
+      if (val > U(std::numeric_limits<T>::max()) + 1) {
+        return error("value overflows ", what);
+      }
+      if (val == U(std::numeric_limits<T>::max()) + 1) {
+        t_val = std::numeric_limits<T>::min();
+      } else {
+        t_val = -T(val);
+      }
+    } else { // e.g. int8_t can be 0...127
+      if (val > U(std::numeric_limits<T>::max())) {
+        return error("value overflows ", what);
+      }
+      t_val = T(val);
+    }
+  } else { // unsigned
+    t_val = T(val);
+  }
+
+  return t_val;
+}
+template <typename T>
+static T parse_integral(
+  const std::string &s,
+  bool allow_suffix,
+  const char *what = "integral")
+{
+  auto r = try_parse_integral<T>(s, allow_suffix, what);
+  if (!r.error.empty())
+    fatal(s, ": ", r.error);
+  return r.value;
 }
 static uint64_t parse_uint64(
   const std::string &s,
   bool allow_suffix = false,
   const char *what = "uint64")
 {
-  return parse_uintT<uint64_t>(s, allow_suffix, what);
+  return parse_integral<uint64_t>(s, allow_suffix, what);
 }
 static uint64_t parse_positive_uint64(
   const std::string &s,
@@ -1483,7 +1575,7 @@ static int64_t parse_int64(
   bool allow_suffix = false,
   const char *what = "int64")
 {
-  return parse_uintT<int64_t>(s, allow_suffix, what);
+  return parse_integral<int64_t>(s, allow_suffix, what);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

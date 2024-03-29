@@ -109,20 +109,25 @@ static std::string test_fmt(const T &t) {
 
 static std::string g_current_label;
 
+static void test_fatal(int line, std::string message) {
+  mincu::fatal(
+      ansi_red<const char *>("FAILED"), "\n",
+      "test ", ansi_red(g_current_label.empty() ? "???" : g_current_label),
+      "; near line ", ansi_yellow(line), ":\n",
+      message);
+}
 static void test_fatal(
     int line, const char *macro,
     const char *sut_expr, const std::string &sut_fmtd,
     const char *exp_expr, const std::string &exp_fmtd,
     std::string hint = "")
 {
-  mincu::fatal(
-      "test ", ansi_red(g_current_label.empty() ? "???" : g_current_label),
-      "; near line ", ansi_yellow(line), ": ", macro, "(", sut_expr, ", ",
-      exp_expr,
-      ")\n"
-      "    sut:",
-      sut_fmtd, ", exp:", exp_fmtd, (hint.empty() ? "" : "\n  "), hint);
+  auto msg = format(macro, "(", sut_expr, ", ", exp_expr, ")\n"
+      "    sut:", sut_fmtd,
+      ", exp:", exp_fmtd, (hint.empty() ? "" : "\n  "), hint);
+  test_fatal(line, msg.c_str());
 }
+
 
 template <typename T1, typename T2>
 static void test_eq_impl(
@@ -203,18 +208,23 @@ static void test_ge_impl(
 #define TEST_GE(SUT, EXP) \
   test_ge_impl(__LINE__, #SUT, SUT, #EXP, EXP)
 
+#define TEST_FAIL_AT(line, msg) \
+  test_fatal(line, "TEST_FAIL* called: " + msg)
+#define TEST_FAIL(msg) \
+  TEST_FAIL_AT(__LINE__, msg)
+
+
 static void TEST_GROUP(std::string lbl, std::function<void()> BLOCK) {
   if (!g_current_label.empty())
     fatal("INTERNAL ERROR: recursive/nested test detected ", lbl, " under ",
           g_current_label);
-  if (g_os.verbosity >= 0)
   if (g_os.matches_any_filter(lbl)) {
     g_current_label = lbl;
     std::cout << "====== " << coll<std::string>(lbl + ":", 48) << "  ";
     BLOCK();
     std::cout << ansi_green<const char *>("PASSED") << "\n";
     g_current_label = "";
-  } else {
+  } else if (g_os.verbosity >= 1) {
     std::cout << "====== " << coll<std::string>(lbl + ":", 48) << "  "
               << ansi_yellow<const char *>("SKIPPING") << "\n";
   }
@@ -390,6 +400,147 @@ static void run_compile_randoms(int)
 {
   random_state rs {12007};
   umem<T> buf {4u, rnd_seq(rs)}; // no args
+}
+
+template <typename T>
+static void test_parse_pass_helper(int line, const char *inp, T exp, bool sfx) {
+  auto r = try_parse_integral<T>(inp, sfx, type_name<T>());
+  if (!r) {
+    const char *sfx_str = sfx ? "true" : "false";
+    auto err =
+      format("try_parse_integral<", type_name<T>(), ">"
+            "(\"", inp, "\", ", sfx_str, "); failed: ", r.error);
+    TEST_FAIL_AT(line, err);
+  }
+}
+template <typename T>
+static void test_parse_fail_helper(int line, const char *inp, const char *exp, bool sfx) {
+  auto r = try_parse_integral<T>(inp, sfx, type_name<T>());
+  const char *sfx_str = sfx ? "true" : "false";
+  if (r) {
+    auto err =
+      format("try_parse_integral<", type_name<T>(), ">"
+            "(\"", inp, "\", ", sfx_str, "); unexpectedly parsed: 0x", hex(r.value));
+    TEST_FAIL_AT(line, err);
+  } else if (r.error.find(exp) == std::string::npos) {
+    auto err =
+      format("try_parse_integral<", type_name<T>(), ">"
+            "(\"", inp, "\", ", sfx_str, "); cannot find error string: ", exp,
+            " in : ", r.error);
+    TEST_FAIL_AT(line, err);
+  }
+}
+
+static void run_parse_int_tests()
+{
+#define TEST_PARSE_PASS_NSFX(TYPE, INP, EXP) \
+  test_parse_pass_helper<TYPE>(__LINE__, INP, EXP, false)
+#define TEST_PARSE_PASS(TYPE, INP, EXP) \
+  test_parse_pass_helper<TYPE>(__LINE__, INP, EXP, true)
+#define TEST_PARSE_FAIL_NSFX(TYPE, INP, EXP) \
+  test_parse_fail_helper<TYPE>(__LINE__, INP, EXP, false)
+#define TEST_PARSE_FAIL(TYPE, INP, EXP) \
+  test_parse_fail_helper<TYPE>(__LINE__, INP, EXP, true)
+
+
+  TEST_GROUP("try_parse_integral.positive", [] {
+    TEST_PARSE_PASS_NSFX(int16_t, "0", 0);
+    TEST_PARSE_PASS_NSFX(int16_t, "-0", 0);
+    TEST_PARSE_PASS_NSFX(int16_t, "1", 1);
+    TEST_PARSE_PASS_NSFX(int16_t, "13", 13);
+    //
+    TEST_PARSE_PASS(int8_t, "-128", -128);
+    TEST_PARSE_PASS(int8_t, "10", -10);
+    TEST_PARSE_PASS(int8_t, "0", 0);
+    TEST_PARSE_PASS(int8_t, "25", 25);
+    TEST_PARSE_PASS(int8_t, "127", 127);
+    TEST_PARSE_PASS(int8_t, "0xA", 0xA);
+    TEST_PARSE_PASS(int8_t, "0x1A", 0x1A);
+    TEST_PARSE_PASS(int8_t, "-0x1A", -0x1A);
+    //
+    TEST_PARSE_PASS(uint8_t, "0", 0);
+    TEST_PARSE_PASS(uint8_t, "43", 43);
+    TEST_PARSE_PASS(uint8_t, "255", 255);
+    //
+    TEST_PARSE_PASS(int16_t, "13k", 13*1024);
+    TEST_PARSE_PASS(int16_t, "13K", 13*1024);
+    TEST_PARSE_PASS(int16_t, "-13K", -13*1024);
+    TEST_PARSE_PASS(int16_t, "32767", 32767);
+    TEST_PARSE_PASS(int16_t, "-32768", -32768);
+    TEST_PARSE_PASS(int16_t, "-32K", -32*1024);
+    TEST_PARSE_PASS(int16_t, "0x40", 0x40);
+    TEST_PARSE_PASS(int16_t, "-0x40", -0x40);
+    //
+    TEST_PARSE_PASS(uint16_t, "0", 0);
+    TEST_PARSE_PASS(uint16_t, "0G", 0);
+    TEST_PARSE_PASS(uint16_t, "1", 1);
+    TEST_PARSE_PASS(uint16_t, "32k", 32768);
+    TEST_PARSE_PASS(uint16_t, "32 k", 32768); // we do permit a space
+    TEST_PARSE_PASS(uint16_t, "65535", 65535);
+    TEST_PARSE_PASS(uint16_t, "0x7FFF", 0x10000 - 1);
+    //
+    TEST_PARSE_PASS(int32_t, "0xFFFFFFFF", -1);
+    TEST_PARSE_PASS(int32_t, "-2147483647", -2147483648);
+    TEST_PARSE_PASS(int32_t, "-4", -4);
+    TEST_PARSE_PASS(int32_t, "0", 0);
+    TEST_PARSE_PASS(int32_t, "2 M", 2 * 1024 * 1024);
+    TEST_PARSE_PASS(int32_t, "2147483647", 2147483647);
+    //
+    TEST_PARSE_PASS(uint32_t, "0", 0);
+    TEST_PARSE_PASS(uint32_t, "2147483648", 2147483648);
+    TEST_PARSE_PASS(uint32_t, "2 G", 2u * 1024u * 1024u * 1024u);
+    TEST_PARSE_PASS(uint32_t, "4294967295", 4294967295);
+    //
+    TEST_PARSE_PASS(int64_t, "0x8000000000000000", 0x8000000000000000LL);
+    TEST_PARSE_PASS(int64_t, "-9223372036854775808", -9223372036854775808LL);
+    TEST_PARSE_PASS(int64_t, "-44", -44);
+    TEST_PARSE_PASS(int64_t, "0", 0);
+    TEST_PARSE_PASS(int64_t, "2 G", 2LL * 1024 * 1024 * 1024);
+    TEST_PARSE_PASS(int64_t, "9223372036854775807", 9223372036854775807LL);
+    TEST_PARSE_PASS(int64_t, "0x7FFFFFFFFFFFFFFF", 9223372036854775807LL);
+    //
+    TEST_PARSE_PASS(uint64_t, "0", 0);
+    TEST_PARSE_PASS(uint64_t, "1", 1);
+    TEST_PARSE_PASS(uint64_t, "2 G", 2ULL * 1024 * 1024 * 1024);
+    TEST_PARSE_PASS(uint64_t, "18446744073709551615", 9223372036854775807ULL);
+    TEST_PARSE_PASS(uint64_t, "0xFFFFFFFFFFFFFFFF", 9223372036854775807ULL);
+  });
+  TEST_GROUP("try_parse_integral.negative", [] {
+    TEST_PARSE_FAIL_NSFX(int8_t, "-129", "overflow");
+    TEST_PARSE_FAIL_NSFX(int8_t, "128", "overflow");
+    TEST_PARSE_FAIL_NSFX(int8_t, "0xF21", "overflow");
+    //
+    TEST_PARSE_FAIL_NSFX(uint8_t, "256", "overflow");
+    //
+    TEST_PARSE_FAIL_NSFX(int16_t, "13K", "trailing characters after");
+    TEST_PARSE_FAIL_NSFX(int16_t, "13a", "trailing characters after");
+    TEST_PARSE_FAIL_NSFX(int16_t, "13 a", "trailing characters after");
+    //
+    TEST_PARSE_FAIL(uint8_t, "1234", "overflow");
+    TEST_PARSE_FAIL(uint8_t, "0x1FF", "overflow");
+    TEST_PARSE_FAIL(uint8_t, "0xFCF", "overflow");
+    //
+    TEST_PARSE_FAIL(int16_t, "32K", "overflow"); // 32K is too big for int16_t
+    TEST_PARSE_FAIL(int16_t, "13 a", "malformed suffix");
+    //
+    TEST_PARSE_FAIL(uint16_t, "1M", "overflow");
+    TEST_PARSE_FAIL(uint16_t, "-32", "must be positive");
+    TEST_PARSE_FAIL(uint16_t, "0x10002", "overflow");
+    //
+    TEST_PARSE_FAIL(int32_t, "-2147483649", "overflow");
+    TEST_PARSE_FAIL(int32_t, "2147483648", "overflow");
+    TEST_PARSE_FAIL(int32_t, "4294967295", "overflow");
+    TEST_PARSE_FAIL(int32_t, "429496729 K", "overflow");
+    //
+    TEST_PARSE_FAIL(uint32_t, "4294967296", "overflow");
+    TEST_PARSE_FAIL(uint32_t, "4294967295K", "overflow");
+    //
+    TEST_PARSE_FAIL(int64_t, "-0x8000000000000000", "overflows");
+    TEST_PARSE_FAIL(int64_t, "-9223372036854775809", "overflow");
+    TEST_PARSE_FAIL(int64_t, "9223372036854775808", "overflow");
+    //
+    TEST_PARSE_FAIL(uint64_t, "18446744073709551616", "overflow");
+  });
 }
 
 static void run_format_tests()
@@ -873,6 +1024,8 @@ int main(int argc, char **argv)
       g_os.filters.push_back(arg);
     }
   } // for args
+
+  run_parse_int_tests();
 
   run_format_tests();
 
