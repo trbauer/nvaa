@@ -213,12 +213,12 @@ fmtOpnd :: FmtOpts -> String -> [FmtSpan]
 fmtOpnd fos o
   | not (foShortHand fos) = noFmt o
   | ".reuse"`isSuffixOf`o = fmtOpnd fos $ take (length o - 2) o
-  | "c[0x0]["`isPrefixOf`o = noFmt $ "c0" ++ drop 6 o
-  | "c[0x1]["`isPrefixOf`o = noFmt $ "c1" ++ drop 6 o
-  | "c[0x2]["`isPrefixOf`o = noFmt $ "c2" ++ drop 6 o
-  | "-c[0x0]["`isPrefixOf`o = noFmt $ "-c0" ++ drop 6 o
-  | "-c[0x1]["`isPrefixOf`o = noFmt $ "-c1" ++ drop 6 o
-  | "-c[0x2]["`isPrefixOf`o = noFmt $ "-c2" ++ drop 6 o
+  | "c[0x0]["`isPrefixOf`o = highlightConst o
+  | "c[0x1]["`isPrefixOf`o = highlightConst o
+  | "c[0x2]["`isPrefixOf`o = highlightConst o
+  | "-c[0x0]["`isPrefixOf`o = highlightConst o
+  | "-c[0x1]["`isPrefixOf`o = highlightConst o
+  | "-c[0x2]["`isPrefixOf`o = highlightConst o
   | "`"`isPrefixOf`o = [FmtSpan "l" o] -- label
   | "["`isPrefixOf`o || "desc["`isPrefixOf`o = highlightAddr o
   | otherwise =
@@ -232,6 +232,18 @@ fmtOpnd fos o
                   _ -> noFmt sfx
       _ -> highlightAllRegs o
   where reg r = [FmtSpan "n" r]
+
+        highlightConst :: String -> [FmtSpan]
+        highlightConst ('-':cs) = noFmt "-" ++ highlightConst cs
+        highlightConst s@('|':cs) =
+          case span (/='|') cs of
+            (body,"|") -> noFmt "|" ++ highlightConst body ++ noFmt "|"
+            _ -> noFmt s
+        highlightConst s
+          | "c[0x0]["`isPrefixOf`s = [FmtSpan "l" $ "c0" ++ drop 6 s]
+          | "c[0x1]["`isPrefixOf`s = [FmtSpan "l" $ "c1" ++ drop 6 s]
+          | "c[0x2]["`isPrefixOf`s = [FmtSpan "l" $ "c2" ++ drop 6 s]
+
 
      -- e.g. desc[UR6][R2.64]
      -- e.g. [R16.64+0x100] or [R88.X16+UR18+0x400]
@@ -254,7 +266,7 @@ fmtOpnd fos o
                       -- e.g. [R16.64...]
                       '.':'6':'4':sfx -> matchToken [FmtSpan "s" ".64"] sfx
                       -- e.g. SLM scaling suffix
-                      '.':'X':'2':sfx -> matchToken [FmtSpan "s" ".X4"] sfx
+                      '.':'X':'2':sfx -> matchToken [FmtSpan "s" ".X2"] sfx
                       '.':'X':'4':sfx -> matchToken [FmtSpan "s" ".X4"] sfx
                       '.':'X':'1':'6':sfx -> matchToken [FmtSpan "s" ".X16"] sfx
                       _ ->
@@ -271,29 +283,51 @@ fmtOpnd fos o
                         matchToken tks sfx = maybe_nfmt ++ tks ++ loop "" sfx
                           where maybe_nfmt = if null rnofmt then [] else noFmt (reverse rnofmt)
 
-
-
-
+-- e.g. RZ, R2, R2+0x100, R2+UR6, R2+UR6+0x100
 regSpan :: String -> Maybe (String,String)
 regSpan s =
   case s of
     'R':'Z':sfx | notIdentChar sfx -> Just ("RZ",sfx)
-    'U':'R':'Z':sfx  | notIdentChar sfx -> Just ("URZ",sfx)
     'P':'T':sfx | notIdentChar sfx -> Just ("PT",sfx)
     'U':'P':'T':sfx  | notIdentChar sfx -> Just ("UPT",sfx)
+    'U':'R':'Z':sfx  | notIdentChar sfx -> Just ("URZ",sfx)
+    --
+    'S':'B':sfx -> tryReg "SB" sfx
     'U':'R':sfx -> tryReg "UR" sfx
     'U':'P':sfx -> tryReg "UP" sfx
     'R':sfx -> tryReg "R" sfx
     'P':sfx -> tryReg "P" sfx
     'B':sfx -> tryReg "B" sfx
     -- 'R':'p':'c':sfx -> Just ("Rpc",sfx)
-    _ -> Nothing
+    _ -> tryKeywords keywords
   where tryReg pfx sfx =
           case span isDigit sfx of
             (ds@(_:_),sfx) | notIdentChar sfx -> Just (pfx ++ ds,sfx)
             _ -> Nothing
         notIdentChar "" = True
         notIdentChar (c:_) = not (isAlphaNum c || c == '_')
+
+        tryKeywords [] = Nothing
+        tryKeywords (kw:kws)
+          | kw`isPrefixOf`s =
+            case splitAt (length kw) s of
+              (kw1,sfx) | kw1 == kw && notIdentChar sfx -> Just (kw,drop (length kw) s)
+              _ -> tryKeywords kws
+          | otherwise = tryKeywords kws
+
+        keywords :: [String]
+        keywords =
+          [
+            "SR_TID.X"
+          , "SR_TID.Y"
+          , "SR_TID.Z"
+          --
+          , "SR_CgaCtaId"
+          , "SR_SWINLO"
+          , "SR_SWINHI"
+          --
+          , "SR_GLOBALTIMERLO"
+          ]
 
 
 

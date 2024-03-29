@@ -166,7 +166,7 @@ doubleToFloat f64
 
 getBits off len val = ((val `shiftR` off) .&. ((1`shiftL`len) - 1))
 
--- deals with NaN
+-- deals with NaN (does not quiet a signaling NaN, only flips sign bit)
 negateDouble :: Double -> Double
 negateDouble d
   | d == d = negate d
