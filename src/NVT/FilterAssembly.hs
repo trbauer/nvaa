@@ -314,7 +314,9 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
 
                 keywords = [
                       ".align"
+                    , ".elftype"
                     , ".global"
+                    , ".headerflags"
                     , ".other"
                     , ".sectionentsize"
                     , ".sectionflags"
