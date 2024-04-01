@@ -204,7 +204,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
         processLns128B dict lns@((_,ln0str):(_,ln1str):lns_sfx) =
           case parseSampleInst (ln0str ++ ln1str) of
             Right si -> do
-              emitSpans fos h_out (fmtSi fos si)
+              emitSpans fos h_out (fmtSi fos si) >> emitLn ""
               processLns128B dict lns_sfx
             Left _ -> tryProcessLineMapping dict lns processLns128B
         processLns128B dict (ln@(_,lnstr):lns) = do
@@ -373,12 +373,12 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
 emitStyle :: FilterOpts -> Handle -> FmtStyle -> String -> IO ()
 emitStyle fos h sty str
   | foColor fos = fsEmitStyle h sty str
-  | otherwise = hPutStrLn h str
+  | otherwise = hPutStr h str
 
 emitSpans :: FilterOpts -> Handle -> [FmtSpan] -> IO ()
 emitSpans fos h_out
   | foColor fos = fsEmit h_out
-  | otherwise = hPutStrLn h_out . fssToString
+  | otherwise = hPutStr h_out . fssToString
 
 fmtSi :: FilterOpts -> SampleInst -> [FmtSpan]
 fmtSi fos = fmtSampleInstToFmtSpans (foFmtOpts fos)
