@@ -535,7 +535,7 @@ emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms = do
 
         emitPtxInstLineLn :: Int -> String -> Bool -> IO ()
         emitPtxInstLineLn llno ptx_ins ooo =
-            emitSpans fos h_out (lno_span:spans ptx_ins)
+            emitSpans fos h_out (lno_span:spans ptx_ins) >> hPutChar h_out '\n'
           where lno_span = text $ ooo_str ++ printf "%4d" llno ++ "> "
                   where ooo_str = if ooo then "!" else " "
 
