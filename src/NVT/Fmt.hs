@@ -61,7 +61,7 @@ fssPadR k fss
 
 fsEmit :: Handle -> [FmtSpan] -> IO ()
 fsEmit h_out = loopSpans
-  where loopSpans [] = hPutStrLn h_out ""
+  where loopSpans [] = hPutStr h_out ""
         loopSpans (fs:fss) = do
           fsEmitStyle h_out (fsStyle fs) (fsText fs)
           loopSpans fss

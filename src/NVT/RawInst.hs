@@ -37,14 +37,14 @@ data RawInst =
   , riOptions :: ![String] -- . suffixes of mnemonic
   , riOperands :: ![String]
   , riDepInfo :: ![String]
-  } deriving Show
+  } deriving (Show,Eq,Ord)
 
 
 data SampleInst =
   SampleInst {
     siRawInst :: !RawInst
   , siBits :: !Word128
-  } deriving Show
+  } deriving (Show,Eq,Ord)
 
 
 fmtRawInst :: RawInst -> String

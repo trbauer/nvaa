@@ -447,9 +447,15 @@ filterAssembly fos = processLns . zip [1..] . lines
 -- assembly collating
 type SrcLoc = (FilePath,Int)
 type SassListingMap = ListingMap SassListingLine
-type SassListingLine = (Int,SampleInst)
+type SassListingLine = (Int,SassListingLineContents) -- (lno_in_asm,line|inst)
 type PtxInstMap = ListingMap PtxInstLine
-type PtxInstLine = (Int,String)
+type PtxInstLine = (Int,String) -- (lno_in_asm, inst_text)
+
+-- TODO: AsmLine a = AsmLine {alAsmLine :: !Int, alContent :: !a}
+
+data SassListingLineContents =
+    SassListingLineContentsLabel !Int !String -- PC and label
+  | SassListingLineContentsInst !SampleInst -- PC is in the inst
 
 -- map source locations to all listing lines/instructions that map there
 type ListingMap a = DM.Map SrcLoc [a]
@@ -460,23 +466,25 @@ no_sloc = ("",0)
 
 -- maps locations to listing line numbers
 collateSassAssembly :: String -> SassListingMap
-collateSassAssembly = loop DM.empty no_sloc . zip [1..] . lines
-  where loop :: SassListingMap -> SrcLoc -> [(Int,String)] -> SassListingMap
-        loop fm _ [] = fm
-        loop fm sl ((lno0,ln0):lns) =
+collateSassAssembly = loop DM.empty no_sloc 0 . zip [1..] . lines
+  where loop :: SassListingMap -> SrcLoc -> Int -> [(Int,String)] -> SassListingMap
+        loop fm _ _ [] = fm
+        loop fm sl lpc ((lno0,ln0):lns)
+          | isLabelLine ln0 =  -- labels don't break location continuity
+            loop (fmInsert sl (lno0,SassListingLineContentsLabel lpc ln0) fm) sl lpc lns
+          | otherwise =
             case lns of
-              [] -> handleNonAsmLn ln0
+              [] -> handleSrcMappingComment ln0
               (_,ln1):lns1 ->
                 case parseSampleInst (ln0 ++ ln1) of
-                  Right si -> loop fm1 sl lns1
-                    where fm1 = fmInsert sl (lno0,si) fm
-                  Left _ -> handleNonAsmLn ln0
-          where handleNonAsmLn ln
-                  | isLabelLine ln =loop fm sl lns -- labels don't break location continuity
-                  | otherwise =
-                    case tryParseLineMapping ln of
-                      Nothing -> loop fm no_sloc lns -- reset loc on inst parse failure
-                      Just sl -> loop fm sl lns
+                  Right si -> loop fm1 sl (riOffset (siRawInst si) + inst_len) lns1
+                    where fm1 = fmInsert sl (lno0,SassListingLineContentsInst si) fm
+                          inst_len = 0x10 -- assume 16B instructions
+                  Left _ -> handleSrcMappingComment ln0
+          where handleSrcMappingComment ln =
+                  case tryParseLineMapping ln of
+                    Nothing -> loop fm no_sloc lpc lns -- reset loc on inst parse failure
+                    Just sl -> loop fm sl      lpc lns
 
 fmInsert :: SrcLoc -> SassListingLine -> SassListingMap -> SassListingMap
 fmInsert sl ll = DM.insertWith (++) sl [ll]
@@ -581,16 +589,24 @@ emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms = do
         -- hasSassListingLine :: Int -> Bool
         -- hasSassListingLine = (`DIM.member`all_sass_listing_lines)
 
-        emitSassInstLn :: Int -> SampleInst -> Bool -> IO ()
-        emitSassInstLn llno si ooo =
-            emitSpans fos h_out $ ooo_span : lloc_span ++ fmtSi fos si
+        emitSassInstLn :: Int -> SassListingLineContents -> Bool -> IO ()
+        emitSassInstLn llno sllc ooo =
+            emitSpans fos h_out $ ooo_span : lloc_span ++ body ++ fs_none "\n"
           where ooo_span = if ooo then FmtSpan FmtRD "!" else FmtSpan FmtNONE " "
                 lloc_span
                   -- emit listing line number (no PCs)
                   | off < 0 = fs_none (printf "[line %4d]" llno)
                   -- use the PC
                   | otherwise = fs_none (printf "[%05X] " off)
-                  where off = riOffset (siRawInst si)
+                  where off =
+                          case sllc of
+                            SassListingLineContentsInst si -> riOffset (siRawInst si)
+                            SassListingLineContentsLabel pc _ -> pc
+                body :: [FmtSpan]
+                body =
+                  case sllc of
+                    SassListingLineContentsLabel _ lbl -> [fs_lit lbl]
+                    SassListingLineContentsInst si -> fmtSi fos si
 
         emitSrcLn :: String -> IO ()
         emitSrcLn s = emitStyle fos h_out fmt_sty_comm s >> hPutStrLn h_out ""
@@ -634,8 +650,7 @@ emitCollatedListingWith fos h_out all_src_fs ptx_lms sass_lms = do
             Nothing -> return ()
             Just oph_llns -> do
               emitFileHeader "(orphans)"
-              forM_ (sortOn fst oph_llns) $ \(llno,si) ->
-                emitSassInstLn llno si False
+              forM_ (sortOn fst oph_llns) $ \(llno,sllc) -> emitSassInstLn 0 sllc False
 
         emitSrcFileLines :: FilePath -> (Int,Int) -> [(Int,String)] -> IO ()
         emitSrcFileLines _ _ [] = return ()
