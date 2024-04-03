@@ -61,8 +61,15 @@ struct opts {
   }
 };
 
+struct test_exception {
+  std::string what;
+  template <typename...Ts>
+  test_exception(Ts...ts) : what(format(ts...)) {}
+};
 
 static opts g_os;
+static bool verbose() {return g_os.verbose();}
+static bool debug() {return g_os.debug();}
 
 template <typename T>
 static std::string mc_format(T t, fmt_opts fos = fmt_opts())
@@ -73,6 +80,7 @@ static std::string mc_format(T t, fmt_opts fos = fmt_opts())
 }
 
 static std::string test_esc_str(std::string s) {
+  // https://en.cppreference.com/w/cpp/language/escape
   std::stringstream ss;
   ss << '\"';
   for (size_t i = 0; i < s.size(); i++) {
@@ -109,9 +117,11 @@ static std::string test_fmt(const T &t) {
 
 static std::string g_current_label;
 
+#define TEST_FATAL(...) \
+  test_fatal(__LINE__, format(__VA_ARGS__))
+
 static void test_fatal(int line, std::string message) {
-  mincu::fatal(
-      ansi_red<const char *>("FAILED"), "\n",
+  throw test_exception(ansi_red<const char *>("FAILED"), "\n",
       "test ", ansi_red(g_current_label.empty() ? "???" : g_current_label),
       "; near line ", ansi_yellow(line), ":\n",
       message);
@@ -214,54 +224,38 @@ static void test_ge_impl(
   TEST_FAIL_AT(__LINE__, msg)
 
 
-static void TEST_GROUP(std::string lbl, std::function<void()> BLOCK) {
+static void TEST_GROUP(std::string lbl,
+                       std::function<void(std::ostream &)> BLOCK) {
   if (!g_current_label.empty())
     fatal("INTERNAL ERROR: recursive/nested test detected ", lbl, " under ",
           g_current_label);
   if (g_os.matches_any_filter(lbl)) {
     g_current_label = lbl;
     std::cout << "====== " << coll<std::string>(lbl + ":", 48) << "  ";
-    BLOCK();
-    std::cout << ansi_green<const char *>("PASSED") << "\n";
+    std::stringstream ss;
+    try {
+      BLOCK(ss);
+      std::cout << ansi_green<const char *>("PASSED") << "\n";
+      std::cout << ss.str();
+    } catch (const test_exception &te) {
+      std::cout << ansi_red<const char *>("FAILED") << "\n";
+      std::cout << ss.str() << "...\n";
+    } catch (...) {
+      std::cout << ansi_red<const char *>("EXCEPTION") << "\n";
+      std::cout << ss.str() << "...\n";
+    }
     g_current_label = "";
   } else if (g_os.verbosity >= 1) {
     std::cout << "====== " << coll<std::string>(lbl + ":", 48) << "  "
               << ansi_yellow<const char *>("SKIPPING") << "\n";
   }
 }
-
-
-/*
-extern "C"
-__global__ void add_float_k(
-    float *dsts,
-    const float *srcs, float k)
-{
-  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  auto val = srcs[gid];
-  auto val_plus_k = val + k;
-  dsts[gid] = val_plus_k;
+static void TEST_GROUP(std::string lbl, std::function<void()> BLOCK) {
+  std::function<void(std::ostream &)> func = [&](std::ostream &) {
+    BLOCK();
+  };
+  TEST_GROUP(lbl, func);
 }
-
-
-static void test_add_float_k()
-{
-  start_test("static void test_add_float_k");
-  static const size_t BLOCKS = 1; // 1 warp only
-  static const size_t TPB = 32; // threads per block (1 warp)
-
-  umem<float> inps(64, arith_seq<float>(0.0f));
-  umem<float> oups(64);
-  inps.str(std::cout, 8, 3);
-
-  add_float_k<<<BLOCKS,TPB>>>(dsts, srcs, 1.0f);
-  auto e = cudaDeviceSynchronize();
-  if (e != cudaSuccess) {
-    mincu::fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error");
-  }
-  oups.str(std::cout, 8, 3);
-} // test_add_float_k
-*/
 
 static void run_buf_init_tests()
 {
@@ -651,7 +645,7 @@ static void run_mc_derived_function_tests()
 
 
 template <typename T>
-static void shared_type_tests(std::stringstream &ss) {
+static void shared_type_tests(std::ostream &os) {
   using E = typename mc_type<T>::elem_type;
 
   const T zero = mc_type<T>::bcast(0);
@@ -665,10 +659,12 @@ static void shared_type_tests(std::stringstream &ss) {
   const T eight = mc_type<T>::bcast(8);
   const T nine = mc_type<T>::bcast(9);
   const T ten = mc_type<T>::bcast(10);
-  ss << "zero is: "; mincu::format_elem(ss, zero, fmt_opts()); ss << "\n";
-  ss << "one is:  "; mincu::format_elem(ss, one, fmt_opts()); ss << "\n";
-  if constexpr (std::is_signed_v<E>) {
-    ss << "negative two is:  "; mincu::format_elem(ss, -two, fmt_opts()); ss << "\n";
+  if (debug()) {
+    os << "zero is: "; mincu::format_elem(os, zero, fmt_opts()); os << "\n";
+    os << "one is:  "; mincu::format_elem(os, one, fmt_opts()); os << "\n";
+    if constexpr (std::is_signed_v<E>) {
+      os << "negative two is:  "; mincu::format_elem(os, -two, fmt_opts()); os << "\n";
+    }
   }
 
   TEST_EQ(zero, zero);
@@ -828,7 +824,9 @@ static void shared_type_tests(std::stringstream &ss) {
   // random sequence
   random_state rs {12007}; // can be shared by various rnd_seq's
   buf.init(rnd_seq(rs, zero, ten));
-  ss << "some random values are: "; buf.str(ss);
+  if (debug()) {
+    os << "some random values are: "; buf.str(os);
+  }
   if constexpr (std::is_same_v<T,uint32_t>) {
     // these are hardcoded based on type
     TEST_EQ(buf[0], one);
@@ -844,7 +842,7 @@ static void shared_type_tests(std::stringstream &ss) {
 }
 
 template <typename T>
-static void test_base_type() {
+static void test_base_type(std::ostream &os) {
   using E = typename mc_type<T>::elem_type;
   static_assert(std::is_same_v<T,E>); // since we are a base type
   static_assert(mc_type<T>::N == 1);
@@ -858,42 +856,40 @@ static void test_base_type() {
   static_assert(std::is_same_v<T,typename mc_type<V3>::elem_type>);
   static_assert(std::is_same_v<T,typename mc_type<V4>::elem_type>);
 
-  std::stringstream ss;
-  ss << "base type " << type_name<T>() << ":\n";
-  ss << "vector versions:\n" <<
-      "V1: " << type_name<V1>() << "\n"
-      "V2: " << type_name<V2>() << "\n"
-      "V3: " << type_name<V3>() << "\n"
-      "V4: " << type_name<V4>() << "\n"
-      "";
+  if (debug()) {
+    os << "base type " << type_name<T>() << ":\n";
+    os << "vector versions:\n" <<
+        "V1: " << type_name<V1>() << "\n"
+        "V2: " << type_name<V2>() << "\n"
+        "V3: " << type_name<V3>() << "\n"
+        "V4: " << type_name<V4>() << "\n"
+        "";
+  }
 
-  shared_type_tests<T>(ss);
+  shared_type_tests<T>(os);
 
-  if (g_os.verbose())
-    std::cout << ss.str();
 }
 template <typename T>
-static void test_vec_type() {
+static void test_vec_type(std::ostream &os) {
   std::stringstream ss;
   using E = typename mc_type<T>::elem_type;
-  ss << "type: " << type_name<T>() << " is " <<
-      type_name<E>() << "[" << mc_type<T>::N << "]\n";
-
-  shared_type_tests<T>(ss);
-
-  if (g_os.verbose())
-    std::cout << ss.str();
+  if (debug()) {
+    os << "type: " << type_name<T>() << " is " <<
+        type_name<E>() << "[" << mc_type<T>::N << "]\n";
+  }
+  shared_type_tests<T>(os);
 }
+
 template <typename T>
 static void test_type(int) {
-    TEST_GROUP(format("mc_type.", type_name<T>()),
-        [] {
-          if constexpr (mc_type<T>::N >= 1) {
-            test_vec_type<T>();
-          } else {
-            test_base_type<T>();
-          }
-        });
+  TEST_GROUP(format("mc_type.", type_name<T>()),
+      [] (std::ostream &os) {
+        if constexpr (mc_type<T>::N >= 1) {
+          test_vec_type<T>(os);
+        } else {
+          test_base_type<T>(os);
+        }
+      });
 }
 
 
@@ -982,6 +978,50 @@ static void run_type_tests()
 //  ON_ALL_MC_TYPES(test_type, 0);
 }
 
+#if 0
+
+// # if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+// #     target_compile_options("mincu-tests75" PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-G>)
+// # endif()
+
+#endif // 0
+
+extern "C"
+__global__ void add_float_k(
+    float *oups,
+    const float *inps, float k)
+{
+  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  auto val = inps[gid];
+  auto val_plus_k = val + k;
+  oups[gid] = val_plus_k;
+}
+
+
+static void run_device_tests()
+{
+  TEST_GROUP("test_add_float_k",
+      [](std::ostream &os) {
+        static const size_t BLOCKS = 1; // 1 warp only
+        static const size_t TPB = 32; // threads per block (1 warp)
+
+        umem<float> inps(64, arith_seq<float>(0.0f));
+        umem<float> oups(64);
+        if (verbose())
+          inps.str(os, 8, 3);
+
+        add_float_k<<<BLOCKS,TPB>>>(oups, inps, 1.0f);
+        auto e = cudaDeviceSynchronize();
+        if (e != cudaSuccess) {
+          TEST_FATAL(cudaGetErrorName(e),
+            " (", cudaGetErrorString(e), "): unexpected error");
+          return;
+        }
+        if (verbose())
+          oups.str(os, 8, 3);
+      });
+} // test_add_float_k
+
 int main(int argc, char **argv)
 {
   for (int i = 1; i < argc; i++) {
@@ -1032,10 +1072,10 @@ int main(int argc, char **argv)
   run_mc_derived_function_tests();
 
   run_buf_init_tests();
-  // TODO: run_format_umem_tests()
-  //  test_add_float_k();
 
   run_type_tests();
+
+  run_device_tests();
 
   return EXIT_SUCCESS;
 }
