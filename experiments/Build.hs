@@ -21,8 +21,7 @@ import qualified Data.Set as DS
 import qualified Data.Map.Strict as DM
 import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 
--- TODO: abort later targets if dependent target fails
--- TODO: honor config files in dir (instead of .cu)
+-- TODO: support config files in dir (instead of .cu)
 --       to allow for multiple targets in a directory
 -- TODO: -q hides everything except errors
 --       -v=0 shows only modified changes
@@ -31,7 +30,7 @@ import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 -- TODO: sniff out #include dependencies...
 -- TODO: cmake should be pseudo target
 --        - store in options oCmake :: [(FilePath,Arch)]
---        - why not treat it like a regular target (non-default)?
+--        - why not treat it like a regular target (non-default) and filter out?
 -- TODO: clean should be a pseudo target (which allows no SM)
 --        - oClean :: [(FilePath,[ArtifactKind],Arch)]
 --          should clean just clean all targets?
@@ -42,7 +41,12 @@ import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 --    I suspect I only check locally in the run.
 --    Since, we run serially, we are probably safe.
 --
--- TODO: Eliminate up to date targets from the build plan
+-- TODO: eliminate up to date targets from the build plan
+--
+-- TODO: move towards programmable formulae
+--       - .bcfg binds EXE's up front
+--       - and give the rules hardcoded below
+--       - generate intermediate files following a given pattern
 
 main :: IO ()
 main = getArgs >>= run
@@ -163,7 +167,6 @@ parseOpts os (a:as)
   --
   | a `elem` ["--setup"] = checkTools True >> exitSuccess
   --
-  | a `elem` ["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["--cmake"] = nextArg os {oCmake = True}
   | a `elem` ["-d","--dry-run"] = nextArg os {oDryRun = True}
   | a `elem` ["-F","--no-fail-fast"] = nextArg os {oFailFast = False}
@@ -330,6 +333,9 @@ runWithOpts os
           removeFile oup
 
   | oCmake os = do
+    -- file:///C:/program%20Files/cmake/doc/cmake/html/module/FindCUDA.html
+    -- Need -G  https://docs.nvidia.com/nsight-visual-studio-edition/cuda-debugger/#build-the-sample-and-launch-the-debugger
+    -- https://stackoverflow.com/questions/67888279/debugging-cuda-kernels-with-vs-code
     z <- doesFileExist "CMakeLists.txt"
     when (z && not (oClobber os)) $
       fatal "CMakeLists.txt already exists in this directory"
@@ -356,6 +362,7 @@ runWithOpts os
       "cmake_minimum_required(VERSION 3.25.2) # CMAKE_CUDA_STANDARD 20 for C++20\n" ++
       "project(" ++ show vs_solution_name ++ " LANGUAGES CXX CUDA)\n" ++
       "\n" ++
+      -- CUDA_NVCC_FLAGS_DEBUG -G?
       "set(CUDA_NVCC_FLAGS \"${CUDA_NVCC_FLAGS}\" \"-g\" \"-G\")\n" ++
       "set(CMAKE_CUDA_STANDARD 20)\n" ++
       "set(CMAKE_CUDA_STANDARD_REQUIRED ON)\n" ++

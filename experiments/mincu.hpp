@@ -1552,6 +1552,18 @@ static T parse_integral(
     fatal(s, ": ", r.error);
   return r.value;
 }
+template <typename T>
+static T parse_integral_positive(
+  const std::string &s,
+  bool allow_suffix,
+  const char *what = "integral")
+{
+  auto val = parse_integral<T>(s, allow_suffix, what);
+  if (val <= 0) {
+    fatal(s, ": ", what, " must be positive");
+  }
+  return val;
+}
 static uint64_t parse_uint64(
   const std::string &s,
   bool allow_suffix = false,
