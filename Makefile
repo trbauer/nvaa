@@ -25,9 +25,11 @@ nva.exe: Makefile src/Main.hs src/NVT/*.hs src/NVT/Encoders/*.hs src/NVT/Parsers
 	strip $@
 
 # If this fails, copy the command line and try direct.
+install2: nva2
+	@cp nva.exe ${INSTALL_DST}
 nva2:
 	mkdir -p build/nva2
-	ghc  -hidir build/nva2 -odir build/nva2 --make src/Main.hs -O2 -o nva.exe -with-rtsopts="-N" -rtsopts -isrc -threaded ${PACKAGES} \
+	ghc  -hidir build/nva2 -odir build/nva2 --make src/Main.hs -O2 -o nva.exe -with-rtsopts="-N" -rtsopts -isrc -threaded ${PACKAGES}
 	strip nva.exe
 
 install: nva.exe

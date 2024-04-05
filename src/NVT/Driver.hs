@@ -94,8 +94,9 @@ spec = PA.mkSpecWithHelpOpt "nva" ("NVidia Assembly Translator " ++ nvt_version)
     , PA.opt spec "Xnvdisasm" "" "ANYTHING"
         "sets an extra argument for the nvdiasm tool" ""
         (\a o -> (o {oExtraNvdisasmArgs = oExtraNvdisasmArgs o ++ [a]})) # PA.OptAttrAllowUnset # PA.OptAttrAllowMultiple
-    , PA.optF spec "Xinlined" "retain inlined source annotations"
-        "retain inline source annotations" ""
+    , PA.optF spec "Xinlined" ""
+        "keep inlined src annotations"
+        "retain inline source annotations"
         (\o -> (o {oFilterAsmPassInlined = True})) # PA.OptAttrAllowUnset
     , PA.optF spec "v2" "debug"
         "the verbosity level" ""
