@@ -30,17 +30,19 @@ Initialization is as simple as an atomic exchange.
       FENCE.VIEW.ASYNC.S                {!10,+1.W}; // flush everything
       SYNCS.EXCH.64  URZ, [UR4], UR6    {!2,+1.W,+2.R}; // swap the values, dumping the old value (URZ)
 ```
-The pending count seems to be stored negative. E.g. `0x1fffc0` is 32.
+The pending count seems to be stored negative. E.g. `0x1fffc0` is init of 32.
+The value -32 is `0xFFFFFFE0`, so shifted left 1 gives `...FC0`.
+Thus, the bottom bit some other status bit (parity?).
 The syntax seems to indicate arrivals are counted up from negative 0 (`A1` means 1 arrives).
 
 ## MBarrier Thread Arrival and ExpectTX `SYNCS.ARRIVE.TRANS64.*`
 Signaling thread arrival is fused with increasing the expected count
 
-- `SYNCS.ARRIVE.TRANS64` -- `mbarrier.arrive.expect_tx.*` -- arrive 1; expect_tx += Src1
+- `SYNCS.ARRIVE.TRANS64` -- `mbarrier.arrive.expect_tx.*` -- arrive = 1; expect_tx += Src1
 - `SYNCS.ARRIVE.TRANS64.OPTOUT` -- `mbarrier.arrive_drop.expect_tx.*`
 - `SYNCS.ARRIVE.TRANS64.A1T0` -- `mbarrier.arrive*` (without Src1) -- arrived += 1, expect_tx += 0
 - `SYNCS.ARRIVE.TRANS64.ART0` -- `mbarrier.arrive*` (with Src1) -- arrived += Src1, expect_tx += 0
-- `SYNCS.ARRIVE.TRANS64.RED.A0TR` - `mbarrier.expect_tx.*` -- arrived 0, expect_tx += Src1
+- `SYNCS.ARRIVE.TRANS64.RED.A0TR` - `mbarrier.expect_tx.*` -- arrived = 0, expect_tx += Src1
 - `SYNCS.ARRIVE.TRANS64.RED.A0TX` - `mbarrier.complete_tx.*` -- simulate completion
 
 ```

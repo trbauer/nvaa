@@ -326,6 +326,13 @@ regSpan s =
           , "SR_SWINLO"
           , "SR_SWINHI"
           --
+          , "SR_CTAID.X"
+          , "SR_CTAID.Y"
+          , "SR_CTAID.Z"
+          --
+          , "SR_LANEID"
+          , "SR_LTMASK"
+          --
           , "SR_GLOBALTIMERLO"
           ]
 
