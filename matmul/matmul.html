@@ -66,24 +66,37 @@ function buildSvg(dims)
   //  v .....    ........
   //    <---> K
 
-  console.log(dims)
+  // console.log("rendering", dims)
 
-  const elem_px = 16, ind = 16, mat_spacing = 32
-  const Dw = dims.M * elem_px
-  const Dh = dims.N * elem_px
-  const Aw = dims.K * elem_px
-  const Ah = dims.M * elem_px
-  const Bw = dims.N * elem_px
-  const Bh = dims.K * elem_px
+  const ind = 16
+  const mat_spacing = 32
+  const frag_w = 16
+  const frag_h = 16
 
-  function elem(id, x_off, y_off, fill) {
+  const Dw = dims.M * frag_w
+  const Dh = dims.N * frag_w
+  const Aw = dims.K * frag_w
+  const Ah = dims.M * frag_w
+  const Bw = dims.N * frag_w
+  const Bh = dims.K * frag_w
+
+  const A_left = ind
+  const A_top = ind + Bh + mat_spacing
+
+  const B_left = ind + Aw + mat_spacing
+  const B_top = ind
+
+  const D_left = A_left + Aw + mat_spacing
+  const D_top = ind + Bh + mat_spacing
+
+  function elem(id, x_off, y_off, frag_w, frag_h, fill) {
     const s =
       "<rect" +
       " id=\"" + id + "\"" +
       " x=\"" + x_off + "\"" +
       " y=\"" + y_off + "\"" +
-      " width=\"" + (elem_px - 1) + "\"" +
-      " height=\"" + (elem_px - 1) + "\"" +
+      " width=\"" + (frag_w - 1) + "\"" +
+      " height=\"" + (frag_h - 1) + "\"" +
       " fill=\"" + fill + "\"" +
       " stroke=\"black\"" +
       ">" +
@@ -101,57 +114,58 @@ function buildSvg(dims)
     return s
   }
 
-  var svg = ""
+  var svg_body = ""
 
   // D matrix
   for (var m = 0; m < dims.M; m++) {
     for (var n = 0; n < dims.N; n++) {
-      const x_off = n * elem_px + ind
-      const y_off = m * elem_px + ind
+      const x_off = D_left + n * frag_w
+      const y_off = D_top  + m * frag_h
       const id = "D." + n + "." + m
-      svg += elem(id, x_off, y_off, "rgb(224,224,255)")
+      svg_body += elem(id, x_off, y_off, frag_w, frag_h, "rgb(224,224,255)")
     }
   }
 
-  svg += drawText("=",
-                  ind + Dw + mat_spacing / 2 - 4,
-                  Dh / 2, "font-family:monospace", 16)
+  //  svg += drawText("=",
+  //                  ind + Dw + mat_spacing / 2 - 4,
+  //                  Dh / 2, "font-family:monospace", 16)
 
   // A matrix
   for (var m = 0; m < dims.M; m++) {
     for (var k = 0; k < dims.K; k++) {
-      const x_off = k * elem_px + ind + Dw + mat_spacing
-      const y_off = m * elem_px + ind
+      const x_off = A_left + k * frag_w
+      const y_off = A_top  + m * frag_h
       const id = "A." + m + "." + k
-      svg += elem(id, x_off, y_off, "rgb(255,224,224)")
+      svg_body += elem(id, x_off, y_off, frag_w, frag_h, "rgb(255,224,224)")
     }
   }
 
-  svg += drawText("x",
-                  ind + Dw + mat_spacing + Aw + mat_spacing / 2 - 4,
-                  Dh / 2, "font-family:monospace", 16)
+  //  svg_body += drawText("x",
+  //                       ind + Dw + mat_spacing + Aw + mat_spacing / 2 - 4,
+  //                       Dh / 2, "font-family:monospace", 16)
 
   // B matrix
   for (var k = 0; k < dims.K; k++) {
     for (var n = 0; n < dims.N; n++) {
-      const x_off = n * elem_px + ind + Dw + mat_spacing + Aw + mat_spacing
-      const y_off = k * elem_px + ind
+      const x_off = B_left + n * frag_w
+      const y_off = B_top  + k * frag_h
       const id = "B." + k + "." + n
-      svg += elem(id, x_off, y_off, "rgb(224,255,224)")
+      svg_body += elem(id, x_off, y_off, frag_w, frag_h, "rgb(224,255,224)")
     }
   }
 
-  const W = ind + Dw + mat_spacing + Aw + mat_spacing + Bw + ind
-  const H = ind + Math.max(Dh, Ah, Bh) + ind
+  const W = D_left + dims.N * frag_w + ind
+  const H = D_top  + dims.M * frag_h + ind
+
   const full_svg =
     "<svg " +
       "width=\"" + W + "\" " +
-      "height=\"" + H + "\">\n"
-    + svg +
+      "height=\"" + H + "\">\n" +
+      svg_body +
     "</svg>\n"
 
   return {src:full_svg, bind_listeners:function() {
-            console.log("TODO: bind listeners")
+            var pinned = false
             for (var m = 0; m < dims.M; m++) {
               for (var n = 0; n < dims.N; n++) {
                 const d_id = "D." + n + "." + m
@@ -169,8 +183,10 @@ function buildSvg(dims)
                   const b_elem = document.getElementById(b_id)
                   d_elem.b_col.push(b_elem)
                 }
-
                 d_elem.addEventListener("mouseenter", function(e) {
+                  if (pinned) {
+                    return
+                  }
                   e.currentTarget.style.stroke = "red"
                   e.currentTarget.a_row.forEach(function(a_elem) {
                      a_elem.style.stroke = "red";
@@ -180,6 +196,9 @@ function buildSvg(dims)
                    });
                 })
                 d_elem.addEventListener("mouseleave", function(e) {
+                  if (pinned) {
+                    return
+                  }
                   e.currentTarget.style.stroke = "black"
                   e.currentTarget.a_row.forEach(function(a_elem) {
                      a_elem.style.stroke = "black";
@@ -187,6 +206,9 @@ function buildSvg(dims)
                   e.currentTarget.b_col.forEach(function(b_elem) {
                      b_elem.style.stroke = "black";
                    });
+                })
+                d_elem.addEventListener("click", function(e) {
+                  pinned = !pinned
                 })
               }
             }
