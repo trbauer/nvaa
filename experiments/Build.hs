@@ -696,7 +696,10 @@ callExeG os dio exe as m_oup_fp inp = do
                 "  >> exited " ++ show ec ++ "\n" ++
                 "ERR:\n" ++ err ++ "\n" ++
                 "OUT:\n" ++ out ++ "\n"
-        throwIO $ TaskException (takeFileName exe ++ " failed")
+        throwTaskException (takeFileName exe ++ " failed")
+
+throwTaskException :: String -> IO a
+throwTaskException = throwIO . TaskException
 
 buildArtifact :: Opts -> IORef (IO ()) -> Artifact -> IO ()
 buildArtifact os dio a@(ak,fp,arch) = do
@@ -715,14 +718,17 @@ buildArtifact os dio a@(ak,fp,arch) = do
     ArtifactKindEXE -> do
       -- 	nvcc -std=c++20 -arch sm_${EXE_ARCH} -I ../../tools ${WORKLOAD}.cu
       --           -o ${WORKLOAD}${EXE_ARCH}.exe
+      inline_opts <- readInlineOptsFor "nvcc" fp
       callExe os dio "nvcc"
           ([ "-std=c++20"
           , "-arch","sm_"++arch
           , "-I", takeDirectory mINCU_PATH
           , "-o", fp_exe
           , fp
-          ] ++ oXnvcc os) ""
+          ] ++ inline_opts ++ oXnvcc os) ""
+
     ArtifactKindCUBIN -> do
+      inline_opts <- readInlineOptsFor "nvcc" fp
       callExe os dio "nvcc"
         ([ "-std=c++20"
         , "-arch","sm_"++arch
@@ -732,9 +738,10 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , "-cubin"
         , "-o", fp_cubin
         , fp
-        ] ++ oXnvcc os) ""
+        ] ++ inline_opts ++ oXnvcc os) ""
 
     ArtifactKindPTX -> do
+      inline_opts <- readInlineOptsFor "nvcc" fp
       callExe os dio "nvcc"
         ([ "-std=c++20"
         , "-arch","sm_"++arch
@@ -744,7 +751,8 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , "--ptx"
         , "-o", fp_ptx
         , fp
-        ] ++ oXnvcc os) ""
+        ] ++ inline_opts ++ oXnvcc os) ""
+
     ArtifactKindSASS -> do
       callExeToFile os dio "nvdisasm"
         ([ "--print-instruction-encoding" -- for depinfo
@@ -805,6 +813,106 @@ buildArtifact os dio a@(ak,fp,arch) = do
         , fp_dot_sass
         ] ""
 
+
+-- Inline source file options:
+-- Lines that start with:
+--   /// OPTIONS [tool]: [opts]
+--   * Must be at beginning of line
+--   * Must be before any source lines
+--   * // comments and empty lines are allowable before the /// OPTIONS
+--   * The [opts] value is tokenized by spaces, with quoted strings allowed
+--
+-- e.g. /// OPTIONS nvcc: --expt-relaxed-constexpr   ==> ["--expt-relaxed-constexpr"]
+--
+-- TODO: multitoken options
+--      /// OPTIONS nvcc: foo bar"baz qux" zip        ==> ["foo","barbaz qux","zip"]
+-- TODO: skip /* (e.g. copyright banners)
+readInlineOpts :: FilePath -> IO ([(String,[String])])
+readInlineOpts fp = readFile fp >>= processBoL 1 DM.empty
+  where processBoL :: Int -> DM.Map String [String] -> String -> IO ([(String,[String])])
+        processBoL lno m s
+          | null s = return $ DM.toList m
+          | "/// OPTIONS"`isPrefixOf`ln = do
+            case words ln of
+              "///":"OPTIONS":tool_colon:_ -> do
+                when (null tool_colon || last tool_colon /= ':') $
+                  malformedOptions lno "expected : to follow tool name"
+                let tool = init tool_colon
+                case tool of
+                  "nvcc" -> return ()
+                  _ -> malformedOptions lno (tool ++ ": unrecognized tool")
+                case tokenizeOptions (drop 1 (dropWhile (/=':') ln)) of
+                  Left err -> malformedOptions lno ("error in options: " ++ err)
+                  Right opts -> processBoL (lno + 1) m1 sfx
+                    where m1 = DM.insertWith (flip (++)) tool opts m
+              _ -> malformedOptions lno "expected: /// OPTIONS [tool]: [opts]"
+          -- allow skipping //
+          | "//"`isPrefixOf`s = do
+            processBoL (lno + 1) m sfx
+          -- allow skipping empty lines or all spaces
+          | all isSpace ln = do
+            processBoL (lno + 1) m sfx
+          --
+          | "/// OPTIONS"`isPrefixOf`dropWhile isSpace ln =
+            malformedOptions lno "/// must be at the beginning of the line"
+          -- otherwise, we're done
+          | otherwise = do
+            let lns_sfx = zip [lno + 1 ..] (lines sfx) :: [(Int,String)]
+            case filter (("/// OPTIONS"`isPrefixOf`) . dropWhile isSpace . snd) lns_sfx  of
+              [] -> return ()
+              (lno,_):sfx ->
+                malformedOptions lno "/// must be at the beginning of the file"
+            return $ DM.toList m
+          where (ln,sfx) =
+                  case span (`notElem`"\n\r") s of
+                    (ln,'\r':'\n':sfx) -> (ln,sfx)
+                    (ln,'\n':sfx) -> (ln,sfx)
+                    (ln,'\r':sfx) -> (ln,sfx)
+                    (ln,"") -> (ln,"")
+
+                malformedOptions :: Int -> String -> IO a
+                malformedOptions lno msg =
+                  throwTaskException $ takeFileName fp ++ ":" ++ show lno ++ ": inline options: " ++ msg
+
+-- readFileS fp = do {fstr <- readFile fp; length fstr `seq` return fst}
+
+
+-- Splits space-separated words into a list of strings,
+-- but permits quoted strings with spaces and escaped quotes.
+tokenizeOptions :: String -> Either String [String]
+tokenizeOptions = nextToken [] . dropWhile isSpace
+  where nextToken :: [String] -> String -> Either String [String]
+        nextToken ropts s =
+          case s of
+            "" -> return $ reverse ropts
+            c:cs
+              | isSpace c -> nextToken ropts cs
+              | otherwise -> do
+                (opt,s) <- consToken "" s
+                nextToken (opt:ropts) s
+
+        consToken :: String -> String -> Either String (String,String)
+        consToken ropt s =
+          case s of
+            "" -> return (reverse ropt,"")
+            '\"':cs -> escToken ropt cs
+              where escToken ropt s =
+                      case s of
+                        "" -> Left "unterminated quoted option"
+                        '\"':cs -> consToken ropt cs
+                        '\\':'\"':cs -> escToken ('\"':ropt) cs
+                        '\\':'\\':cs -> escToken ('\\':ropt) cs
+                        c:cs -> escToken (c:ropt) cs
+            c:cs
+              | isSpace c -> return (reverse ropt,c:cs)
+              | otherwise -> consToken (c:ropt) cs
+
+readInlineOptsFor :: String -> FilePath -> IO [String]
+readInlineOptsFor tool fp =
+  readInlineOpts fp >>= \opts ->
+    case tool`lookup`opts of
+      Just opts -> return opts
+      Nothing -> return []
 
 
 -- nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx -I .. -arch sm_${ARCH}
