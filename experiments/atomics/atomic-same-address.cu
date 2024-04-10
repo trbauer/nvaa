@@ -1,12 +1,24 @@
+/// OPTIONS nvcc: --expt-relaxed-constexpr
 #include "mincu.hpp"
 
 #include <array>
 #include <bit>
 #include <tuple>
 
+
 using namespace mincu;
 
-static const unsigned ITRS = 64;
+static __device__ uint32_t get_lane_id() {
+  uint32_t __id;
+  asm ("mov.u32 %0, %laneid;" : "=r"(__id));
+  return __id;
+}
+static __device__ bool elect() {
+  return get_lane_id() == __ffs(__activemask()) - 1;
+}
+
+// static const unsigned ITRS = 64;
+static const unsigned ITRS = 4;
 
 static const unsigned NUM_BINS = 64;
 static_assert(std::popcount(NUM_BINS) == 1, "NUM_BINS must be a power of 2");
@@ -14,6 +26,7 @@ static_assert(std::popcount(NUM_BINS) == 1, "NUM_BINS must be a power of 2");
 static __host__ __device__ unsigned get_bin(unsigned x) {
   return x & (NUM_BINS - 1);
 }
+
 
 extern "C"
 __global__ void count_bins_glb(
@@ -34,14 +47,14 @@ __global__ void count_bins_collapse_zero(
 {
   const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
   const uint32_t val = inps[gid];
+  const auto lane_id = get_lane_id();
   // hammer the atomic ITRS times with the same value
   for (unsigned i = 0; i < ITRS; i++) {
     const unsigned b = get_bin(val + i * zero);
-    // collapse all to bin zero
-    if (b == 0) {
-      auto mask = __activemask();
-      if (__ffs(mask) == threadIdx.x % 32) { // elect a lane
-        atomicAdd(&bins[b], std::popcount(mask));
+    if (b == 0) { // manually collapse all to bin zero
+      auto zeros = std::popcount(__activemask());
+      if (elect()) { // elect a lane
+        atomicAdd(&bins[b], zeros);
       }
     } else {
       atomicAdd(&bins[b], 1);
@@ -52,7 +65,7 @@ __global__ void count_bins_collapse_zero(
 
 struct opts {
   int verbosity = 0;
-  int iterations = 1;
+  int iterations = 2;
   bool check = false;
   size_t blocks_per_grid = 1024;
   size_t threads_per_block = 256;
@@ -154,37 +167,37 @@ static void run_test(
 
 using test = std::tuple<std::string,std::function<unsigned(size_t)>,dispatch_wrapper>;
 static const test ALL_TESTS[] {
-  {"glb-00-zeros",
+  {"hw-00-zeros",
       [] (size_t ix) {return 1;},
       [] (size_t blocks_per_grid, size_t block_size, uint32_t *bins, const uint32_t *inps) {
         count_bins_glb<<<blocks_per_grid,block_size>>>(bins, inps, 0);
       }},
-  {"glb-01-zeros",
+  {"hw-01-zeros",
       [] (size_t ix) {return ix % 32 == 0 ? 0 : 1;},
       [] (size_t blocks_per_grid, size_t block_size, uint32_t *bins, const uint32_t *inps) {
         count_bins_glb<<<blocks_per_grid,block_size>>>(bins, inps, 0);
       }},
-  {"glb-08-zeros",
+  {"hw-08-zeros",
       [] (size_t ix) {return ix % 32 < 8 ? 0 : 1;},
       [] (size_t blocks_per_grid, size_t block_size, uint32_t *bins, const uint32_t *inps) {
         count_bins_glb<<<blocks_per_grid,block_size>>>(bins, inps, 0);
       }},
-  {"glb-16-zeros",
+  {"hw-16-zeros",
       [] (size_t ix) {return ix % 32 < 16 ? 0 : 1;},
       [] (size_t blocks_per_grid, size_t block_size, uint32_t *bins, const uint32_t *inps) {
         count_bins_glb<<<blocks_per_grid,block_size>>>(bins, inps, 0);
       }},
-  {"glb-24-zeros",
+  {"hw-24-zeros",
       [] (size_t ix) {return ix % 32 < 24 ? 0 : 1;},
       [] (size_t blocks_per_grid, size_t block_size, uint32_t *bins, const uint32_t *inps) {
         count_bins_glb<<<blocks_per_grid,block_size>>>(bins, inps, 0);
       }},
-  {"glb-31-zeros",
+  {"hw-31-zeros",
       [] (size_t ix) {return ix % 32 < 31 ? 0 : 1;},
       [] (size_t blocks_per_grid, size_t block_size, uint32_t *bins, const uint32_t *inps) {
         count_bins_glb<<<blocks_per_grid,block_size>>>(bins, inps, 0);
       }},
-  {"glb-32-zeros",
+  {"hw-32-zeros",
       [] (size_t ix) {return 0;},
       [] (size_t blocks_per_grid, size_t block_size, uint32_t *bins, const uint32_t *inps) {
         count_bins_glb<<<blocks_per_grid,block_size>>>(bins, inps, 0);
@@ -251,15 +264,16 @@ int main(int argc, const char* argv[])
       }
       std::stringstream uss;
       uss <<
-        "usage: ngt_tile.exe OPTS TESTS\n"
+        "usage: atomic-same-address.exe OPTS TESTS\n"
         "where OPTS:\n"
         "  -bpg=INT              blocks per grid (defaults to " << DFT_OPTS.blocks_per_grid << ")\n"
+        "  -tpb=INT              threads per blocks (defaults to " << DFT_OPTS.threads_per_block << ")\n"
         "  --check               referee the output on CPU\n"
         "  -i/--iterations=INT   number of runs to take the min of\n"
         "  -v/-v2/-v3            verbosity/debug\n"
         "and TESTS are: " << tss.str() << "\n"
         "EXAMPLES:\n"
-        " % ngt_tile.exe -bpg=1k all\n"
+        " % atomic-same-address -bpg=4k all\n"
         "  generates and processes 1k blocks per grid on all tests\n"
         "";
       std::cout << uss.str();
