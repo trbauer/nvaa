@@ -21,25 +21,37 @@ import qualified Data.Set as DS
 import qualified Data.Map.Strict as DM
 import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 
--- TODO: support config files in dir (instead of .cu)
---       to allow for multiple targets in a directory
--- TODO: -q hides everything except errors
---       -v=0 shows only modified changes
---       -v=1 shows success steps (e.g. skipped)
--- TODO: -j=... parallelism for parallel build
--- TODO: sniff out #include dependencies...
--- TODO: cmake should be pseudo target
---        - store in options oCmake :: [(FilePath,Arch)]
---        - why not treat it like a regular target (non-default) and filter out?
--- TODO: clean should be a pseudo target (which allows no SM)
---        - oClean :: [(FilePath,[ArtifactKind],Arch)]
---          should clean just clean all targets?
--- TODO: the graph logic is not robust
+-- TODO: need some tests
+--    build higher-level logic primitives
+--   data Node = Node {nId :: !Int, nName :: !String, nDeps :: [Int], nAction :: IO ()}
+
+-- TODO: the graph logic is not robust (transitivity is broken)
 --     A `targ(X)` B
 --     B `targ(X)` C
 --    IF B is stale, then so is C
 --    I suspect I only check locally in the run.
 --    Since, we run serially, we are probably safe.
+
+-- TODO: support config files in dir (instead of .cu)
+--       to allow for multiple targets in a directory
+-- TODO: upon failure with -w=..
+--       we should stall until an input changes before trying again...
+--       I think we recalculate and retry endlessly
+-- TODO: -q hides everything except errors
+--       -v=0 shows only modified changes
+--       -v=1 shows success steps (e.g. skipped)
+-- TODO: -j=... parallelism for parallel build
+--       (only after fixing transitivity)
+-- TODO: sniff out #include dependencies...
+-- TODO: cmake should be pseudo target
+--        - store in options oCmake :: [(FilePath,Arch)]
+--        - why not treat it like a regular target (non-default) and filter out?
+--          i.e. collect all *:cmake:* targets
+-- TODO: clean should be a pseudo target (which allows no SM)
+--        - oClean :: [(FilePath,[ArtifactKind],Arch)]
+--          should clean just clean given targets?
+--            *:clean:*
+
 --
 -- TODO: eliminate up to date targets from the build plan
 --
@@ -47,6 +59,13 @@ import qualified System.Console.ANSI as SCA -- cabal install ansi-terminal
 --       - .bcfg binds EXE's up front
 --       - and give the rules hardcoded below
 --       - generate intermediate files following a given pattern
+--     e.g. input file and sm arch becomes parameters
+--     test.bcfg
+--     make-style rules:
+--       ${INP}-sm_${SM}.exe: ${INP}.cu
+--          nvcc -arch sm_${SM} ...
+--     generates a function with INP and SM
+
 
 main :: IO ()
 main = getArgs >>= run
@@ -149,6 +168,8 @@ parseOpts os (a:as)
       "    builds exe for sm_75 for file bar.cu\n" ++
       "  % bexp  bar.cu::90\n" ++
       "    builds all artifacts of bar.cu for sm_90\n" ++
+      "  % bexp  bar.cu:sass:90 -w=1\n" ++
+      "    builds sass for bar.cu for sm_90; check for updates every 1 second\n" ++
       "  % bexp foo.cu:sass90 -Xnvcc=-rdc=true\n" ++
       "    builds SASS code for sm_90 adding -rdc=true in the nvcc steps\n" ++
       "  % bexp  bar.cu::75 --clean\n" ++
@@ -173,7 +194,7 @@ parseOpts os (a:as)
   | a `elem` ["-c","--clobber"] = nextArg os {oClobber = True}
   | a `elem` ["-k","--keep"] = nextArg os {oKeep = True}
   | a `elem` ["--keep-inlines"] = nextArg os {oKeepInlines = True}
-  | k `elem` ["-w=","--watch"] = parseAsFloatValue (\f -> os{oWatch = Just f})
+  | k `elem` ["-w=","--watch="] = parseAsFloatTimeValue (\f -> os{oWatch = Just f})
   | k `elem` ["-Xnvcc="] = nextArg os {oXnvcc = oXnvcc os ++ [v]}
   | k `elem` ["-Xnvdisasm="] = nextArg os {oXnvdisasm = oXnvdisasm os ++ [v]}
   --
@@ -253,6 +274,13 @@ parseOpts os (a:as)
         parseAsFloatValue func =
           case reads v of
             [(x,"")] -> parseOpts (func x) as
+            _ -> badArg "malformed float"
+        parseAsFloatTimeValue :: (Float -> Opts) -> IO Opts
+        parseAsFloatTimeValue func =
+          case reads v of
+            [(x,"")] -> parseOpts (func x) as
+            [(x,"s")] -> parseOpts (func x) as
+            [(x,"ms")] -> parseOpts (func (x * 1e-3)) as
             _ -> badArg "malformed float"
 
         badArg :: String -> IO a
@@ -406,16 +434,23 @@ runWithOpts os
             x -> do
               putStrLn $ "============= " ++ fmtArtifact a ++ ": " ++ show x
               return True
+
+    let handleFail e
+          | "ExitFailure" `isPrefixOf` show (e :: SomeException) = return ()
+          | otherwise = do
+            -- putStrLn $ "ERROR: " ++ show (e :: SomeException)
+            exitFailure
     let watchForUpdate delay_s = do
           when (delay_s > 0.0) $ do
             threadDelay (round (delay_s * 1000 * 1000))
           when (oVerbosity os >= 2) $
             putStrLn "checking for updates"
           z <- loopForUpdate (concat p)
-          when z $ executePlan os p
+          when z $ do
+            executePlan os p`catch`handleFail
           watchForUpdate delay_s
     --
-    executePlan os p
+    executePlan os p`catch`handleFail
     case oWatch os of
       Nothing -> return ()
       Just s -> watchForUpdate s
@@ -722,6 +757,7 @@ buildArtifact os dio a@(ak,fp,arch) = do
       callExe os dio "nvcc"
           ([ "-std=c++20"
           , "-arch","sm_"++arch
+          , "-lineinfo" -- for compute sanitizer
           , "-I", takeDirectory mINCU_PATH
           , "-o", fp_exe
           , fp

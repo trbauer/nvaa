@@ -143,9 +143,15 @@ struct col
     : value(val), width(wid), pad_fill(f) { }
 }; // col
 template <typename T>
-using coll = col<pad::R,T>;
+struct coll : col<pad::R, T> {
+  coll(const T &val, int wid, char f = ' ')
+    : col<pad::R, T>(val, wid, f) { }
+};
 template <typename T>
-using colr = col<pad::L,T>;
+struct colr : col<pad::L, T> {
+  colr(const T &val, int wid, char f = ' ')
+    : col<pad::L, T>(val, wid, f) { }
+};
 
 template <pad P,typename T>
 static inline std::ostream &operator<<(std::ostream &os, const col<P,T> &p) {
