@@ -996,21 +996,51 @@ __global__ void add_float_k(
   auto val_plus_k = val + k;
   oups[gid] = val_plus_k;
 }
+extern "C"
+__global__ void add_int_k(
+    int *oups,
+    const int *inps, int k)
+{
+  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  auto val = inps[gid];
+  auto val_plus_k = val + k;
+  oups[gid] = val_plus_k;
+}
 
 
 static void run_device_tests()
 {
-  TEST_GROUP("test_add_float_k",
+  TEST_GROUP("test_add_float_k.umem",
       [](std::ostream &os) {
         static const size_t BLOCKS = 1; // 1 warp only
         static const size_t TPB = 32; // threads per block (1 warp)
 
-        umem<float> inps(64, arith_seq<float>(0.0f));
-        umem<float> oups(64);
+        umem<float> inps(BLOCKS * TPB, arith_seq<float>(0.0f));
+        umem<float> oups(BLOCKS * TPB);
         if (verbose())
           inps.str(os, 8, 3);
 
         add_float_k<<<BLOCKS,TPB>>>(oups, inps, 1.0f);
+        auto e = cudaDeviceSynchronize();
+        if (e != cudaSuccess) {
+          TEST_FATAL(cudaGetErrorName(e),
+            " (", cudaGetErrorString(e), "): unexpected error");
+          return;
+        }
+        if (verbose())
+          oups.str(os, 8, 3);
+      });
+  TEST_GROUP("test_add_int_k.dmem",
+      [](std::ostream &os) {
+        static const size_t BLOCKS = 1; // 1 warp only
+        static const size_t TPB = 32; // threads per block (1 warp)
+
+        dmem<int> inps(BLOCKS * TPB, arith_seq<int>(0));
+        dmem<int> oups(BLOCKS * TPB);
+        if (verbose())
+          inps.str(os, 8, 3);
+
+        add_int_k<<<BLOCKS,TPB>>>(oups, inps, 2);
         auto e = cudaDeviceSynchronize();
         if (e != cudaSuccess) {
           TEST_FATAL(cudaGetErrorName(e),
