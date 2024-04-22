@@ -239,6 +239,7 @@ static void TEST_GROUP(std::string lbl,
       std::cout << ss.str();
     } catch (const test_exception &te) {
       std::cout << ansi_red<const char *>("FAILED") << "\n";
+      std::cout << te.what;
       std::cout << ss.str() << "...\n";
     } catch (...) {
       std::cout << ansi_red<const char *>("EXCEPTION") << "\n";
@@ -1049,6 +1050,10 @@ static void run_device_tests()
         }
         if (verbose())
           oups.str(os, 8, 3);
+
+        dmem_view<int> v {oups, oups.size()};
+        TEST_EQ(v[0], 2);
+        TEST_EQ(v[31], 33);
       });
 } // test_add_float_k
 

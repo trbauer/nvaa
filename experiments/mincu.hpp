@@ -308,8 +308,7 @@ static inline std::ostream &operator<<(std::ostream &os, const ansi_esc<T> &e) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// ansi colors
-
+// formatter options
 struct fmt_opts {
   int         cols_per_elem;
   int         frac_prec; // decimal precision
@@ -328,8 +327,7 @@ struct fmt_opts {
   constexpr fmt_opts prec(int p) const {auto c = *this; c.frac_prec = p; return c;}
 };
 
-
-
+///////////////////////////////////////////////////////////////////////////////
 template <typename T>
 static void format_elem_unsigned(std::ostream &os, T t, const fmt_opts &fos) {
   if (fos.ansi_color) {
@@ -1331,26 +1329,29 @@ struct dmem_alloc {
 // a host snapshot of device memory (RAII type)
 template <typename E>
 struct dmem_view {
-  E *h_mem;
-  size_t nelems;
+  // TODO: split view kinds up: read-only, write-only, and read-write
+  E       *d_mem;
+  E       *h_mem;
+  size_t   nelems;
 
-  explicit dmem_view(const dmem_alloc &d, bool is_write_only = false)
-    : nelems(d.size() / sizeof(E))
+  explicit dmem_view(E *dev, size_t nelms, bool is_write_only = false)
+    : d_mem(dev), nelems(nelms)
   {
-    if (d.size() % sizeof(E) != 0)
-      fatal("dmem_view: ragged view");
-    h_mem = new E[d.size() / sizeof(E)];
+    // SPECIFY: do we want cudaMallocHost here? // pinned?
+    h_mem = new E[nelms];
     if (!is_write_only) {
-      CUDA_API(cudaMemcpy, h_mem, d.d_ptr, d.size(),
-               cudaMemcpyDeviceToHost);
+      copy_in();
     }
   }
   dmem_view(const dmem_view &) = delete;
-  dmem_view(dmem_view &&v) : h_mem(v.h_mem), nelems(v.nelems) {
-    v.h_mem = nullptr;
-    v.nelems = 0;
-  }
   dmem_view<E> &operator=(const dmem_view &) = delete;
+  dmem_view(dmem_view &&) = delete;
+  // dmem_view(dmem_view &&v) : h_mem(v.h_mem), nelems(v.nelems) {
+  //   v.h_mem = nullptr;
+  //   v.nelems = 0;
+  // }
+  dmem_view<E> &operator=(dmem_view &&) = delete;
+  /*
   dmem_view<E> &operator=(dmem_view &&v) {
     if (h_mem)
       delete [] h_mem;
@@ -1360,10 +1361,27 @@ struct dmem_view {
     v.nelems = 0;
     return *this;
   }
+  */
 
   ~dmem_view() {
-    if (h_mem)
+    if (h_mem) // SPECIFY: OR cudaFreeHost
       delete [] h_mem;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  void copy_in(size_t off = 0) {copy_in(off, nelems - off);}
+  void copy_in(size_t off, size_t len) {
+    if (off + len > nelems)
+      fatal("dmem_view::copy_in: out of bounds");
+    CUDA_API(cudaMemcpy, h_mem + off, d_mem + off, sizeof(E) * len,
+              cudaMemcpyDeviceToHost);
+  }
+  void copy_out(size_t off = 0) {copy_out(off, nelems - off);}
+  void copy_out(size_t off, size_t len) {
+    if (off + len > nelems)
+      fatal("dmem_view::copy_out: out of bounds");
+    CUDA_API(cudaMemcpy, d_mem + off, h_mem + off, sizeof(E) * len,
+              cudaMemcpyHostToDevice);
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -1379,11 +1397,9 @@ struct dmem_view {
     std::ostream &os = std::cout,
     int elems_per_line = -1) const
   {
-    read([&](const E *ptr) {
-      format_buffer(os, h_mem, size(),
-                    elems_per_line,
-                    fmt_elem, color_elems_none<E>());
-    });
+    format_buffer(os, h_mem, size(),
+                  elems_per_line,
+                  fmt_elem, color_elems_none<E>());
   }
   void str(
     std::ostream &os = std::cout,
@@ -1435,20 +1451,21 @@ public:
     });
   }
 
-
   //////////////////////////////////////////////////////////////////////////////
   // accessors
+
   // dmem_view<E> &&view() const {return std::move(dmem_view<E>(*mem));}
 
-  // read the entire buffer
+  // read the entire buffer and apply a function to it
   void read(std::function<void(const E *)> f) const {
-    // auto &&v = view();
-    dmem_view<E> v(*mem);
+    // const_cast is safe here because the memory is not modified
+    E *d_ptr = (E *)const_cast<void *>(mem->d_ptr);
+    dmem_view<E> v(d_ptr, mem->d_bytes / sizeof(E));
     f(v.h_mem);
   }
 
   // read the buffer by index
-  void read(std::function<void(size_t, const E &)> f) {
+  void read(std::function<void(size_t, const E &)> f) const {
     read([&](const E *ptr) {
       for (size_t i = 0; i < size(); i++) {
         f(i, ptr[i]);
@@ -1459,11 +1476,9 @@ public:
   // reads the current device memory, calls the user modify function,
   // and writes it back
   void modify(std::function<void(E *)> f) {
-    // auto &&v = view();
-    dmem_view<E> v(*mem);
+    dmem_view<E> v(mem->d_ptr, mem->d_bytes / sizeof(E));
     f(v.h_mem.data());
-    CUDA_API(cudaMemcpy, mem->d_ptr, v.h_mem.data(), mem->size(),
-             cudaMemcpyHostToDevice);
+    v.copy_out();
   }
   void modify(std::function<void(size_t, E &)> f) {
     modify([&](E *ptr) {
@@ -1476,10 +1491,9 @@ public:
   // writes device memory new values; the memory passed are not the current
   // device values
   void write(std::function<void(E *)> f) {
-    dmem_view<E> v(*mem, true);
+    dmem_view<E> v((E *)mem->d_ptr, mem->d_bytes / sizeof(E), true);
     f(v.h_mem);
-    CUDA_API(cudaMemcpy, mem->d_ptr, v.h_mem, mem->size(),
-             cudaMemcpyHostToDevice);
+    v.copy_out();
   }
   void write(std::function<void(size_t, E &)> f) {
     write([&](E *ptr) {
