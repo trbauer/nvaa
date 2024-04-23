@@ -1432,7 +1432,7 @@ public:
 
   //////////////////////////////////////////////////////////////////////////////
   // conversion to device pointer for kernel calls
-  operator       E *()       {return (E*)mem->d_ptr;}
+  operator       E *()       {return       (E*)mem->d_ptr;}
   operator const E *() const {return (const E*)mem->d_ptr;}
 
   //////////////////////////////////////////////////////////////////////////////

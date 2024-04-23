@@ -18,7 +18,12 @@ using namespace mincu;
 // TODO: would like to have a dataset description to vary inputs more
 //    - 0's and 1's (instead of ascending)
 // TODO: report device times (op lat)
-
+//
+// TODO: making this more principled
+//    - zs00, zs01 seeems faster than zs32, zs31
+//      I think this is because of same address collisions
+//     >> we need to see os00 and os31 ... (ones)
+//
 
 ////////////////////////////////////////////////////////////////////////////////
 struct opts {
@@ -207,8 +212,23 @@ static void print_headers()
   std::cout << coll("input", 16) << "  ";
   std::cout << colr("rate(B*atom/s)", 16);
   std::cout << "\n";
-
 }
+
+using init_func_t = std::function<unsigned(size_t)>;
+
+static init_func_t make_init_func_aseq_zeros(size_t num_zeros_per_warp)
+{
+  return
+      [&](size_t ix) {
+        // lower [num_zeros_per_message] lanes will have 0's and the rest
+        // will have lane_id + 1 (e.g. 1,2,3...) clamped to 32
+        // (so we will not hit bin 0)
+        auto lane_id = ix % 32; // WARP_SIZE
+        auto non_zero = std::min(32u, (unsigned)lane_id + 1); // saturate
+        return lane_id < (size_t)num_zeros_per_warp ? 0 : non_zero;
+      };
+}
+
 static void run_test(
     const opts &os,
     algorithm alg,
@@ -220,15 +240,7 @@ static void run_test(
   iss << "zs" << std::setfill('0') << std::setw(2) << num_zeros_per_message;
   std::cout << coll(format(iss.str()), 16) << "  ";
 
-  std::function<unsigned(size_t)> init =
-      [&] (size_t ix) {
-        // lower [num_zeros_per_message] lanes will have 0's and the rest
-        // will have lane_id + 1 (e.g. 1,2,3...) clamped to 32
-        // (so we will not hit bin 0)
-        auto lane_id = ix % 32;
-        auto non_zero = std::min(32u, (unsigned)lane_id + 1);
-        return lane_id < (size_t)num_zeros_per_message ? 0 : non_zero;
-      };
+  init_func_t init = make_init_func_aseq_zeros(num_zeros_per_message);
 
   umem<uint32_t> bins {NUM_BINS};
   const umem<uint32_t> inps {os.blocks_per_grid * os.threads_per_block, init};
@@ -257,6 +269,13 @@ static void run_test(
     std::cout << "  elems:  " << inps.size() << " elems\n";
     std::cout << "  mem:    " << frac(total_mb, 3) << " MB (input buffer size)\n";
     std::cout << "  time:   " << frac(min_t, 6) << " s\n";
+  }
+
+  if (os.debug()) {
+    std::cout << "DATA PATTERN:\n";
+    inps.subbuf(32).str(std::cout, 8);
+    if (inps.size() > 32)
+      std::cout << "...\n";
   }
 
   if (os.verbose_debug()) {
@@ -299,8 +318,8 @@ int main(int argc, const char* argv[])
     if (arg == "-h" || arg == "--help") {
       std::stringstream uss;
       uss <<
-        "usage: atomic-same-address.exe OPTS TESTS\n"
-        "where OPTS:\n"
+        "usage: atomic-same-address.exe [OPTS] TESTS\n"
+        "where [OPTS]:\n"
         "  -bpg=INT              blocks per grid (defaults to " << DFT_OPTS.blocks_per_grid << ")\n"
         "  -tpb=INT              threads per blocks (defaults to " << DFT_OPTS.threads_per_block << ")\n"
         "  --check               referee the output on CPU\n"

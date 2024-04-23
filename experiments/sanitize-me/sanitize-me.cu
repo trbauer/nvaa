@@ -24,8 +24,6 @@ struct opts {
 };
 constexpr opts DFT_OPTS;
 
-////////////////////////////////////////////////////////////////////////////////
-
 
 ////////////////////////////////////////////////////////////////////////////////
 extern "C"
@@ -39,8 +37,8 @@ extern "C"
 __global__ void oob_glb_wr(uint32_t *oups, const uint32_t *inps)
 {
   const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
-  auto val = inps[gid]; // last one will be OOB
-  oups[gid + 1] = val;
+  auto val = inps[gid];
+  oups[gid + 1] = val; // last one will be OOB
 }
 extern "C"
 __global__ void oob_shm_rd(uint32_t *oups, const uint32_t *inps)
@@ -52,7 +50,9 @@ __global__ void oob_shm_rd(uint32_t *oups, const uint32_t *inps)
   smem[threadIdx.x] = inps[gid];
   __syncthreads();
 
-  auto oob_val = smem[threadIdx.x + 1]; // last one will be OOB
+  // NOTE: if I used [idx - 1] then it gets matched as a __global__ write
+  // e.g. -1 hits: 0x0000'0216'4DFF'FFFC
+  auto oob_val = smem[threadIdx.x + 1]; // OOPS! last tid OOB
   oups[gid] = oob_val;
 }
 extern "C"
@@ -62,11 +62,11 @@ __global__ void oob_shm_wr(uint32_t *oups, const uint32_t *inps)
 
   __shared__ uint32_t smem[64];
 
-  smem[threadIdx.x - 1] = inps[gid];
+  smem[threadIdx.x + 1] = inps[gid]; // OOPS! tid=0 will write to -1
   __syncthreads();
 
-  auto oob_val = smem[threadIdx.x]; // last one will be OOB
-  oups[gid] = oob_val;
+  auto val = smem[threadIdx.x];
+  oups[gid] = val;
 }
 
 extern "C"
@@ -76,6 +76,48 @@ __global__ void sqaure_kernel(uint32_t *oups, const uint32_t *inps)
   auto val = inps[gid];
   oups[gid] = val * val;
 }
+extern "C"
+__global__ void add_one(uint32_t *oups, const uint32_t *inps)
+{
+  const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+  auto val = inps[gid];
+  oups[gid] = val + 1;
+}
+
+extern "C"
+__global__ void uninit_shm(uint32_t *oups, const uint32_t *inps)
+{
+  const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  __shared__ uint32_t smem[64];
+
+  if (threadIdx.x != 7)
+    smem[threadIdx.x] = inps[gid];
+
+  __syncthreads();
+
+  auto val = smem[threadIdx.x]; // smem[7] is uninitialized
+  oups[gid] = val;
+}
+extern "C"
+__global__ void race_shm(uint32_t *oups, const uint32_t *inps)
+{
+  const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  __shared__ uint32_t smem[64];
+
+  int tid_in_b = threadIdx.x;
+  if (tid_in_b == 7)
+    tid_in_b = 6;
+
+  smem[tid_in_b] = inps[gid]; // tid_in_b is written twice
+
+  __syncthreads();
+
+  auto val = smem[threadIdx.x];
+  oups[gid] = val;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 using device_wrapper_t =
@@ -120,14 +162,20 @@ static void launch_kernel_uninit(
   std::cout << "================ running " << tnm << "\n";
 
   // const umem<uint32_t> inps {BPG * TPB, arith_seq<uint32_t>(0)};
-  const umem<uint32_t> inps {BPG * TPB};
+  // const umem<uint32_t> inps {BPG * TPB};
+  void *d_inps;
+  CUDA_API(cudaMalloc, &d_inps, BPG * TPB * sizeof(uint32_t));
+  // OOPS! we missed first and last element!
+  CUDA_API(cudaMemset, (uint32_t *)d_inps + 1, 2, (BPG * TPB - 2) * sizeof(uint32_t));
   if (os.verbose_debug()) {
-    std::cout << "INPS:\n";
-    inps.str(std::cout, 8);
+    // this would be an uninitialized access
+    // std::cout << "INPS:\n";
+    // inps.str(std::cout, 8);
+    std::cout << "INPS:\n[[cannot show INPS on this test]]";
   }
 
   umem<uint32_t> oups {BPG * TPB};
-  wrapper(BPG, TPB, oups, inps);
+  wrapper(BPG, TPB, oups, (const uint32_t *)d_inps);
   auto e = cudaDeviceSynchronize();
   if (e != cudaSuccess) {
     fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error");
@@ -136,6 +184,8 @@ static void launch_kernel_uninit(
     std::cout << "OUPS:\n";
     oups.str(std::cout, 8);
   }
+
+  CUDA_API(cudaFree, d_inps);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -150,23 +200,28 @@ static void launch_kernel_leak(
   // const umem<uint32_t> inps {BPG * TPB, arith_seq<uint32_t>(0)};
   void *d_inps;
   CUDA_API(cudaMalloc, &d_inps, BPG * TPB * sizeof(uint32_t));
-  CUDA_API(cudaMemset, d_inps, 42, BPG * TPB * sizeof(uint32_t));
+  CUDA_API(cudaMemset, d_inps, 2, BPG * TPB * sizeof(uint32_t));
   if (os.verbose_debug()) {
-    std::cout << "INPS:\n" << "[[cannot show INPS on this test]]";
+    std::cout << "INPS:\n";
+    dmem_view<uint32_t> v {(uint32_t *)d_inps, BPG * TPB};
+    v.str(std::cout, 8);
   }
 
-  umem<uint32_t> oups {BPG * TPB};
-  wrapper(BPG, TPB, oups, (const uint32_t *)d_inps);
+  void *d_oups;
+  CUDA_API(cudaMalloc, &d_oups, BPG * TPB * sizeof(uint32_t));
+  wrapper(BPG, TPB, (uint32_t *)d_oups, (const uint32_t *)d_inps);
   auto e = cudaDeviceSynchronize();
   if (e != cudaSuccess) {
     fatal(cudaGetErrorName(e), " (", cudaGetErrorString(e), "): unexpected error");
   }
   if (os.debug()) {
     std::cout << "OUPS:\n";
-    oups.str(std::cout, 8);
+    dmem_view<uint32_t> v {(uint32_t *)d_oups, BPG * TPB};
+    v.str(std::cout, 8);
   }
   // OOPS!
   // CUDA_API(cudaFree, d_inps);
+  CUDA_API(cudaFree, d_oups);
 }
 
 
@@ -188,13 +243,23 @@ static const test_t ALL_TESTS[] {
     [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
       oob_shm_wr<<<bpg,tpb>>>(oups, inps);
     }},
-  {"uninit-glb", launch_kernel_uninit,
-    [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
-      sqaure_kernel<<<bpg,tpb>>>(oups, inps);
-    }},
   {"leak-glb", launch_kernel_leak,
     [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
-      sqaure_kernel<<<bpg,tpb>>>(oups, inps);
+      add_one<<<bpg,tpb>>>(oups, inps);
+    }},
+  // initcheck
+  {"uninit-glb", launch_kernel_uninit,
+    [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
+      add_one<<<bpg,tpb>>>(oups, inps);
+    }},
+  {"uninit-shm", launch_kernel, // THIS ONE FAILS TO TRIGGER
+    [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
+      uninit_shm<<<bpg,tpb>>>(oups, inps);
+    }},
+  // racecheck
+  {"race-shm", launch_kernel,
+    [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
+      race_shm<<<bpg,tpb>>>(oups, inps);
     }},
 };
 
