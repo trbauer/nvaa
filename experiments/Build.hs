@@ -757,7 +757,8 @@ buildArtifact os dio a@(ak,fp,arch) = do
       callExe os dio "nvcc"
           ([ "-std=c++20"
           , "-arch","sm_"++arch
-          , "-lineinfo" -- for compute sanitizer
+          -- , "-lineinfo" -- for compute sanitizer
+          , "-G" -- for compute sanitizer (BETTER)
           , "-I", takeDirectory mINCU_PATH
           , "-o", fp_exe
           , fp

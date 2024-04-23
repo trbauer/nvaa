@@ -125,10 +125,21 @@ Generates.
       .... R2-R3 come from above
 .L_x_0:
   // mbarrier.try_wait.shared.b64    complete, [mbar], arv_tkn, 0x1234;
-      MOV       R7,     UR4                              {!4,Y}; // unnecessary?
-      SYNCS.PHASECHK.TRANS64.TRYWAIT  P0, [R7+URZ], R3   {!1,+1.W,+1.R};
+      MOV       R7,     UR4                              {!4,Y};         // unnecessary?
+      SYNCS.PHASECHK.TRANS64.TRYWAIT  P0, [R7+URZ], R3   {!1,+1.W,+1.R}; // sets up notify for SYNCS?
       DEPBAR.LE  SB1,   0x0                              {!4,Y};
-@!P0  NANOSLEEP.SYNCS  0x1234                            {!5};
-@!P0  SYNCS.PHASECHK.TRANS64  P0, [R7+URZ], R3           {!2,+0.W};
+@!P0  NANOSLEEP.SYNCS  0x1234                            {!5};      // if QWORD holding MBar touched, we wake up early
+@!P0  SYNCS.PHASECHK.TRANS64  P0, [R7+URZ], R3           {!2,+0.W}; // confirm that wait is done
 @!P0  BRA       `(.L_x_0)                                {!5,^0};
+```
+
+
+# TODO: Show Non-Uniformity
+```
+__global__ void ...()
+{
+   __shared__ cuda::barrier<...> mbar[32];
+   init(&mbar[idx], threadIdx.x);
+   // init(&mbar[0], 1); // everyone executes? ... BAD
+}
 ```
