@@ -143,9 +143,15 @@ struct col
     : value(val), width(wid), pad_fill(f) { }
 }; // col
 template <typename T>
-using coll = col<pad::R,T>;
+struct coll : col<pad::R, T> {
+  coll(const T &val, int wid, char f = ' ')
+    : col<pad::R, T>(val, wid, f) { }
+};
 template <typename T>
-using colr = col<pad::L,T>;
+struct colr : col<pad::L, T> {
+  colr(const T &val, int wid, char f = ' ')
+    : col<pad::L, T>(val, wid, f) { }
+};
 
 template <pad P,typename T>
 static inline std::ostream &operator<<(std::ostream &os, const col<P,T> &p) {
@@ -302,8 +308,7 @@ static inline std::ostream &operator<<(std::ostream &os, const ansi_esc<T> &e) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// ansi colors
-
+// formatter options
 struct fmt_opts {
   int         cols_per_elem;
   int         frac_prec; // decimal precision
@@ -322,8 +327,7 @@ struct fmt_opts {
   constexpr fmt_opts prec(int p) const {auto c = *this; c.frac_prec = p; return c;}
 };
 
-
-
+///////////////////////////////////////////////////////////////////////////////
 template <typename T>
 static void format_elem_unsigned(std::ostream &os, T t, const fmt_opts &fos) {
   if (fos.ansi_color) {
@@ -1016,10 +1020,10 @@ static void format_buffer(
       os << "  ";
       auto color = color_elem_ansi(ptr[i]);
       if (color)
-          os << color;
+        os << color;
       fmt_elem(os, ptr[i]);
       if (color)
-          os << ANSI_RESET;
+        os << ANSI_RESET;
     }
     os << "\n";
   }
@@ -1202,7 +1206,7 @@ class umem // unified memory buffer
 public:
   explicit umem(size_t _elems)
     : elems(_elems), ptr(std::make_shared<umem_alloc>(_elems * sizeof(E))) { }
-  explicit umem(std::shared_ptr<umem_alloc> &_ptr, size_t _elems)
+  explicit umem(std::shared_ptr<umem_alloc> _ptr, size_t _elems)
     : elems(_elems), ptr(_ptr) { }
 
   explicit umem(size_t _elems, const const_seq<E> &g)
@@ -1240,6 +1244,13 @@ public:
     return es;
   }
 
+  umem<E> subbuf(size_t sub_len) const {
+    if (sub_len >= elems) {
+      fatal("subbuf OOB");
+    }
+    return umem<E>(ptr, sub_len);
+  }
+
   // template <typename U>
   // umem<U> as() {
   //   return umem<U>(ptr, elems*sizeof(E)/sizeof(U));
@@ -1253,7 +1264,8 @@ public:
     CUDA_API(cudaMemPrefetchAsync, get_cptr(), elems * sizeof(E), cudaCpuDeviceId);
   }
 
-   // elements
+   //////////////////////////////////////////////////////////////////////////////
+   // element access
    operator       E *()        {return get_ptr();}
                   E *get_ptr() {return const_cast<E *>(get_cptr());}
    operator const E *()         const {return get_cptr();}
@@ -1288,6 +1300,231 @@ public:
     return ss.str();
   }
 }; // struct umem
+
+
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+// device only memory
+struct dmem_alloc {
+  size_t d_bytes;
+  void *d_ptr;
+
+  explicit dmem_alloc(size_t nbytes) : d_bytes(nbytes), d_ptr(nullptr) {
+    CUDA_API(cudaMalloc, &d_ptr, d_bytes);
+  }
+  ~dmem_alloc() {
+    CUDA_API(cudaFree, d_ptr);
+  }
+  size_t size() const {return d_bytes;}
+
+  void set(int to) {set(0, d_bytes, to);}
+  void set(size_t off, size_t len, int to) {
+    if (off + len >= d_bytes)
+      fatal("dmem_alloc::set: OOB write");
+    CUDA_API(cudaMemset, (char *)d_ptr + off, to, len);
+  }
+};
+
+//////////////////////////////////////////////////////
+// a host snapshot of device memory (RAII type)
+template <typename E>
+struct dmem_view {
+  // TODO: split view kinds up: read-only, write-only, and read-write
+  E       *d_mem;
+  E       *h_mem;
+  size_t   nelems;
+
+  explicit dmem_view(E *dev, size_t nelms, bool is_write_only = false)
+    : d_mem(dev), nelems(nelms)
+  {
+    // SPECIFY: do we want cudaMallocHost here? // pinned?
+    h_mem = new E[nelms];
+    if (!is_write_only) {
+      copy_in();
+    }
+  }
+  dmem_view(const dmem_view &) = delete;
+  dmem_view<E> &operator=(const dmem_view &) = delete;
+  dmem_view(dmem_view &&) = delete;
+  // dmem_view(dmem_view &&v) : h_mem(v.h_mem), nelems(v.nelems) {
+  //   v.h_mem = nullptr;
+  //   v.nelems = 0;
+  // }
+  dmem_view<E> &operator=(dmem_view &&) = delete;
+  /*
+  dmem_view<E> &operator=(dmem_view &&v) {
+    if (h_mem)
+      delete [] h_mem;
+    h_mem = v.h_mem;
+    nelems = v.nelems;
+    v.h_mem = nullptr;
+    v.nelems = 0;
+    return *this;
+  }
+  */
+
+  ~dmem_view() {
+    if (h_mem) // SPECIFY: OR cudaFreeHost
+      delete [] h_mem;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  void copy_in(size_t off = 0) {copy_in(off, nelems - off);}
+  void copy_in(size_t off, size_t len) {
+    if (off + len > nelems)
+      fatal("dmem_view::copy_in: out of bounds");
+    CUDA_API(cudaMemcpy, h_mem + off, d_mem + off, sizeof(E) * len,
+              cudaMemcpyDeviceToHost);
+  }
+  void copy_out(size_t off = 0) {copy_out(off, nelems - off);}
+  void copy_out(size_t off, size_t len) {
+    if (off + len > nelems)
+      fatal("dmem_view::copy_out: out of bounds");
+    CUDA_API(cudaMemcpy, d_mem + off, h_mem + off, sizeof(E) * len,
+              cudaMemcpyHostToDevice);
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  size_t size() const {return nelems;}
+
+  //////////////////////////////////////////////////////////////////////////////
+  operator       E *()       {return h_mem;}
+  operator const E *() const {return h_mem;}
+
+  //////////////////////////////////////////////////////////////////////////////
+  void str(
+    std::function<void(std::ostream&,const E&)> fmt_elem,
+    std::ostream &os = std::cout,
+    int elems_per_line = -1) const
+  {
+    format_buffer(os, h_mem, size(),
+                  elems_per_line,
+                  fmt_elem, color_elems_none<E>());
+  }
+  void str(
+    std::ostream &os = std::cout,
+    int elems_per_line = -1,
+    int cols_per_elem = default_format_elem_preferred_columns<E>(),
+    int prec = -1) const
+  {
+    fmt_opts fos{cols_per_elem, prec};
+    str(default_elem_formatter<E>(fos), os, elems_per_line);
+  }
+};
+
+//////////////////////////////////////////////////////////////////////////////
+template <typename E>
+  // requires(is_trivially_copyable_v<E>
+class dmem // device memory buffer
+{
+  size_t                       nelems;
+  std::shared_ptr<dmem_alloc>  mem;
+public:
+  explicit dmem(size_t _nelems)
+    : nelems(_nelems), mem(std::make_shared<dmem_alloc>(nelems * sizeof(E))) { }
+
+  template <typename I>
+  explicit dmem(size_t _elems, I i)
+    : dmem<E>(_elems) {init<I>(i);}
+
+  //////////////////////////////////////////////////////////////////////////////
+  size_t size() const {return nelems;}
+
+  //////////////////////////////////////////////////////////////////////////////
+  // conversion to device pointer for kernel calls
+  operator       E *()       {return       (E*)mem->d_ptr;}
+  operator const E *() const {return (const E*)mem->d_ptr;}
+
+  //////////////////////////////////////////////////////////////////////////////
+  // initializers
+  template <typename I>
+  void init(I i) {
+    // TODO: specialize case with zero or const allocation to cudaMemset
+    write([&](E *ptr) {
+      i.apply(ptr, size());
+    });
+  }
+
+  void init(std::function<E(size_t)> g) {
+    write([&](size_t ix, E &e) {
+      e = g(ix);
+    });
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  // accessors
+
+  // dmem_view<E> &&view() const {return std::move(dmem_view<E>(*mem));}
+
+  // read the entire buffer and apply a function to it
+  void read(std::function<void(const E *)> f) const {
+    // const_cast is safe here because the memory is not modified
+    E *d_ptr = (E *)const_cast<void *>(mem->d_ptr);
+    dmem_view<E> v(d_ptr, mem->d_bytes / sizeof(E));
+    f(v.h_mem);
+  }
+
+  // read the buffer by index
+  void read(std::function<void(size_t, const E &)> f) const {
+    read([&](const E *ptr) {
+      for (size_t i = 0; i < size(); i++) {
+        f(i, ptr[i]);
+      }
+    });
+  }
+
+  // reads the current device memory, calls the user modify function,
+  // and writes it back
+  void modify(std::function<void(E *)> f) {
+    dmem_view<E> v(mem->d_ptr, mem->d_bytes / sizeof(E));
+    f(v.h_mem.data());
+    v.copy_out();
+  }
+  void modify(std::function<void(size_t, E &)> f) {
+    modify([&](E *ptr) {
+      for (size_t i = 0; i < size(); i++) {
+        f(i, ptr[i]);
+      }
+    });
+  }
+
+  // writes device memory new values; the memory passed are not the current
+  // device values
+  void write(std::function<void(E *)> f) {
+    dmem_view<E> v((E *)mem->d_ptr, mem->d_bytes / sizeof(E), true);
+    f(v.h_mem);
+    v.copy_out();
+  }
+  void write(std::function<void(size_t, E &)> f) {
+    write([&](E *ptr) {
+      for (size_t i = 0; i < size(); i++) {
+        f(i, ptr[i]);
+      }
+    });
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  void str(
+    std::function<void(std::ostream&,const E&)> fmt_elem,
+    std::ostream &os = std::cout,
+    int elems_per_line = -1) const
+  {
+    read([&](const E *ptr) {
+      format_buffer(os, ptr, size(),
+                    elems_per_line,
+                    fmt_elem, color_elems_none<E>());
+    });
+  }
+  void str(
+    std::ostream &os = std::cout,
+    int elems_per_line = -1,
+    int cols_per_elem = default_format_elem_preferred_columns<E>(),
+    int prec = -1) const
+  {
+    fmt_opts fos{cols_per_elem, prec};
+    str(default_elem_formatter<E>(fos), os, elems_per_line);
+  }
+}; // dmem
 
 ///////////////////////////////////////////////////////////////////////////////
 // fp16 support

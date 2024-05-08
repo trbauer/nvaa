@@ -46,7 +46,7 @@ extern "C" static __device__ uint32_t get_nsmid()
 extern "C" static __device__ uint64_t get_globaltimer()
 {
   uint64_t globaltimer;
-  asm volatile("mov.u64  %0, %globaltimer;" : "=l"(globaltimer));
+  asm volatile("mov.u64  %0, %globaltimer;" : "=l"(globaltimer) :: "memory");
   return globaltimer;
 }
 
