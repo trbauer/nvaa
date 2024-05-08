@@ -117,6 +117,9 @@ static void launch_latency_test(const opts &os, const char *test_name)
     }
 
     min_c = std::min(times[0], min_c);
+    if (os.verbose()) {
+      print_col(vss, format(test_name,".run[", i ,"]"), times[0]);
+    }
     /*
     times.read([&](const int64_t *times) {
       min_c = std::min(times[0], min_c);
