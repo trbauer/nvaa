@@ -14,6 +14,7 @@
 #include <concepts>
 #include <cstdint>
 #include <cstdlib>
+#include <chrono>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -69,7 +70,7 @@ struct hex
 static inline std::ostream &operator <<(std::ostream &os, hex h) {
   std::stringstream ss;
   ss << std::setw(h.columns) <<
-    std::setfill('0') << std::hex << std::uppercase << h.value;
+        std::setfill('0') << std::hex << std::uppercase << h.value;
   os << ss.str();
   return os;
 }
@@ -1502,6 +1503,13 @@ public:
       }
     });
   }
+  void write(const E *es, size_t off, size_t nes) {
+    if (off + nes > nelems)
+      fatal("dmem::write: OOB");
+    dmem_view<E> v(mem->d_ptr, nes, true);
+    memcpy(v.h_mem + off, es, nes * sizeof(E));
+    v.copy_out();
+  }
 
   //////////////////////////////////////////////////////////////////////////////
   void str(
@@ -1534,7 +1542,7 @@ static const int F32_EXP_BITS = F32_BITS - 1 - F32_MNT_BITS; // 23
 static const int F32_BIAS = (1 << (F32_EXP_BITS - 1)) - 1; // 127
 static const uint32_t F32_SIGN_BIT  = 1u << (F32_BITS - 1); // 0x80000000
 static const uint32_t F32_EXP_MASK =
-  ((1 << F32_EXP_BITS) - 1) << F32_MNT_BITS;
+    ((1 << F32_EXP_BITS) - 1) << F32_MNT_BITS;
 static const uint32_t F32_MANT_MASK = (1u << F32_MNT_BITS) - 1; // 0x007FFFFF
 static const uint32_t F32_QNAN_BIT = (F32_MANT_MASK + 1) >> 1; // 0x00400000
 
@@ -1848,6 +1856,24 @@ static float time_dispatch_s(std::function<void()> func) {
   return time_dispatch_ms(func) / 1000.0f;
 }
 
+double time_s(std::function<void()> func)
+{
+  auto st = std::chrono::steady_clock::now();
+  func();
+  auto ed = std::chrono::steady_clock::now();
+  double elapsed_s = std::chrono::duration<double>(ed - st).count();
+  return elapsed_s;
+}
+
+// template <typename R,typename Ts...>
+// std::tuple<R,double> time_s(std::function<R(Ts...)> func, Ts...args)
+// {
+//   auto st = std::chrono::steady_clock::now();
+//   R r = func(args...);
+//   auto ed = std::chrono::steady_clock::now();
+//   double elapsed_s = std::chrono::duration<double>(ed - st).count();
+//   return std::make_tuple<R,double>(r, elapsed_s);
+// }
 
 
 ///////////////////////////////////////////////////////////////////////////////

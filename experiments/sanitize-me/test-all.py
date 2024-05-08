@@ -23,15 +23,23 @@ colorama.init()
 ALL_TESTS = [
   # (test-name, tool-to-use, string-to-match)
   # (t,tool,match)
+  ##################
+  # memcheck
   ("oob-glb-rd", "memcheck", [], "Invalid __global__ read"),
   ("oob-glb-wr", "memcheck", [], "Invalid __global__ write"),
   ("oob-shm-rd", "memcheck", [], "Invalid __shared__ read"),
   ("oob-shm-wr", "memcheck", [], "Invalid __shared__ write"),
-  # https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html#device-side-allocation-checking
-  # maybe needs
-  ("leak-glb",   "memcheck", ["--leak-check","full"], "Leaked 256 bytes"),
-  ("uninit-glb", "initcheck", [], "Uninitialized __global__ memory read"),
   #
+  ##################
+  # memcheck
+  # https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html#device-side-allocation-checking
+  ("leak-glb",   "memcheck", ["--leak-check","full"], "Leaked 256 bytes"),
+  ##################
+  # initcheck
+  ("uninit-glb", "initcheck", [], "Uninitialized __global__ memory read"),
+  # ("uninit-shm", "initcheck", [], "Uninitialized __shared__ memory read"), # ESCAPING
+  #
+  # ("race-glm", "racecheck", [], "Race reported"), # ESCAPING
   ("race-shm", "racecheck", [], "Race reported"),
   ]
 

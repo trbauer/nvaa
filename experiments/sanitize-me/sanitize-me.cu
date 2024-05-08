@@ -100,6 +100,15 @@ __global__ void uninit_shm(uint32_t *oups, const uint32_t *inps)
   oups[gid] = val;
 }
 extern "C"
+__global__ void race_glb(uint32_t *oups, const uint32_t *inps)
+{
+  size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gid == 7)
+    gid = 1;
+  auto val = inps[gid];
+  oups[gid] = val;
+}
+extern "C"
 __global__ void race_shm(uint32_t *oups, const uint32_t *inps)
 {
   const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -252,11 +261,15 @@ static const test_t ALL_TESTS[] {
     [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
       add_one<<<bpg,tpb>>>(oups, inps);
     }},
-  {"uninit-shm", launch_kernel, // THIS ONE FAILS TO TRIGGER
+  {"uninit-shm", launch_kernel, // ESCAPES
     [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
       uninit_shm<<<bpg,tpb>>>(oups, inps);
     }},
   // racecheck
+  {"race-glb", launch_kernel, // ESCAPES
+    [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
+      race_glb<<<bpg,tpb>>>(oups, inps);
+    }},
   {"race-shm", launch_kernel,
     [] (size_t bpg, size_t tpb, uint32_t *oups, const uint32_t *inps) {
       race_shm<<<bpg,tpb>>>(oups, inps);
