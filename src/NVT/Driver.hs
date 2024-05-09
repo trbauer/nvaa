@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 module NVT.Driver where
 
+import NVT.Color
 import NVT.CUDASDK
 import NVT.Diagnostic
 import NVT.ElfDecode
@@ -413,7 +414,11 @@ runWithOpts os
           | otherwise = do
             is_tty <- hIsTerminalDevice h_out
             let color = oColor os == ColorAlways || oColor os == ColorAuto && is_tty
-                fos = fos_dft {
+            when color $ do
+              z <- tryEnableColor h_out
+              debugLn os $ "hNowSupportsANSI: " ++ show z
+
+            let fos = fos_dft {
                           foArch = oArch os
                         , foColor = color
                         , foFmtOpts =

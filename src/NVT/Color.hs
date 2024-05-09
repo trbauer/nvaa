@@ -78,3 +78,5 @@ hPutStrColoredI i c h str = bracket_ acq rel act
         act = hPutStr h str
         rel = SCA.hSetSGR h [SCA.Reset]
 
+tryEnableColor :: Handle -> IO Bool
+tryEnableColor = SCA.hNowSupportsANSI

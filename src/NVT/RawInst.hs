@@ -334,6 +334,7 @@ regSpan s =
           , "SR_LTMASK"
           --
           , "SR_GLOBALTIMERLO"
+          , "SR_CLOCKLO"
           ]
 
 
