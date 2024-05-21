@@ -1512,6 +1512,18 @@ public:
   }
 
   //////////////////////////////////////////////////////////////////////////////
+  std::vector<E> to_vector() const {
+    std::vector<E> es;
+    es.reserve(size());
+    read([&](const E *ptr) {
+      for (size_t i = 0; i < size(); i++) {
+        es.emplace_back(ptr[i]);
+      }
+    });
+    return es;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
   void str(
     std::function<void(std::ostream&,const E&)> fmt_elem,
     std::ostream &os = std::cout,
@@ -1856,7 +1868,7 @@ static float time_dispatch_s(std::function<void()> func) {
   return time_dispatch_ms(func) / 1000.0f;
 }
 
-double time_s(std::function<void()> func)
+static double time_s(std::function<void()> func)
 {
   auto st = std::chrono::steady_clock::now();
   func();
