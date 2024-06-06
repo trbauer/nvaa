@@ -132,21 +132,21 @@ Signed multiplication uses the following sequence.
     IADD3            R9,  R9, R11, RZ
 
 
-### Address Seqeunces
+### LEA and Address Seqeunces
 Load effective address.
 
-`R2-R3` is 64b index.
-Output is `R4-R5 = ((R2-3 + const64) * 2^3)`??
-Or is it
-Output is `R4-R5 = ((R2-3 * 2^3) + const64)`??
+`R2-R3` is 64b index.  The constant is the base 64b value.
+Output is `R4-R5 = ((R2-3 * 2^3) + const64)`.
 
     T buf[N];
     ...
     buf + ix*sizeof(T)
 
+This produces the following `LEA`s.
+
     `R2-R3` are 64b `ix` (LO and HI)
-    `c[0x0][0x170]` = LO(buf)
-    `c[0x0][0x174]` = HI(buf)
+    `c[0x0][0x170]` => LO(buf)
+    `c[0x0][0x174]` => HI(buf)
 
     LEA       R4|P0, R2,  c0[0x170],      0x3;
     LEA.HI.X  R5,    R2,  c0[0x174], R3,  0x3, P0;
@@ -157,6 +157,11 @@ Semantics:
 
     R4|P0 = LO32(R2 << 3) + c0[0x170] + RZ
     R5    = LO32(R3 << 3) + c0[0x174] + HI32(R2 << 3) + P0
+
+More generally expect to see `B + (IX << S)` as the following.
+
+    LEA      DST[0],P0, IX[0], B[0], S;
+    LEA.HI.X DST[1],    IX[0], B[0], IX[1], S, P0;
 
 
 ## LOP3

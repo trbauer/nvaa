@@ -52,15 +52,16 @@ static __device__ int64_t get_globaltimer()
 //  asm volatile ("mov.u64 %0, %clock64;" : "=l"(st) :: "memory");
 
 
-static const uint32_t WALKS = 64;
+static const uint32_t WALKS = 128;
 
-// loads 'bytes' bytes into the cache and then time the flush (a fence)
 template <typename T>
 __global__ void mad_latency(int64_t *times, T *oups, T zero)
 {
   T sum = T(threadIdx.x);
   if (threadIdx.x == 0)
     sum += zero;
+  if (zero > T(0))
+    sum += 1;
   for (int i = 0; i < int(zero) + 2; i++) {
     const auto st = clock64();
     const auto st_ns = get_globaltimer();
@@ -71,9 +72,6 @@ __global__ void mad_latency(int64_t *times, T *oups, T zero)
     const auto ed_ns = get_globaltimer();
     const size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     oups[tid] = sum;
-  //  int64_t ed;
-  //  asm volatile ("mov.u64 %0, %clock64;" : "=l"(ed) :: "memory");
-    //
     if (threadIdx.x == 0) {
       times[4 * blockIdx.x + 0] = ed - st;
     } else if (threadIdx.x == 1) {

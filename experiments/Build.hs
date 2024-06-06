@@ -71,7 +71,9 @@ main :: IO ()
 main = getArgs >>= run
 
 run :: [String] -> IO ()
-run as = parseOpts dft_opts as >>= runWithOpts
+run as = do
+  tryEnableColor stdout
+  parseOpts dft_opts as >>= runWithOpts
 
 data Opts =
   Opts {
@@ -955,6 +957,8 @@ readInlineOptsFor tool fp =
 -- nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx -I .. -arch sm_${ARCH}
 -- # nvcc ${NVCC_EXTRA_FLAGS} ${WORKLOAD}.cu --generate-line-info --ptx --source-in-ptx -I .. -arch sm_${ARCH}
 -- mv ${WORKLOAD}.ptx ${WORKLOAD}-sm_${ARCH}.ptx
+tryEnableColor :: Handle -> IO Bool
+tryEnableColor = SCA.hNowSupportsANSI
 
 putStrRed :: String -> IO ()
 putStrRed = hPutVivid SCA.Red stdout
