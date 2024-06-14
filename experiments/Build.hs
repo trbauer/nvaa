@@ -164,6 +164,10 @@ parseOpts os (a:as)
       "    (last two digits from entries of nvcc --list-gpu-arch)\n" ++
       "  If artifacts are absent; a default set is chosen to build.\n" ++
       "  If FILE is '.' (current dir), then it matches all .cu files.\n" ++
+      "INLINE OPTIONS: at the top of the file prepend the following:\n" ++
+      "/// OPTIONS nvcc: -std=c++17 --expt-relaxed-constexpr\n" ++
+      "  * adds extra options to nvcc for this given file\n" ++
+      "  * -std=... is specially recognized and overrides the default -std=...\n" ++
       "EXAMPLES:\n" ++
 --      "  % bexp  foo.cu\n" ++
       "  % bexp  bar.cu:exe:75\n" ++
@@ -756,9 +760,12 @@ buildArtifact os dio a@(ak,fp,arch) = do
       -- 	nvcc -std=c++20 -arch sm_${EXE_ARCH} -I ../../tools ${WORKLOAD}.cu
       --           -o ${WORKLOAD}${EXE_ARCH}.exe
       inline_opts <- readInlineOptsFor "nvcc" fp
+      let maybe_cpp_std
+            | any ("-std="`isPrefixOf`) inline_opts = []
+            | otherwise = ["-std=c++20"]
       callExe os dio "nvcc"
-          ([ "-std=c++20"
-          , "-arch","sm_"++arch
+          (maybe_cpp_std ++ [
+            "-arch","sm_"++arch
           -- , "-lineinfo" -- for compute sanitizer
           , "-G" -- for compute sanitizer (BETTER)
           , "-I", takeDirectory mINCU_PATH
@@ -768,12 +775,14 @@ buildArtifact os dio a@(ak,fp,arch) = do
 
     ArtifactKindCUBIN -> do
       inline_opts <- readInlineOptsFor "nvcc" fp
+      let maybe_cpp_std
+            | any ("-std="`isPrefixOf`) inline_opts = []
+            | otherwise = ["-std=c++20"]
       callExe os dio "nvcc"
-        ([ "-std=c++20"
-        , "-arch","sm_"++arch
+        (maybe_cpp_std ++ [
+          "-arch","sm_"++arch
         , "-I", takeDirectory mINCU_PATH
         , "--generate-line-info"
-        -- , "--source-in-ptx" (shouldn't be needed; since PTX doesn't use this path)
         , "-cubin"
         , "-o", fp_cubin
         , fp
@@ -781,9 +790,12 @@ buildArtifact os dio a@(ak,fp,arch) = do
 
     ArtifactKindPTX -> do
       inline_opts <- readInlineOptsFor "nvcc" fp
+      let maybe_cpp_std
+            | any ("-std="`isPrefixOf`) inline_opts = []
+            | otherwise = ["-std=c++20"]
       callExe os dio "nvcc"
-        ([ "-std=c++20"
-        , "-arch","sm_"++arch
+        (maybe_cpp_std ++ [
+          "-arch","sm_"++arch
         , "-I", takeDirectory mINCU_PATH
         , "--generate-line-info" -- .loc directives
         , "--source-in-ptx" -- emits // lines with source (requires --generate-line-info)
