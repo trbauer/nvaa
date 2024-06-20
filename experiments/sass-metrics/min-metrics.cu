@@ -1,5 +1,5 @@
-/// OPTIONS nvcc: -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4/extras/CUPTI/include"
-/// OPTIONS nvcc: -L "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\extras\CUPTI\lib64" -lcupti
+/// OPTIONS nvcc: -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5/extras/CUPTI/include"
+/// OPTIONS nvcc: -L "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5\extras\CUPTI\lib64" -lcupti
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
@@ -69,6 +69,7 @@ int main(int argc, char *argv[])
   RUNTIME_API_CALL(cudaGetDeviceProperties(&prop, deviceNum));
   std::cout << "Device Name: " << prop.name << "\n";
   std::cout << "Device compute capability: " << prop.major << "." << prop.minor << "\n";
+  std::cout << "MemoryBus" << prop.memoryBusWidth << ", MemClock:" << prop.memoryClockRate << "\n";
 
   CUpti_Profiler_Initialize_Params profilerInitializeParams = { CUpti_Profiler_Initialize_Params_STRUCT_SIZE };
   CUPTI_API_CALL(cuptiProfilerInitialize(&profilerInitializeParams));

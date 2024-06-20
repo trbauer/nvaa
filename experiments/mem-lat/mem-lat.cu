@@ -14,8 +14,6 @@ struct opts {
   int verbosity = 0;
   int iterations = 2;
   bool check = false;
-//  size_t blocks_per_grid = 1024;
-//  size_t threads_per_block = 256;
 
   bool normal() const {return verbosity >= 0;}
   bool verbose() const {return verbosity >= 1;}
@@ -29,7 +27,7 @@ constexpr opts DFT_OPTS;
 static __device__ int64_t get_globaltimer()
 {
   int64_t t;
-  asm volatile ("mov.u64 %0, %globaltimer;" : "=l"(t));
+  asm volatile ("mov.u64 %0, %%globaltimer;" : "=l"(t));
   return t;
 }
 
@@ -37,7 +35,7 @@ using device_launcher = std::function<void(int64_t *,uint32_t *,const uint32_t *
 using host_launcher = void (*)(const opts &, std::string, device_launcher);
 using test = std::tuple<const char *,host_launcher,device_launcher>;
 
-static const int WALKS = 1024*1024;
+static const int WALKS = 1000*1000; // 16; // 1024*1024;
 
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void load_latency_l1(
@@ -47,7 +45,6 @@ __global__ void load_latency_l1(
           uint32_t zero)
 {
   const size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-  extern __shared__ uint32_t smem[];
 
   const uint32_t *ptr = inps + tid;
   // prefetch this 128B and force the dependency
@@ -105,6 +102,7 @@ __global__ void load_latency_smem(
   oups[tid] = *ptr;
 }
 
+////////////////////////////////////////////////////////////////////////////////
 static void print_col_headers(std::ostream &os) {
   os << coll("Test", 16) << " " <<
         colr("Latency(c)", 16) << " " <<
@@ -162,6 +160,9 @@ static void latency_test(
     min_c = std::min(this_c, min_c);
     min_ns = std::min(this_ns, min_ns);
     if (os.verbose()) {
+      if (os.debug()) {
+        vss << frac(s, 6) << " elapsed s\n";
+      }
       vss << frac(s * 1e9 / WALKS, 4) << " ns / walk\n";
       print_col(vss, format(test_name,".run[", i ,"]"), this_c, this_ns);
     }
@@ -181,10 +182,10 @@ static void latency_test(
 }
 
 static const test ALL_TESTS[] {
-  {"l1",  latency_test, [](int64_t *ts, uint32_t *os, const uint32_t *is) {
+  {"l1", latency_test, [](int64_t *ts, uint32_t *os, const uint32_t *is) {
     load_latency_l1<<<NBS,TPB,TPB*sizeof(uint32_t)>>>(ts, os, is, 0);
   }},
-  {"smem",  latency_test, [](int64_t *ts, uint32_t *os, const uint32_t *is) {
+  {"sm", latency_test, [](int64_t *ts, uint32_t *os, const uint32_t *is) {
     load_latency_smem<<<NBS,TPB,TPB*sizeof(uint32_t)>>>(ts, os, is, 0);
   }},
 };
@@ -202,10 +203,39 @@ int main(int argc, const char* argv[])
       key = arg.substr(0, eq + 1); // include the =
       val = arg.substr(eq + 1);
     }
-    auto bad_opt = [&](const char *msg) {
+    auto bad_opt = [&](std::string msg) {
       fatal(arg, ": ", msg);
     };
-
+    // matches start of a key-value pair option (e.g. -k=...)
+    // checks to ensure the option is not given as a flag (e.g. -k is illegal)
+    // and gives a good error diagnostic in that case
+    auto arg_is_key_eq = [&](const char *k_pfx0, const char *k_pfx1 = nullptr) {
+      if (k_pfx0 + std::string("=") == key) {
+        return true;
+      }
+      if (k_pfx1 && k_pfx1 + std::string("=") == key) {
+        return true;
+      }
+      if (key == k_pfx0) {
+        bad_opt(format(k_pfx0, ": expects a value (", k_pfx0, "=...)"));
+      } else if (k_pfx1 && key == k_pfx1) {
+        bad_opt(format(k_pfx1, ": expects a value (", k_pfx1, "=...)"));
+      }
+      return false;
+    };
+    // similar to above, but as a flag
+    auto arg_is_flag = [&](const char *k_pfx0, const char *k_pfx1 = nullptr) {
+      if (key == k_pfx0 || (k_pfx1 && key == k_pfx1)) {
+        return true;
+      }
+      if (k_pfx0 + std::string("=") == key) {
+        bad_opt(format(k_pfx0, ": should be given as a flag"));
+      }
+      if (k_pfx1 && k_pfx1 + std::string("=") == key) {
+        bad_opt(format(k_pfx1, ": should be given as a flag"));
+      }
+    };
+    ///////////////////////
     if (arg == "-h" || arg == "--help") {
       std::stringstream uss;
       uss <<
@@ -227,13 +257,13 @@ int main(int argc, const char* argv[])
         "";
       std::cout << uss.str();
       return EXIT_SUCCESS;
-    } else if (key == "-i=") {
+    } else if (arg_is_key_eq("-i", "--iterations")) {
       os.iterations = parse_integral_positive<int>(val, false);
-    } else if (arg == "-v") {
+    } else if (arg_is_flag("-v")) {
       os.verbosity = 1;
-    } else if (arg == "-v2") {
+    } else if (arg_is_flag("-v2")) {
       os.verbosity = 2;
-    } else if (arg == "-v3") {
+    } else if (arg_is_flag("-v3")) {
       os.verbosity = 3;
     } else if (arg.substr(0, 1) == "-") {
       bad_opt("invalid option");
