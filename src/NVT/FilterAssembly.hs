@@ -320,6 +320,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                     , ".other"
                     , ".sectionentsize"
                     , ".sectionflags"
+                    , ".sectioninfo"
                     , ".section"
                     , ".size"
                     , ".text"
