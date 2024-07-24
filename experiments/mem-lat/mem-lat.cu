@@ -35,7 +35,7 @@ using device_launcher = std::function<void(int64_t *,uint32_t *,const uint32_t *
 using host_launcher = void (*)(const opts &, std::string, device_launcher);
 using test = std::tuple<const char *,host_launcher,device_launcher>;
 
-static const int WALKS = 1000*1000; // 16; // 1024*1024;
+static const int WALKS = 10*1000*1000; // 16; // 1024*1024;
 
 ////////////////////////////////////////////////////////////////////////////////
 __global__ void load_latency_l1(
@@ -234,6 +234,7 @@ int main(int argc, const char* argv[])
       if (k_pfx1 && k_pfx1 + std::string("=") == key) {
         bad_opt(format(k_pfx1, ": should be given as a flag"));
       }
+      return false;
     };
     ///////////////////////
     if (arg == "-h" || arg == "--help") {
