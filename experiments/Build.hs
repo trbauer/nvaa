@@ -729,7 +729,10 @@ callExeG os dio exe as m_oup_fp inp = do
            dIO $ putStrLn err
         case m_oup_fp of
           Just oup_fp -> writeFile oup_fp out
-          Nothing -> return ()
+          Nothing -> do
+            when (oVerbosity os >= 1 && not (null out)) $
+              dIO $ putStrLn out
+            return ()
       ExitFailure ec -> do
         when (oVerbosity os < 2) $ -- we didn't print it earlier
           dIO $ putStrLn $ " % " ++ esc_arg exe ++ " " ++ intercalate " " (map esc_arg as)
