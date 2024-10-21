@@ -307,6 +307,14 @@ static void run_buf_init_tests()
         }
       });
 
+  TEST_GROUP("umem<unsigned>.arit_seq<unsigned>()",
+      [] {
+        // arithmetic sequence initializer
+        umem<unsigned> buf {8, arith_seq<unsigned>()};
+        for (size_t i = 0; i < buf.size(); i++) {
+          TEST_EQ(buf[i], i);
+        }
+      });
   TEST_GROUP("umem<unsigned>.arit_seq(0)",
       [] {
         // arithmetic sequence initializer
