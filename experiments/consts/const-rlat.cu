@@ -114,12 +114,13 @@ static void run_test(test t, int itrs, int verbosity)
   for (int i = 0; i < itrs; i++) {
     out_times.emplace_back(1, const_seq<uint64_t>(0));
     if (t.code == test::ordinal::R) {
-      funcs.push_back([&]{
+      umem<uint64_t> *out_times_ptr = &out_times[i];
+      funcs.push_back([&] {
         std::cout << "calling ffma_r\n";
         std::cout << &oups << "\n";
         std::cout << &inps << "\n";
-        std::cout << &out_times[i] << "\n";
-        ffma_r<<<1,1>>>(out_times[i], oups, inps);
+        std::cout << out_times_ptr << "\n";
+        ffma_r<<<1,1>>>(*out_times_ptr, oups, inps);
         std::cout << "called ffma_r\n";
         });
     } else if (t.code == test::ordinal::C) {
