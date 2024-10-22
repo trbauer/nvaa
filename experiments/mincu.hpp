@@ -1867,6 +1867,32 @@ static float time_dispatch_ms(std::function<void()> func)
 static float time_dispatch_s(std::function<void()> func) {
   return time_dispatch_ms(func) / 1000.0f;
 }
+static std::vector<float> time_dispatches_ms(std::vector<std::function<void()>> funcs) {
+  std::vector<std::pair<cudaEvent_t,cudaEvent_t>> evts;
+  for (const auto &func : funcs) {
+    evts.emplace_back();
+    CUDA_API(cudaEventCreate, &evts.back().first);
+    CUDA_API(cudaEventCreate, &evts.back().second);
+    CUDA_API(cudaEventRecord, evts.back().first);
+    func();
+    CUDA_API(cudaEventRecord, evts.back().second);
+  }
+  std::vector<float> times;
+  for (auto &evt : evts) {
+    CUDA_API(cudaEventSynchronize, evt.second);
+    times.emplace_back();
+    CUDA_API(cudaEventElapsedTime, &times.back(), evt.first, evt.second);
+    CUDA_API(cudaEventDestroy, evt.first);
+    CUDA_API(cudaEventDestroy, evt.second);
+  }
+  return times;
+}
+static std::vector<float> time_dispatches_s(std::vector<std::function<void()>> funcs) {
+  auto ts = time_dispatches_ms(funcs);
+  for (auto &t : ts)
+    t /= 1000.0f;
+  return ts;
+}
 
 static double time_s(std::function<void()> func)
 {

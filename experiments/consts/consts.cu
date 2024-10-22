@@ -20,7 +20,7 @@
 
 using namespace mincu;
 
-// #define INCLUDE_FFMA_LAT
+#define INCLUDE_FFMA_LAT
 #define INCLUDE_DFMA_LAT
 // #define INCLUDE_CBUF_ARG_LAT
 // #define INCLUDE_CBUF_DIR_LAT
@@ -39,9 +39,11 @@ static const int TOTAL_ACCESSES = 4096;
 
 static const int KEY_W = 32, VAL_W = 16;
 
-static void emitTableHdr(const char *xLabel, const char *yLabel)
+static void emitTableHdr(const char *test, const char *xLabel, const char *yLabel)
 {
-  std::cout << std::setw(KEY_W) << std::right << xLabel <<
+  std::stringstream ss;
+  ss << test << "-" << xLabel;
+  std::cout << std::setw(KEY_W) << std::right << ss.str() <<
     "    " << std::setw(VAL_W) << std::right << yLabel << "\n";
 }
 static int syncAndEmitTableRow(uint32_t x, umem<uint64_t> &runtimes)
@@ -104,10 +106,10 @@ static int test_ffma_lat()
 {
   int ret = EXIT_SUCCESS;
 
-  umem<float> oups(1, init_const<float>(0.0f));
-  umem<uint64_t> runtimes(1, init_seq<uint32_t>(0));
+  umem<float> oups(1, const_seq<float>(0.0f));
+  umem<uint64_t> runtimes((size_t)1, arith_seq<uint64_t>(0));
 
-  emitTableHdr("run", "clks/ref");
+  emitTableHdr("ffma_lat", "run", "clks/ref");
 
   for (int i = 0; i <= 8; i++) {
     ffma_lat<<<1,1>>>(oups, runtimes, 0.5f, 1.0f, TOTAL_ACCESSES);
@@ -161,7 +163,7 @@ static int test_dfma_lat()
   umem<double> oups(1, const_seq<double>(0.0));
   umem<uint64_t> runtimes(1, arith_seq<uint64_t>(0));
 
-  emitTableHdr("run", "clks/ref");
+  emitTableHdr("dfma-lat", "run", "clks/ref");
 
   for (int i = 0; i <= 8; i++) {
     dfma_lat<<<1,1>>>(oups, runtimes, 0.5f, 1.0f, TOTAL_ACCESSES);
@@ -277,7 +279,7 @@ static int test_const_arg_lat()
   umem<float> oups(1, init_const<float>(0.0f));
   umem<uint64_t> runtimes(1, init_seq<uint32_t>(0));
 
-  emitTableHdr("access size (B)", "clks/ref");
+  emitTableHdr("const_arg", "access size (B)", "clks/ref");
 
   for (int buf_size = 64; buf_size <= 3840; buf_size += 64) {
     const_arg_latency<<<1,1>>>(oups, runtimes, args, buf_size, TOTAL_ACCESSES);
@@ -407,7 +409,7 @@ static int test_const_buf_dir_lat()
   umem<float> oups(1, init_const<float>(0.0f));
   umem<uint64_t> runtimes(1, init_seq<uint32_t>(0));
 
-  emitTableHdr("access size (B)", "clks/ref");
+  emitTableHdr("const_buf_dir", "access size (B)", "clks/ref");
 
   for (int buf_size = 64; buf_size <= 8192; buf_size += 64) {
     const_buf_dir_lat<<<1,1>>>(oups, runtimes, buf_size, TOTAL_ACCESSES);
@@ -469,7 +471,7 @@ static int test_const_buf_ind_lat()
   umem<uint32_t> oups(1, init_seq<uint32_t>(0));
   umem<uint64_t> runtimes(1, init_seq<uint32_t>(0));
 
-  emitTableHdr("access size (B)", "clks/ref");
+  emitTableHdr("const_buf_ind", "access size (B)", "clks/ref");
 
   for (int k = 32; k <= 64*1024/4; k += 32) {
     h_table[k - 1] = 0;
@@ -549,7 +551,7 @@ static int test_const_buf_indv_lat_gen(
 //  }
   umem<uint64_t> runtimes(1, init_seq<uint32_t>(0));
 
-  emitTableHdr("access size (B)", "clks/ref");
+  emitTableHdr("const_buf_indv", "access size (B)", "clks/ref");
 
   for (int access_size = 512; access_size <= 64*1024; access_size += 128) {
     for (uint32_t i = 0; i < sizeof(h_table)/sizeof(h_table[0]); i++) {
