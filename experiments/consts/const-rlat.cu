@@ -94,7 +94,7 @@ static __global__ void ffma_c(
 struct test {
   enum class ordinal {R, C} code;
   const char *symbol;
-  explicit test (ordinal c, const char *sym) : code(c), symbol(sym) { }
+  explicit test(ordinal c, const char *sym) : code(c), symbol(sym) { }
 };
 static const test R {test::ordinal::R, "r"};
 static const test C {test::ordinal::C, "c"};
@@ -115,7 +115,7 @@ static void run_test(test t, int itrs, int verbosity)
     if (t.code == test::ordinal::R) {
       funcs.push_back([&,i] {ffma_r<<<1,1>>>(out_times[i], oups, inps);});
     } else if (t.code == test::ordinal::C) {
-      funcs.push_back([&,i]{ffma_c<<<1,1>>>(out_times[i], oups, inps, 0.5f);});
+      funcs.push_back([&,i] {ffma_c<<<1,1>>>(out_times[i], oups, inps, 0.5f);});
     } else {
       fatal("unreachable");
     }
@@ -125,11 +125,26 @@ static void run_test(test t, int itrs, int verbosity)
   if (e0 != cudaSuccess) {
     fatal(cudaGetErrorName(e0), " (", cudaGetErrorString(e0), "): unexpected error");
   }
+  int min_ix = -1;
+  for (size_t i = 0; i < elapsed_ss.size(); i++) {
+    if (min_ix == -1 || elapsed_ss[i] < elapsed_ss[min_ix]) {
+      min_ix = (int)i;
+    }
+  }
   for (size_t i = 0; i < elapsed_ss.size(); i++) {
     auto elapsed_s = elapsed_ss[i];
     auto clocks = (int64_t)out_times[i][0];
-    std::cout << format("elapsed_s[", i, "]: ",
-                        frac(elapsed_s, 4), " s, ", clocks, " c\n");
+    if (verbosity > 0 || i == (size_t)min_ix) {
+      if (i == (size_t)min_ix && verbosity > 0) {
+        std::cout << ">> ";
+      } else {
+        std::cout << "   ";
+      }
+      std::cout << format("run[", i, "]: ",
+                          "wall_time: ", frac(elapsed_s, 4), " s, ",
+                          frac(elapsed_s * 1e9 / WALKS, 4), " ns/walk, ",
+                          clocks, " c\n");
+    }
   }
 }
 

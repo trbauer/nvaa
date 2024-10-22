@@ -1,0 +1,365 @@
+	.headerflags	@"EF_CUDA_TEXMODE_UNIFIED EF_CUDA_64BIT_ADDRESS EF_CUDA_SM89 EF_CUDA_VIRTUAL_SM(EF_CUDA_SM89)"
+	.elftype	@"ET_EXEC"
+
+
+//--------------------- .text._Z6ffma_cPyPfPK6float4f --------------------------
+	.section	.text._Z6ffma_cPyPfPK6float4f,"ax",@progbits
+	.sectioninfo	@"SHI_REGISTERS=28"
+	.align	128
+.text._Z6ffma_cPyPfPK6float4f:
+        .type           _Z6ffma_cPyPfPK6float4f,@function
+        .size           _Z6ffma_cPyPfPK6float4f,(.L_x_4 - _Z6ffma_cPyPfPK6float4f)
+        .other          _Z6ffma_cPyPfPK6float4f,@"STO_CUDA_ENTRY STV_DEFAULT"
+_Z6ffma_cPyPfPK6float4f:
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 60
+        /*0000*/                   MOV R1, c[0x0][0x28] ;                         /* 0x00000a0000017a02 */
+                                                                                  /* 0x000fe40000000f00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 67
+        /*0010*/                   S2R R0, SR_CTAID.X ;                           /* 0x0000000000007919 */
+                                                                                  /* 0x000e220000002500 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 70
+        /*0020*/                   MOV R5, 0x10 ;                                 /* 0x0000001000057802 */
+                                                                                  /* 0x000fe20000000f00 */
+        /*0030*/                   CS2R R24, SRZ ;                                /* 0x0000000000187805 */
+                                                                                  /* 0x000fe2000001ff00 */
+        /*0040*/                   CS2R R22, SRZ ;                                /* 0x0000000000167805 */
+                                                                                  /* 0x000fe2000001ff00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 67
+        /*0050*/                   S2R R3, SR_TID.X ;                             /* 0x0000000000037919 */
+                                                                                  /* 0x000e220000002100 */
+        /*0060*/                   ULDC.64 UR4, c[0x0][0x118] ;                   /* 0x0000460000047ab9 */
+                                                                                  /* 0x000fe20000000a00 */
+        /*0070*/                   IMAD R0, R0, c[0x0][0x0], R3 ;                 /* 0x0000000000007a24 */
+                                                                                  /* 0x001fc800078e0203 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 70
+        /*0080*/                   IMAD.WIDE.U32 R2, R0, R5, c[0x0][0x170] ;      /* 0x00005c0000027625 */
+                                                                                  /* 0x000fca00078e0005 */
+        /*0090*/                   MOV R20, R2 ;                                  /* 0x0000000200147202 */
+                                                                                  /* 0x000fe40000000f00 */
+        /*00a0*/                   MOV R21, R3 ;                                  /* 0x0000000300157202 */
+                                                                                  /* 0x000fca0000000f00 */
+.L_x_0:
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 77
+        /*00b0*/                   LDG.E.128 R4, [R20.64] ;                       /* 0x0000000414047981 */
+                                                                                  /* 0x000168000c1e1d00 */
+        /*00c0*/                   LDG.E.128 R8, [R20.64+0x10] ;                  /* 0x0000100414087981 */
+                                                                                  /* 0x000168000c1e1d00 */
+        /*00d0*/                   LDG.E.128 R12, [R20.64+0x20] ;                 /* 0x00002004140c7981 */
+                                                                                  /* 0x000168000c1e1d00 */
+        /*00e0*/                   LDG.E.128 R16, [R20.64+0x30] ;                 /* 0x0000300414107981 */
+                                                                                  /* 0x000164000c1e1d00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 10 inlined at "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 79
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 79
+        /*00f0*/                   CS2R R2, SR_CLOCKLO ;                          /* 0x0000000000027805 */
+                                                                                  /* 0x000fe40000015000 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 81
+        /*0100*/                   FFMA R4, R4, c[0x0][0x178], R25 ;              /* 0x00005e0004047a23 */
+                                                                                  /* 0x020fc80000000019 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 82
+        /*0110*/                   FFMA R5, R5, c[0x0][0x178], R4 ;               /* 0x00005e0005057a23 */
+                                                                                  /* 0x000fc80000000004 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 83
+        /*0120*/                   FFMA R6, R6, c[0x0][0x178], R5 ;               /* 0x00005e0006067a23 */
+                                                                                  /* 0x000fc80000000005 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 84
+        /*0130*/                   FFMA R7, R7, c[0x0][0x178], R6 ;               /* 0x00005e0007077a23 */
+                                                                                  /* 0x000fc80000000006 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 81
+        /*0140*/                   FFMA R8, R8, c[0x0][0x178], R7 ;               /* 0x00005e0008087a23 */
+                                                                                  /* 0x000fc80000000007 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 82
+        /*0150*/                   FFMA R9, R9, c[0x0][0x178], R8 ;               /* 0x00005e0009097a23 */
+                                                                                  /* 0x000fc80000000008 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 83
+        /*0160*/                   FFMA R10, R10, c[0x0][0x178], R9 ;             /* 0x00005e000a0a7a23 */
+                                                                                  /* 0x000fc80000000009 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 84
+        /*0170*/                   FFMA R11, R11, c[0x0][0x178], R10 ;            /* 0x00005e000b0b7a23 */
+                                                                                  /* 0x000fc8000000000a */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 81
+        /*0180*/                   FFMA R12, R12, c[0x0][0x178], R11 ;            /* 0x00005e000c0c7a23 */
+                                                                                  /* 0x000fc8000000000b */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 82
+        /*0190*/                   FFMA R13, R13, c[0x0][0x178], R12 ;            /* 0x00005e000d0d7a23 */
+                                                                                  /* 0x000fc8000000000c */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 83
+        /*01a0*/                   FFMA R14, R14, c[0x0][0x178], R13 ;            /* 0x00005e000e0e7a23 */
+                                                                                  /* 0x000fc8000000000d */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 84
+        /*01b0*/                   FFMA R15, R15, c[0x0][0x178], R14 ;            /* 0x00005e000f0f7a23 */
+                                                                                  /* 0x000fc8000000000e */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 81
+        /*01c0*/                   FFMA R16, R16, c[0x0][0x178], R15 ;            /* 0x00005e0010107a23 */
+                                                                                  /* 0x000fc8000000000f */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 82
+        /*01d0*/                   FFMA R17, R17, c[0x0][0x178], R16 ;            /* 0x00005e0011117a23 */
+                                                                                  /* 0x000fc80000000010 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 83
+        /*01e0*/                   FFMA R18, R18, c[0x0][0x178], R17 ;            /* 0x00005e0012127a23 */
+                                                                                  /* 0x000fc80000000011 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 84
+        /*01f0*/                   FFMA R25, R19, c[0x0][0x178], R18 ;            /* 0x00005e0013197a23 */
+                                                                                  /* 0x000fe20000000012 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 10 inlined at "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 86
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 86
+        /*0200*/                   CS2R R4, SR_CLOCKLO ;                          /* 0x0000000000047805 */
+                                                                                  /* 0x000fcc0000015000 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 73
+        /*0210*/                   IADD3 R24, R24, 0x1, RZ ;                      /* 0x0000000118187810 */
+                                                                                  /* 0x000fe40007ffe0ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 86
+        /*0220*/                   IADD3 R22, P1, P2, R4, R22, -R2 ;              /* 0x0000001604167210 */
+                                                                                  /* 0x000fe40007a3e802 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 73
+        /*0230*/                   ISETP.NE.AND P0, PT, R24, 0x1000, PT ;         /* 0x000010001800780c */
+                                                                                  /* 0x000fe40003f05270 */
+        /*0240*/                   IADD3 R20, P3, R20, 0x40, RZ ;                 /* 0x0000004014147810 */
+                                                                                  /* 0x001fe40007f7e0ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 86
+        /*0250*/                   IADD3.X R23, R5, R23, ~R3, P1, P2 ;            /* 0x0000001705177210 */
+                                                                                  /* 0x000fe40000fe4c03 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 73
+        /*0260*/                   IADD3.X R21, RZ, R21, RZ, P3, !PT ;            /* 0x00000015ff157210 */
+                                                                                  /* 0x000fce0001ffe4ff */
+        /*0270*/               @P0 BRA `(.L_x_0) ;                                /* 0xfffffe3000000947 */
+                                                                                  /* 0x000fea000383ffff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 88
+        /*0280*/                   LEA R4, P0, R0, c[0x0][0x168], 0x2 ;           /* 0x00005a0000047a11 */
+                                                                                  /* 0x000fe400078010ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 90
+        /*0290*/                   SHF.R.U64 R22, R22, 0x10, R23.reuse ;          /* 0x0000001016167819 */
+                                                                                  /* 0x100fe40000001217 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 88
+        /*02a0*/                   LEA.HI.X R5, R0, c[0x0][0x16c], RZ, 0x2, P0 ;  /* 0x00005b0000057a11 */
+                                                                                  /* 0x000fe400000f14ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 90
+        /*02b0*/                   SHF.R.U32.HI R23, RZ, 0x10, R23 ;              /* 0x00000010ff177819 */
+                                                                                  /* 0x000fe40000011617 */
+        /*02c0*/                   MOV R2, c[0x0][0x160] ;                        /* 0x0000580000027a02 */
+                                                                                  /* 0x000fe20000000f00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 88
+        /*02d0*/                   STG.E [R4.64], R25 ;                           /* 0x0000001904007986 */
+                                                                                  /* 0x000fe2000c101904 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 90
+        /*02e0*/                   MOV R3, c[0x0][0x164] ;                        /* 0x0000590000037a02 */
+                                                                                  /* 0x000fca0000000f00 */
+        /*02f0*/                   STG.E.64 [R2.64], R22 ;                        /* 0x0000001602007986 */
+                                                                                  /* 0x000fe2000c101b04 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 91
+        /*0300*/                   EXIT ;                                         /* 0x000000000000794d */
+                                                                                  /* 0x000fea0003800000 */
+.L_x_1:
+        /*0310*/                   BRA `(.L_x_1);                                 /* 0xfffffff000007947 */
+                                                                                  /* 0x000fc0000383ffff */
+        /*0320*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0330*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0340*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0350*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0360*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0370*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0380*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0390*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03a0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03b0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03c0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03d0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03e0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03f0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+.L_x_4:
+
+
+//--------------------- .text._Z6ffma_rPyPfPK6float4 --------------------------
+	.section	.text._Z6ffma_rPyPfPK6float4,"ax",@progbits
+	.sectioninfo	@"SHI_REGISTERS=29"
+	.align	128
+.text._Z6ffma_rPyPfPK6float4:
+        .type           _Z6ffma_rPyPfPK6float4,@function
+        .size           _Z6ffma_rPyPfPK6float4,(.L_x_5 - _Z6ffma_rPyPfPK6float4)
+        .other          _Z6ffma_rPyPfPK6float4,@"STO_CUDA_ENTRY STV_DEFAULT"
+_Z6ffma_rPyPfPK6float4:
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 27
+        /*0000*/                   MOV R1, c[0x0][0x28] ;                         /* 0x00000a0000017a02 */
+                                                                                  /* 0x000fe40000000f00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 33
+        /*0010*/                   S2R R0, SR_CTAID.X ;                           /* 0x0000000000007919 */
+                                                                                  /* 0x000e220000002500 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 37
+        /*0020*/                   MOV R3, 0x10 ;                                 /* 0x0000001000037802 */
+                                                                                  /* 0x000fe20000000f00 */
+        /*0030*/                   CS2R R22, SRZ ;                                /* 0x0000000000167805 */
+                                                                                  /* 0x000fe2000001ff00 */
+        /*0040*/                   MOV R25, RZ ;                                  /* 0x000000ff00197202 */
+                                                                                  /* 0x000fe20000000f00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 33
+        /*0050*/                   S2R R5, SR_TID.X ;                             /* 0x0000000000057919 */
+                                                                                  /* 0x000e220000002100 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 37
+        /*0060*/                   MOV R26, RZ ;                                  /* 0x000000ff001a7202 */
+                                                                                  /* 0x000fe20000000f00 */
+        /*0070*/                   ULDC.64 UR4, c[0x0][0x118] ;                   /* 0x0000460000047ab9 */
+                                                                                  /* 0x000fe20000000a00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 33
+        /*0080*/                   IMAD R0, R0, c[0x0][0x0], R5 ;                 /* 0x0000000000007a24 */
+                                                                                  /* 0x001fe200078e0205 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 34
+        /*0090*/                   I2FP.F32.U32 R24, R5 ;                         /* 0x0000000500187245 */
+                                                                                  /* 0x000fc60000201000 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 37
+        /*00a0*/                   IMAD.WIDE.U32 R2, R0, R3, c[0x0][0x170] ;      /* 0x00005c0000027625 */
+                                                                                  /* 0x000fca00078e0003 */
+        /*00b0*/                   MOV R20, R2 ;                                  /* 0x0000000200147202 */
+                                                                                  /* 0x000fe40000000f00 */
+        /*00c0*/                   MOV R21, R3 ;                                  /* 0x0000000300157202 */
+                                                                                  /* 0x000fca0000000f00 */
+.L_x_2:
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 44
+        /*00d0*/                   LDG.E.128 R4, [R20.64] ;                       /* 0x0000000414047981 */
+                                                                                  /* 0x000168000c1e1d00 */
+        /*00e0*/                   LDG.E.128 R8, [R20.64+0x10] ;                  /* 0x0000100414087981 */
+                                                                                  /* 0x000168000c1e1d00 */
+        /*00f0*/                   LDG.E.128 R12, [R20.64+0x20] ;                 /* 0x00002004140c7981 */
+                                                                                  /* 0x000168000c1e1d00 */
+        /*0100*/                   LDG.E.128 R16, [R20.64+0x30] ;                 /* 0x0000300414107981 */
+                                                                                  /* 0x000164000c1e1d00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 10 inlined at "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 46
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 46
+        /*0110*/                   CS2R R2, SR_CLOCKLO ;                          /* 0x0000000000027805 */
+                                                                                  /* 0x000fe40000015000 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 48
+        /*0120*/                   FFMA R4, R24, R4, R25 ;                        /* 0x0000000418047223 */
+                                                                                  /* 0x020fc80000000019 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 49
+        /*0130*/                   FFMA R5, R24, R5, R4 ;                         /* 0x0000000518057223 */
+                                                                                  /* 0x000fc80000000004 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 50
+        /*0140*/                   FFMA R6, R24, R6, R5 ;                         /* 0x0000000618067223 */
+                                                                                  /* 0x000fc80000000005 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 51
+        /*0150*/                   FFMA R7, R24, R7, R6 ;                         /* 0x0000000718077223 */
+                                                                                  /* 0x000fc80000000006 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 48
+        /*0160*/                   FFMA R8, R24, R8, R7 ;                         /* 0x0000000818087223 */
+                                                                                  /* 0x000fc80000000007 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 49
+        /*0170*/                   FFMA R9, R24, R9, R8 ;                         /* 0x0000000918097223 */
+                                                                                  /* 0x000fc80000000008 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 50
+        /*0180*/                   FFMA R10, R24, R10, R9 ;                       /* 0x0000000a180a7223 */
+                                                                                  /* 0x000fc80000000009 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 51
+        /*0190*/                   FFMA R11, R24, R11, R10 ;                      /* 0x0000000b180b7223 */
+                                                                                  /* 0x000fc8000000000a */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 48
+        /*01a0*/                   FFMA R12, R24, R12, R11 ;                      /* 0x0000000c180c7223 */
+                                                                                  /* 0x000fc8000000000b */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 49
+        /*01b0*/                   FFMA R13, R24, R13, R12 ;                      /* 0x0000000d180d7223 */
+                                                                                  /* 0x000fc8000000000c */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 50
+        /*01c0*/                   FFMA R14, R24, R14, R13 ;                      /* 0x0000000e180e7223 */
+                                                                                  /* 0x000fc8000000000d */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 51
+        /*01d0*/                   FFMA R15, R24, R15, R14 ;                      /* 0x0000000f180f7223 */
+                                                                                  /* 0x000fc8000000000e */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 48
+        /*01e0*/                   FFMA R16, R24, R16, R15 ;                      /* 0x0000001018107223 */
+                                                                                  /* 0x000fc8000000000f */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 49
+        /*01f0*/                   FFMA R17, R24, R17, R16 ;                      /* 0x0000001118117223 */
+                                                                                  /* 0x000fc80000000010 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 50
+        /*0200*/                   FFMA R18, R24, R18, R17 ;                      /* 0x0000001218127223 */
+                                                                                  /* 0x000fc80000000011 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 51
+        /*0210*/                   FFMA R25, R24, R19, R18 ;                      /* 0x0000001318197223 */
+                                                                                  /* 0x000fe20000000012 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 10 inlined at "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 53
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 53
+        /*0220*/                   CS2R R4, SR_CLOCKLO ;                          /* 0x0000000000047805 */
+                                                                                  /* 0x000fcc0000015000 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 40
+        /*0230*/                   IADD3 R26, R26, 0x1, RZ ;                      /* 0x000000011a1a7810 */
+                                                                                  /* 0x000fe40007ffe0ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 53
+        /*0240*/                   IADD3 R22, P1, P2, R4, R22, -R2 ;              /* 0x0000001604167210 */
+                                                                                  /* 0x000fe40007a3e802 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 40
+        /*0250*/                   ISETP.NE.AND P0, PT, R26, 0x1000, PT ;         /* 0x000010001a00780c */
+                                                                                  /* 0x000fe40003f05270 */
+        /*0260*/                   IADD3 R20, P3, R20, 0x40, RZ ;                 /* 0x0000004014147810 */
+                                                                                  /* 0x001fe40007f7e0ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 53
+        /*0270*/                   IADD3.X R23, R5, R23, ~R3, P1, P2 ;            /* 0x0000001705177210 */
+                                                                                  /* 0x000fe40000fe4c03 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 40
+        /*0280*/                   IADD3.X R21, RZ, R21, RZ, P3, !PT ;            /* 0x00000015ff157210 */
+                                                                                  /* 0x000fce0001ffe4ff */
+        /*0290*/               @P0 BRA `(.L_x_2) ;                                /* 0xfffffe3000000947 */
+                                                                                  /* 0x000fea000383ffff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 55
+        /*02a0*/                   LEA R4, P0, R0, c[0x0][0x168], 0x2 ;           /* 0x00005a0000047a11 */
+                                                                                  /* 0x000fe400078010ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 57
+        /*02b0*/                   SHF.R.U64 R22, R22, 0x10, R23.reuse ;          /* 0x0000001016167819 */
+                                                                                  /* 0x100fe40000001217 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 55
+        /*02c0*/                   LEA.HI.X R5, R0, c[0x0][0x16c], RZ, 0x2, P0 ;  /* 0x00005b0000057a11 */
+                                                                                  /* 0x000fe400000f14ff */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 57
+        /*02d0*/                   SHF.R.U32.HI R23, RZ, 0x10, R23 ;              /* 0x00000010ff177819 */
+                                                                                  /* 0x000fe40000011617 */
+        /*02e0*/                   MOV R2, c[0x0][0x160] ;                        /* 0x0000580000027a02 */
+                                                                                  /* 0x000fe20000000f00 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 55
+        /*02f0*/                   STG.E [R4.64], R25 ;                           /* 0x0000001904007986 */
+                                                                                  /* 0x000fe2000c101904 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 57
+        /*0300*/                   MOV R3, c[0x0][0x164] ;                        /* 0x0000590000037a02 */
+                                                                                  /* 0x000fca0000000f00 */
+        /*0310*/                   STG.E.64 [R2.64], R22 ;                        /* 0x0000001602007986 */
+                                                                                  /* 0x000fe2000c101b04 */
+	//## File "D:\\ddev\\nvaa\\experiments\\consts/const-rlat.cu", line 58
+        /*0320*/                   EXIT ;                                         /* 0x000000000000794d */
+                                                                                  /* 0x000fea0003800000 */
+.L_x_3:
+        /*0330*/                   BRA `(.L_x_3);                                 /* 0xfffffff000007947 */
+                                                                                  /* 0x000fc0000383ffff */
+        /*0340*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0350*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0360*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0370*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0380*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*0390*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03a0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03b0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03c0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03d0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03e0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+        /*03f0*/                   NOP;                                           /* 0x0000000000007918 */
+                                                                                  /* 0x000fc00000000000 */
+.L_x_5:

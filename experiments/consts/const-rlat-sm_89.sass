@@ -1,0 +1,233 @@
+	.headerflags	@"EF_CUDA_TEXMODE_UNIFIED EF_CUDA_64BIT_ADDRESS EF_CUDA_SM89 EF_CUDA_VIRTUAL_SM(EF_CUDA_SM89)"
+	.elftype	@"ET_EXEC"
+
+
+//--------------------- .text._Z6ffma_cPyPfPK6float4f --------------------------
+	.section	.text._Z6ffma_cPyPfPK6float4f,"ax",@progbits
+	.sectioninfo	@"SHI_REGISTERS=28"
+	.align	128
+.text._Z6ffma_cPyPfPK6float4f:
+        .type           _Z6ffma_cPyPfPK6float4f,@function
+        .size           _Z6ffma_cPyPfPK6float4f,(.L_x_4 - _Z6ffma_cPyPfPK6float4f)
+        .other          _Z6ffma_cPyPfPK6float4f,@"STO_CUDA_ENTRY STV_DEFAULT"
+_Z6ffma_cPyPfPK6float4f:
+  // const-rlat.cu:60:               static __global__ void ffma_c(
+      MOV       R1,     c0[0x28]                         {!2};
+  // const-rlat.cu:67:                 const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+      S2R       R0,     SR_CTAID.X                       {!1,+0.W};
+  // const-rlat.cu:70:                 const float4 *in_ptr = in0 + gid;
+      MOV       R5,     0x10                             {!1};
+      CS2R      R24,    SRZ                              {!1};
+      CS2R      R22,    SRZ                              {!1};
+  // const-rlat.cu:67:                 const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+      S2R       R3,     SR_TID.X                         {!1,+0.W};
+      ULDC.64   UR4,    c0[0x118]                        {!1};
+      IMAD      R0,     R0,     c0[0x0], R3              {!4,Y,^0};
+  // const-rlat.cu:70:                 const float4 *in_ptr = in0 + gid;
+      IMAD.WIDE.U32  R2, R0,    R5,     c0[0x170]        {!5,Y};
+      MOV       R20,    R2                               {!2};
+      MOV       R21,    R3                               {!5,Y};
+.L_x_0:
+  // const-rlat.cu:77:                     acc[k] = *in_ptr++;
+      LDG.E.128  R4,    [R20.64]                         {!4,+5.W,+0.R};
+      LDG.E.128  R8,    [R20.64+0x10]                    {!4,+5.W,+0.R};
+      LDG.E.128  R12,   [R20.64+0x20]                    {!4,+5.W,+0.R};
+      LDG.E.128  R16,   [R20.64+0x30]                    {!2,+5.W,+0.R};
+  // const-rlat.cu:79:                   ulong rt_stt = get_time();
+      CS2R      R2,     SR_CLOCKLO                       {!2};
+  // const-rlat.cu:81:                     sum += acc[k].x * konst;
+      FFMA      R4,     R4,     c0[0x178], R25           {!4,Y,^5};
+  // const-rlat.cu:82:                     sum += acc[k].y * konst;
+      FFMA      R5,     R5,     c0[0x178], R4            {!4,Y};
+  // const-rlat.cu:83:                     sum += acc[k].z * konst;
+      FFMA      R6,     R6,     c0[0x178], R5            {!4,Y};
+  // const-rlat.cu:84:                     sum += acc[k].w * konst;
+      FFMA      R7,     R7,     c0[0x178], R6            {!4,Y};
+  // const-rlat.cu:81:                     sum += acc[k].x * konst;
+      FFMA      R8,     R8,     c0[0x178], R7            {!4,Y};
+  // const-rlat.cu:82:                     sum += acc[k].y * konst;
+      FFMA      R9,     R9,     c0[0x178], R8            {!4,Y};
+  // const-rlat.cu:83:                     sum += acc[k].z * konst;
+      FFMA      R10,    R10,    c0[0x178], R9            {!4,Y};
+  // const-rlat.cu:84:                     sum += acc[k].w * konst;
+      FFMA      R11,    R11,    c0[0x178], R10           {!4,Y};
+  // const-rlat.cu:81:                     sum += acc[k].x * konst;
+      FFMA      R12,    R12,    c0[0x178], R11           {!4,Y};
+  // const-rlat.cu:82:                     sum += acc[k].y * konst;
+      FFMA      R13,    R13,    c0[0x178], R12           {!4,Y};
+  // const-rlat.cu:83:                     sum += acc[k].z * konst;
+      FFMA      R14,    R14,    c0[0x178], R13           {!4,Y};
+  // const-rlat.cu:84:                     sum += acc[k].w * konst;
+      FFMA      R15,    R15,    c0[0x178], R14           {!4,Y};
+  // const-rlat.cu:81:                     sum += acc[k].x * konst;
+      FFMA      R16,    R16,    c0[0x178], R15           {!4,Y};
+  // const-rlat.cu:82:                     sum += acc[k].y * konst;
+      FFMA      R17,    R17,    c0[0x178], R16           {!4,Y};
+  // const-rlat.cu:83:                     sum += acc[k].z * konst;
+      FFMA      R18,    R18,    c0[0x178], R17           {!4,Y};
+  // const-rlat.cu:84:                     sum += acc[k].w * konst;
+      FFMA      R25,    R19,    c0[0x178], R18           {!1};
+  // const-rlat.cu:86:                   rt_sum += get_time() - rt_stt;
+      CS2R      R4,     SR_CLOCKLO                       {!6,Y};
+  // const-rlat.cu:73:                 for (uint i = 0; i < WALKS / 16; i++) {
+      IADD3     R24,    R24,    0x1,    RZ               {!2};
+  // const-rlat.cu:86:                   rt_sum += get_time() - rt_stt;
+      IADD3     R22,    P1,     P2,     R4,     R22,    -R2      {!2};
+  // const-rlat.cu:73:                 for (uint i = 0; i < WALKS / 16; i++) {
+      ISETP.NE.AND  P0, PT,     R24,    0x1000, PT       {!2};
+      IADD3     R20,    P3,     R20,    0x40,   RZ       {!2,^0};
+  // const-rlat.cu:86:                   rt_sum += get_time() - rt_stt;
+      IADD3.X   R23,    R5,     R23,    ~R3,    P1,     P2       {!2};
+  // const-rlat.cu:73:                 for (uint i = 0; i < WALKS / 16; i++) {
+      IADD3.X   R21,    RZ,     R21,    RZ,     P3,     !PT      {!7,Y};
+@P0   BRA       `(.L_x_0)                                {!5};
+  // const-rlat.cu:88:                 out[gid] = sum;
+      LEA       R4,     P0,     R0,     c0[0x168], 0x2   {!2};
+  // const-rlat.cu:90:                 out_time[0] = rt_sum / WALKS;
+      SHF.R.U64  R22,   R22,    0x10,   R23.reu          {!2};
+  // const-rlat.cu:88:                 out[gid] = sum;
+      LEA.HI.X  R5,     R0,     c0[0x16c], RZ,  0x2,    P0       {!2};
+  // const-rlat.cu:90:                 out_time[0] = rt_sum / WALKS;
+      SHF.R.U32.HI  R23, RZ,    0x10,   R23              {!2};
+      MOV       R2,     c0[0x160]                        {!1};
+  // const-rlat.cu:88:                 out[gid] = sum;
+      STG.E     [R4.64], R25                             {!1};
+  // const-rlat.cu:90:                 out_time[0] = rt_sum / WALKS;
+      MOV       R3,     c0[0x164]                        {!5,Y};
+      STG.E.64  [R2.64], R22                             {!1};
+  // const-rlat.cu:91:               }
+      EXIT                                               {!5};
+.L_x_1:
+      BRA       `(.L_x_1)                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+.L_x_4:
+
+
+//--------------------- .text._Z6ffma_rPyPfPK6float4 --------------------------
+	.section	.text._Z6ffma_rPyPfPK6float4,"ax",@progbits
+	.sectioninfo	@"SHI_REGISTERS=29"
+	.align	128
+.text._Z6ffma_rPyPfPK6float4:
+        .type           _Z6ffma_rPyPfPK6float4,@function
+        .size           _Z6ffma_rPyPfPK6float4,(.L_x_5 - _Z6ffma_rPyPfPK6float4)
+        .other          _Z6ffma_rPyPfPK6float4,@"STO_CUDA_ENTRY STV_DEFAULT"
+_Z6ffma_rPyPfPK6float4:
+  // const-rlat.cu:27:               static __global__ void ffma_r(
+      MOV       R1,     c0[0x28]                         {!2};
+  // const-rlat.cu:33:                 const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+      S2R       R0,     SR_CTAID.X                       {!1,+0.W};
+  // const-rlat.cu:37:                 const float4 *in_ptr = in0 + gid;
+      MOV       R3,     0x10                             {!1};
+      CS2R      R22,    SRZ                              {!1};
+      MOV       R25,    RZ                               {!1};
+  // const-rlat.cu:33:                 const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+      S2R       R5,     SR_TID.X                         {!1,+0.W};
+  // const-rlat.cu:37:                 const float4 *in_ptr = in0 + gid;
+      MOV       R26,    RZ                               {!1};
+      ULDC.64   UR4,    c0[0x118]                        {!1};
+  // const-rlat.cu:33:                 const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+      IMAD      R0,     R0,     c0[0x0], R5              {!1,^0};
+  // const-rlat.cu:34:                 float reg = (float)threadIdx.x;
+      I2FP.F32.U32  R24, R5                              {!3,Y};
+  // const-rlat.cu:37:                 const float4 *in_ptr = in0 + gid;
+      IMAD.WIDE.U32  R2, R0,    R3,     c0[0x170]        {!5,Y};
+      MOV       R20,    R2                               {!2};
+      MOV       R21,    R3                               {!5,Y};
+.L_x_2:
+  // const-rlat.cu:44:                     acc[k] = *in_ptr++;
+      LDG.E.128  R4,    [R20.64]                         {!4,+5.W,+0.R};
+      LDG.E.128  R8,    [R20.64+0x10]                    {!4,+5.W,+0.R};
+      LDG.E.128  R12,   [R20.64+0x20]                    {!4,+5.W,+0.R};
+      LDG.E.128  R16,   [R20.64+0x30]                    {!2,+5.W,+0.R};
+  // const-rlat.cu:46:                   ulong rt_stt = get_time();
+      CS2R      R2,     SR_CLOCKLO                       {!2};
+  // const-rlat.cu:48:                     sum += acc[k].x * reg;
+      FFMA      R4,     R24,    R4,     R25              {!4,Y,^5};
+  // const-rlat.cu:49:                     sum += acc[k].y * reg;
+      FFMA      R5,     R24,    R5,     R4               {!4,Y};
+  // const-rlat.cu:50:                     sum += acc[k].z * reg;
+      FFMA      R6,     R24,    R6,     R5               {!4,Y};
+  // const-rlat.cu:51:                     sum += acc[k].w * reg;
+      FFMA      R7,     R24,    R7,     R6               {!4,Y};
+  // const-rlat.cu:48:                     sum += acc[k].x * reg;
+      FFMA      R8,     R24,    R8,     R7               {!4,Y};
+  // const-rlat.cu:49:                     sum += acc[k].y * reg;
+      FFMA      R9,     R24,    R9,     R8               {!4,Y};
+  // const-rlat.cu:50:                     sum += acc[k].z * reg;
+      FFMA      R10,    R24,    R10,    R9               {!4,Y};
+  // const-rlat.cu:51:                     sum += acc[k].w * reg;
+      FFMA      R11,    R24,    R11,    R10              {!4,Y};
+  // const-rlat.cu:48:                     sum += acc[k].x * reg;
+      FFMA      R12,    R24,    R12,    R11              {!4,Y};
+  // const-rlat.cu:49:                     sum += acc[k].y * reg;
+      FFMA      R13,    R24,    R13,    R12              {!4,Y};
+  // const-rlat.cu:50:                     sum += acc[k].z * reg;
+      FFMA      R14,    R24,    R14,    R13              {!4,Y};
+  // const-rlat.cu:51:                     sum += acc[k].w * reg;
+      FFMA      R15,    R24,    R15,    R14              {!4,Y};
+  // const-rlat.cu:48:                     sum += acc[k].x * reg;
+      FFMA      R16,    R24,    R16,    R15              {!4,Y};
+  // const-rlat.cu:49:                     sum += acc[k].y * reg;
+      FFMA      R17,    R24,    R17,    R16              {!4,Y};
+  // const-rlat.cu:50:                     sum += acc[k].z * reg;
+      FFMA      R18,    R24,    R18,    R17              {!4,Y};
+  // const-rlat.cu:51:                     sum += acc[k].w * reg;
+      FFMA      R25,    R24,    R19,    R18              {!1};
+  // const-rlat.cu:53:                   rt_sum += get_time() - rt_stt;
+      CS2R      R4,     SR_CLOCKLO                       {!6,Y};
+  // const-rlat.cu:40:                 for (uint i = 0; i < WALKS / 16; i++) {
+      IADD3     R26,    R26,    0x1,    RZ               {!2};
+  // const-rlat.cu:53:                   rt_sum += get_time() - rt_stt;
+      IADD3     R22,    P1,     P2,     R4,     R22,    -R2      {!2};
+  // const-rlat.cu:40:                 for (uint i = 0; i < WALKS / 16; i++) {
+      ISETP.NE.AND  P0, PT,     R26,    0x1000, PT       {!2};
+      IADD3     R20,    P3,     R20,    0x40,   RZ       {!2,^0};
+  // const-rlat.cu:53:                   rt_sum += get_time() - rt_stt;
+      IADD3.X   R23,    R5,     R23,    ~R3,    P1,     P2       {!2};
+  // const-rlat.cu:40:                 for (uint i = 0; i < WALKS / 16; i++) {
+      IADD3.X   R21,    RZ,     R21,    RZ,     P3,     !PT      {!7,Y};
+@P0   BRA       `(.L_x_2)                                {!5};
+  // const-rlat.cu:55:                 out[gid] = sum;
+      LEA       R4,     P0,     R0,     c0[0x168], 0x2   {!2};
+  // const-rlat.cu:57:                 out_time[0] = rt_sum / WALKS;
+      SHF.R.U64  R22,   R22,    0x10,   R23.reu          {!2};
+  // const-rlat.cu:55:                 out[gid] = sum;
+      LEA.HI.X  R5,     R0,     c0[0x16c], RZ,  0x2,    P0       {!2};
+  // const-rlat.cu:57:                 out_time[0] = rt_sum / WALKS;
+      SHF.R.U32.HI  R23, RZ,    0x10,   R23              {!2};
+      MOV       R2,     c0[0x160]                        {!1};
+  // const-rlat.cu:55:                 out[gid] = sum;
+      STG.E     [R4.64], R25                             {!1};
+  // const-rlat.cu:57:                 out_time[0] = rt_sum / WALKS;
+      MOV       R3,     c0[0x164]                        {!5,Y};
+      STG.E.64  [R2.64], R22                             {!1};
+  // const-rlat.cu:58:               }
+      EXIT                                               {!5};
+.L_x_3:
+      BRA       `(.L_x_3)                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+      NOP                                                {Y};
+.L_x_5:
