@@ -22,13 +22,13 @@ static __device__ inline uint32_t get_time32()
 typedef uint64_t ulong;
 typedef uint32_t uint;
 
+static const int WALKS = 64 * 1024;
+
 static __global__ void ffma_r(
         ulong *out_time,
         float  *out,
   const float4 *in0)
 {
-  const int K = 64 * 1024;
-
   // uint gid = get_global_id(0);
   const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
   float reg = (float)threadIdx.x;
@@ -37,7 +37,7 @@ static __global__ void ffma_r(
   const float4 *in_ptr = in0 + gid;
   // #pragma nounroll
   #pragma unroll 1
-  for (uint i = 0; i < K / 16; i++) {
+  for (uint i = 0; i < WALKS / 16; i++) {
     // load16; time(use16)
     float4 acc[4];
     for (uint k = 0; k < sizeof(acc)/sizeof(acc[0]); k++) {
@@ -54,7 +54,7 @@ static __global__ void ffma_r(
   }
   out[gid] = sum;
   // printf("T: %lld\n", rt_sum / K);
-  out_time[0] = rt_sum / K;
+  out_time[0] = rt_sum / WALKS;
 }
 
 static __global__ void ffma_c(
@@ -63,8 +63,6 @@ static __global__ void ffma_c(
   const float4 *in0,
         float konst)
 {
-  const int K = 64 * 1024;
-
   // uint gid = get_global_id(0);
   const size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
   float sum = 0.0f;
@@ -72,7 +70,7 @@ static __global__ void ffma_c(
   const float4 *in_ptr = in0 + gid;
   // #pragma nounroll
   #pragma unroll 1
-  for (uint i = 0; i < K / 16; i++) {
+  for (uint i = 0; i < WALKS / 16; i++) {
     // load16; time(use16)
     float4 acc[4];
     for (uint k = 0; k < sizeof(acc)/sizeof(acc[0]); k++) {
@@ -89,7 +87,7 @@ static __global__ void ffma_c(
   }
   out[gid] = sum;
   // printf("T: %lld\n", rt_sum / K);
-  out_time[0] = rt_sum / K;
+  out_time[0] = rt_sum / WALKS;
 }
 
 
@@ -104,6 +102,7 @@ static const test *all_tests[] {&R, &C};
 
 static void run_test(test t, int itrs, int verbosity)
 {
+  std::cout << "run_ffma_" << t.symbol << "\n";
   umem<float> oups(1, const_seq<float>(0.0f));
   umem<float4> inps(1, arith_seq<float4>());
   std::vector<umem<uint64_t>> out_times;
@@ -114,17 +113,9 @@ static void run_test(test t, int itrs, int verbosity)
   for (int i = 0; i < itrs; i++) {
     out_times.emplace_back(1, const_seq<uint64_t>(0));
     if (t.code == test::ordinal::R) {
-      umem<uint64_t> *out_times_ptr = &out_times[i];
-      funcs.push_back([&] {
-        std::cout << "calling ffma_r\n";
-        std::cout << &oups << "\n";
-        std::cout << &inps << "\n";
-        std::cout << out_times_ptr << "\n";
-        ffma_r<<<1,1>>>(*out_times_ptr, oups, inps);
-        std::cout << "called ffma_r\n";
-        });
+      funcs.push_back([&,i] {ffma_r<<<1,1>>>(out_times[i], oups, inps);});
     } else if (t.code == test::ordinal::C) {
-      funcs.push_back([&]{ffma_c<<<1,1>>>(out_times[i], oups, inps, 0.5f);});
+      funcs.push_back([&,i]{ffma_c<<<1,1>>>(out_times[i], oups, inps, 0.5f);});
     } else {
       fatal("unreachable");
     }
@@ -135,8 +126,10 @@ static void run_test(test t, int itrs, int verbosity)
     fatal(cudaGetErrorName(e0), " (", cudaGetErrorString(e0), "): unexpected error");
   }
   for (size_t i = 0; i < elapsed_ss.size(); i++) {
+    auto elapsed_s = elapsed_ss[i];
+    auto clocks = (int64_t)out_times[i][0];
     std::cout << format("elapsed_s[", i, "]: ",
-                        frac(elapsed_ss[i], 3), ", ", (int64_t)out_times[i][0], " c\n");
+                        frac(elapsed_s, 4), " s, ", clocks, " c\n");
   }
 }
 
