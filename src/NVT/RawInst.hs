@@ -217,11 +217,15 @@ fmtOpnd fos o
   | "c[0x0]["`isPrefixOf`o = highlightConst o
   | "c[0x1]["`isPrefixOf`o = highlightConst o
   | "c[0x2]["`isPrefixOf`o = highlightConst o
+  | "c[0x3]["`isPrefixOf`o = highlightConst o
+  | "c[0x4]["`isPrefixOf`o = highlightConst o
   | "-c[0x0]["`isPrefixOf`o = highlightConst o
   | "-c[0x1]["`isPrefixOf`o = highlightConst o
   | "-c[0x2]["`isPrefixOf`o = highlightConst o
+  | "-c[0x3]["`isPrefixOf`o = highlightConst o
+  | "-c[0x4]["`isPrefixOf`o = highlightConst o
   | "`"`isPrefixOf`o = [fs_lit o] -- label
-  | "["`isPrefixOf`o || "desc["`isPrefixOf`o = highlightAddr o
+  | "["`isPrefixOf`o || "desc["`isPrefixOf`o || "gdesc["`isPrefixOf`o = highlightAddr o
   | otherwise =
     case regSpan o of
       Just (reg,sfx) -> fs_reg reg:rest
@@ -244,6 +248,8 @@ fmtOpnd fos o
           | "c[0x0]["`isPrefixOf`s = [fs_lit $ "c0" ++ drop 6 s]
           | "c[0x1]["`isPrefixOf`s = [fs_lit $ "c1" ++ drop 6 s]
           | "c[0x2]["`isPrefixOf`s = [fs_lit $ "c2" ++ drop 6 s]
+          | "c[0x3]["`isPrefixOf`s = [fs_lit $ "c3" ++ drop 6 s]
+          | "c[0x4]["`isPrefixOf`s = [fs_lit $ "c4" ++ drop 6 s]
 
      -- e.g. desc[UR6][R2.64]
      -- e.g. [R16.64+0x100] or [R88.X16+UR18+0x400]
@@ -255,6 +261,8 @@ fmtOpnd fos o
                 fs_none "[" ++ highlightAllRegs sfx
             ("desc",'[':sfx) ->
                 [fs_kw1 "desc"] ++ fs_none "[" ++ highlightAllRegs sfx
+            ("gdesc",'[':sfx) ->
+                [fs_kw1 "gdesc"] ++ fs_none "[" ++ highlightAllRegs sfx
             _ -> fs_none o
 
         highlightAllRegs :: String -> [FmtSpan]
@@ -269,6 +277,16 @@ fmtOpnd fos o
                       '.':'X':'2':sfx -> matchToken [fs_kw1 ".X2"] sfx
                       '.':'X':'4':sfx -> matchToken [fs_kw1 ".X4"] sfx
                       '.':'X':'1':'6':sfx -> matchToken [fs_kw1 ".X16"] sfx
+                      --
+                      -- Need to make this accessible in operands
+                      -- e.g. .SIGN (PLOP3)
+                      -- '.':'S':'I':'G':'N':sfx -> matchToken [fs_kw1 ".SIGN"] sfx
+                      -- e.g. IMMA
+                      -- '.':'R':'O':'L':sfx -> matchToken [fs_kw1 ".ROW"] sfx
+                      -- '.':'C':'O':'L':sfx -> matchToken [fs_kw1 ".COL"] sfx
+                      --
+                      -- '.':'r':'e':'u':'s':'e':sfx -> matchToken [fs_kw1 ".reuse"] sfx
+                      -- '.':'r':'e':'u':sfx -> matchToken [fs_kw1 ".reu"] sfx
                       _ ->
                         case regSpan s of
                           Just (rn,sfx) -> matchToken (reg rn) sfx
@@ -292,6 +310,9 @@ regSpan s =
     'U':'P':'T':sfx  | notIdentChar sfx -> Just ("UPT",sfx)
     'U':'R':'Z':sfx  | notIdentChar sfx -> Just ("URZ",sfx)
     --
+    -- IGMMA
+    'g':'s':'b':'0':sfx | notIdentChar sfx -> Just ("gsb0",sfx)
+    --
     'S':'B':sfx -> tryReg "SB" sfx
     'U':'R':sfx -> tryReg "UR" sfx
     'U':'P':sfx -> tryReg "UP" sfx
@@ -299,6 +320,7 @@ regSpan s =
     'P':sfx -> tryReg "P" sfx
     'B':sfx -> tryReg "B" sfx
     -- 'R':'p':'c':sfx -> Just ("Rpc",sfx)
+    --
     _ -> tryKeywords keywords
   where tryReg pfx sfx =
           case span isDigit sfx of

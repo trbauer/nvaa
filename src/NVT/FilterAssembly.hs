@@ -313,7 +313,9 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                             _ -> return sfx
 
                 keywords = [
-                      ".align"
+                      "@progbits"
+                    , ".align"
+                    , ".debug_frame"
                     , ".elftype"
                     , ".global"
                     , ".headerflags"
@@ -325,6 +327,7 @@ filterAssemblyWithInterleavedSrcIO fos h_out = processLns . zip [1..] . lines
                     , ".size"
                     , ".text"
                     , ".type"
+                    , ".weak"
                     , ".zero"
                     ]
                 data_types = [".byte",".short",".word",".dword"]
