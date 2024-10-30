@@ -183,6 +183,10 @@ __global__ void example_wgmma(
   ds[threadIdx.x] = d;
 }
 */
+
+
+/*
+//////////////////////////////////////////////////////////////////////////////
 struct float8
 {
   float s[8];
@@ -195,17 +199,16 @@ __noinline__ __device__ float8 wgmma_m64n16k8_f32_tf32_tf32(
   asm volatile (R"({
     wgmma.mma_async.sync.aligned.m64n16k8.f32.tf32.tf32
       {%0, %1, %2, %3, %4, %5, %6, %7},
-      descA,
-      descB,
+      %8,
+      %9,
       0, -1, -1;
           })"
-            : "=r"(d.s[0]), "=r"(d.s[1]), "=r"(d.s[2]), "=r"(d.s[3]),
-              "=r"(d.s[4]), "=r"(d.s[5]), "=r"(d.s[6]), "=r"(d.s[7])
+            : "=f"(d.s[0]), "=f"(d.s[1]), "=f"(d.s[2]), "=f"(d.s[3]),
+              "=f"(d.s[4]), "=f"(d.s[5]), "=f"(d.s[6]), "=f"(d.s[7])
             : "l"(descA),"l"(descB)
             : "memory");
   return d;
 }
-
 __global__ void example_wgmma(
   float8 * __restrict__ ds,
 //  const float8 * __restrict__ as,
@@ -214,6 +217,40 @@ __global__ void example_wgmma(
   bool neg)
 {
   float8 d = wgmma_m64n16k8_f32_tf32_tf32(descA, descB);
+  ds[threadIdx.x] = d;
+}
+*/
+
+//////////////////////////////////////////////////////////////////////////////
+
+__noinline__ __device__ float4 wgmmam64n8k32_f32_e5m2_e4m3(
+    uint4 a, const void *descB)
+{
+  float4 d;
+  asm volatile (R"({
+      wgmma.mma_async.sync.aligned.m64n8k32.f32.e5m2.e4m3
+        {%0, %1, %2, %3},
+        {%4, %5, %6, %7},
+        %8,
+        1, -1, -1;
+          })"
+            : "=f"(d.x), "=f"(d.y), "=f"(d.z), "=f"(d.w)
+            : "r"(a.x), "r"(a.y), "r"(a.z), "r"(a.w),
+               "l"(descB)
+            : "memory");
+  d.x += 1.0f;
+  d.w += 4.0f;
+  return d;
+}
+__global__ void example_wgmma(
+  float4 * __restrict__ ds,
+  const uint4 * __restrict__ as,
+  const void *descA,
+  const void *descB,
+  bool neg)
+{
+  uint4 a = as[threadIdx.x];
+  auto d = wgmmam64n8k32_f32_e5m2_e4m3(a, descB);
   ds[threadIdx.x] = d;
 }
 
