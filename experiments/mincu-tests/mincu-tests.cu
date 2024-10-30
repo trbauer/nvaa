@@ -794,6 +794,14 @@ static void shared_type_tests(std::ostream &os) {
   TEST_EQ(buf[3], one);
 
   ////////////////////////////////////
+  // constant zero sequence
+  buf.init(const_seq_zero);
+  TEST_EQ(buf[0], zero);
+  TEST_EQ(buf[1], zero);
+  TEST_EQ(buf[2], zero);
+  TEST_EQ(buf[3], zero);
+
+  ////////////////////////////////////
   // arithmetic sequence
   buf.init(arith_seq<T>());
   TEST_EQ(buf[0], zero);
@@ -812,6 +820,14 @@ static void shared_type_tests(std::ostream &os) {
   TEST_EQ(buf[1], two);
   TEST_EQ(buf[2], one);
   TEST_EQ(buf[3], zero);
+
+  ////////////////////////////////////
+  // arithmetic unit sequence
+  buf.init(arit_seq_unit);
+  TEST_EQ(buf[0], zero);
+  TEST_EQ(buf[1], one);
+  TEST_EQ(buf[2], two);
+  TEST_EQ(buf[3], three);
 
   ////////////////////////////////////
   // cycle sequence
@@ -1015,11 +1031,18 @@ __global__ void add_int_k(
   auto val_plus_k = val + k;
   oups[gid] = val_plus_k;
 }
-
+extern "C"
+__global__ void destructive_add_k(
+    int *oups,
+    int k)
+{
+  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  oups[gid] += k;
+}
 
 static void run_device_tests()
 {
-  TEST_GROUP("test_add_float_k.umem",
+  TEST_GROUP("test.umem.add_float_k",
       [](std::ostream &os) {
         static const size_t BLOCKS = 1; // 1 warp only
         static const size_t TPB = 32; // threads per block (1 warp)
@@ -1039,7 +1062,7 @@ static void run_device_tests()
         if (verbose())
           oups.str(os, 8, 3);
       });
-  TEST_GROUP("test_add_int_k.dmem",
+  TEST_GROUP("test.dmem.add_int_k",
       [](std::ostream &os) {
         static const size_t BLOCKS = 1; // 1 warp only
         static const size_t TPB = 32; // threads per block (1 warp)
@@ -1063,6 +1086,30 @@ static void run_device_tests()
         TEST_EQ(v[0], 2);
         TEST_EQ(v[31], 33);
       });
+
+    TEST_GROUP("test.time_dispatches_s",
+      [](std::ostream &os) {
+        static const size_t BLOCKS = 1; // 1 warp only
+        static const size_t TPB = 32; // threads per block (1 warp)
+
+        dmem<int> oups(BLOCKS * TPB, arith_seq<int>(0));
+        if (verbose())
+          oups.str(os, 8, 3);
+
+        std::vector<std::function<void()>> funcs;
+        funcs.push_back([&]() {destructive_add_k<<<BLOCKS,TPB>>>(oups, 1);});
+        funcs.push_back([&]() {destructive_add_k<<<BLOCKS,TPB>>>(oups, 2);});
+
+        auto ts = time_dispatches_s(funcs);
+
+        if (verbose())
+          oups.str(os, 8, 3);
+
+        dmem_view<int> v {oups, oups.size()};
+        TEST_EQ(v[0], 3);
+        TEST_EQ(v[1], 4);
+      });
+
 } // test_add_float_k
 
 int main(int argc, char **argv)

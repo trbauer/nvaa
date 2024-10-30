@@ -1080,6 +1080,13 @@ struct const_seq {
     for (size_t i = 0; i < n; i++) {vals[i] = value;}
   }
 };
+struct const_seq_z {
+  template <typename E>
+  void apply(E *vals, size_t n) const {
+    const_seq<E>(mc_type<E>::bcast(0)).apply(vals, n);
+  }
+};
+constexpr const_seq_z const_seq_zero;
 
 // bounded linear arithmetic sequence
 //   x[i] = (x[i-1] + seq_delta)            [ when seq_mod absent ]
@@ -1114,6 +1121,13 @@ struct arith_seq {
     }
   } // apply
 }; // arith_seq
+struct arit_seq_u {
+  template <typename E>
+  void apply(E *vals, size_t n) const {
+    arith_seq<E>().apply(vals, n);
+  }
+};
+constexpr arit_seq_u arit_seq_unit;
 
 // cyclic sequence
 template <typename E>
@@ -1220,11 +1234,19 @@ public:
     : umem<E>(_elems) {init(g);}
   explicit umem(size_t _elems, std::function<E(size_t)> g)
     : umem<E>(_elems) {init(g);}
+  // inferred types
+  explicit umem(size_t _elems, const const_seq_z &g)
+    : umem<E>(_elems) {init(g);}
+  explicit umem(size_t _elems, const arit_seq_u &g)
+    : umem<E>(_elems) {init(g);}
 
   void init(const const_seq<E> &g) {g.apply(get_ptr(), size());}
   void init(const arith_seq<E> &g) {g.apply(get_ptr(), size());}
   void init(const cyc_seq<E> &g) {g.apply(get_ptr(), size());}
   void init(const rnd_seq<E> &g) {g.apply(get_ptr(), size());}
+  // inferred types
+  void init(const const_seq_z &g) {g.apply(get_ptr(), size());}
+  void init(const arit_seq_u &g) {g.apply(get_ptr(), size());}
 
   void init(std::function<E(size_t)> g) {
     for (size_t i = 0; i < size(); i++) {

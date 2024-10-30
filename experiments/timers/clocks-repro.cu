@@ -5,6 +5,9 @@
 #include <string>
 #include <sstream>
 
+#include <cuda_profiler_api.h>
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // text formatting
 template <typename...Ts>
@@ -62,6 +65,37 @@ __global__ void batch_clock(uint32_t *cs)
   }
 }
 
+__global__ void batch_clock2(
+    uint32_t *cs, int *sum_ptr,
+    const int *inps,
+    int arg, int zero)
+{
+  if (threadIdx.x != 0)
+    return;
+  static const int BATCH = 16;
+
+  uint32_t ws[BATCH];
+  for (int k = 0; k < BATCH; k++) {
+    ws[k] = threadIdx.x + k * arg + inps[k];
+  }
+
+  int sum = 0;
+
+  #pragma unroll 1
+  for (int i = zero; i < NELEMS; i += BATCH) {
+    uint32_t bs[BATCH];
+    for (int k = 0; k < BATCH; k++) {
+      // asm volatile("mov.u32 %0, %%clock;" : "=r"(bs[k]) :: "memory");
+      bs[k] = clock();
+      sum += k * ws[k];
+    }
+    for (int k = 0; k < BATCH; k++) {
+      cs[i + k] = bs[k];
+    }
+  }
+  sum_ptr[0] = sum;
+}
+
 static std::string fmt_hex(uint32_t x) {
   std::stringstream ss;
   ss << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << x;
@@ -74,12 +108,20 @@ int main(int argc, const char *arv[])
   CUDA_API(cudaMalloc, &d_ptr, NELEMS * sizeof(uint32_t));
   std::array<uint32_t,NELEMS> h_arr;
 
+  int32_t *d_ptr2;
+  CUDA_API(cudaMalloc, &d_ptr2, NELEMS * sizeof(uint32_t));
 
-  batch_clock<<<1,1>>>(d_ptr);
+  int32_t *d_ptr3;
+  CUDA_API(cudaMalloc, &d_ptr3, NELEMS * sizeof(uint32_t));
+
+// cudaProfilerStart();
+  // batch_clock<<<1,1>>>(d_ptr);
+  batch_clock2<<<1,1>>>(d_ptr, d_ptr2, d_ptr3, argc, 0);
   auto e0 = cudaDeviceSynchronize();
   if (e0 != cudaSuccess) {
     fatal(cudaGetErrorName(e0), " (", cudaGetErrorString(e0), "): unexpected error");
   }
+// cudaProfilerStop();
   CUDA_API(cudaMemcpy, &h_arr[0], d_ptr, NELEMS * sizeof(uint32_t),
             cudaMemcpyDeviceToHost);
   for (size_t i = 0; i < h_arr.size(); i++) {
