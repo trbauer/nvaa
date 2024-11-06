@@ -307,8 +307,9 @@ regSpan s =
   case s of
     'R':'Z':sfx | notIdentChar sfx -> Just ("RZ",sfx)
     'P':'T':sfx | notIdentChar sfx -> Just ("PT",sfx)
-    'U':'P':'T':sfx  | notIdentChar sfx -> Just ("UPT",sfx)
-    'U':'R':'Z':sfx  | notIdentChar sfx -> Just ("URZ",sfx)
+    'U':'P':'T':sfx | notIdentChar sfx -> Just ("UPT",sfx)
+    'U':'R':'Z':sfx | notIdentChar sfx -> Just ("URZ",sfx)
+    'S':'R':'Z':sfx | notIdentChar sfx -> Just ("SRZ",sfx) -- CS2R uses this
     --
     -- IGMMA
     'g':'s':'b':'0':sfx | notIdentChar sfx -> Just ("gsb0",sfx)
