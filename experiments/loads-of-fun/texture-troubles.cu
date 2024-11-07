@@ -27,3 +27,43 @@ __global__ void texture_troubles(
   dsts[gid].z = 0.1250f * px0.z + alpha * px1.z + src.x * px2.z + src.y * px3.z;
   dsts[gid].w = 0.0625f * px0.w + alpha * px1.w + src.x * px2.w + src.y * px3.w;
 }
+
+/*
+static float4 operator*(float4 a, float b) {
+  a.x *= b;
+  a.y *= b;
+  a.z *= b;
+  a.w *= b;
+  return a;
+}
+*/
+static __device__ float4& operator*=(float4 &a, float b) {
+  a.x *= b;
+  a.y *= b;
+  a.z *= b;
+  a.w *= b;
+  return a;
+}
+
+// cudaBoundaryModeZero
+// cudaBoundaryModeClamp
+// cudaBoundaryModeTrap
+
+extern "C"
+__global__ void surface_stress(
+    cudaSurfaceObject_t dst_surf,
+    cudaSurfaceObject_t src_surf,
+    float alpha)
+{
+  const int gid_x = blockIdx.x * blockDim.x + threadIdx.x;
+  const int gid_y = blockIdx.x * blockDim.x + threadIdx.x;
+  float4 px0 = surf2Dread<float4>(src_surf, gid_x + 0, gid_y + 0, cudaBoundaryModeTrap);
+  float4 px1 = surf2Dread<float4>(src_surf, gid_x + 1, gid_y + 0, cudaBoundaryModeZero);
+  float4 px2 = surf2Dread<float4>(src_surf, gid_x + 2, gid_y + 0, cudaBoundaryModeClamp);
+  px0 *= alpha;
+  px1 *= alpha;
+  px2 *= alpha;
+  surf2Dwrite(px0, dst_surf, gid_x + 0, gid_y + 0, cudaBoundaryModeTrap);
+  surf2Dwrite(px1, dst_surf, gid_x + 1, gid_y + 0, cudaBoundaryModeZero);
+  surf2Dwrite(px2, dst_surf, gid_x + 1, gid_y + 0, cudaBoundaryModeClamp);
+}
