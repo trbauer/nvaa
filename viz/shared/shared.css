@@ -1,0 +1,16 @@
+span.nt { /* non-terminal (variable) */
+  color:rgb(128,92,255);
+  font:italic large monospace;
+}
+span.nts { /* small size */
+  color:rgb(128,92,255);
+  font:italic small monospace;
+}
+span.te { /* terminal */
+  color:rgb(128,32,92);
+  font:large monospace;
+}
+span.me { /* meta */
+  color:rgb(128,192,255);
+  font:italic large monospace;
+}

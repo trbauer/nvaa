@@ -1,0 +1,14 @@
+span.succ {
+  background-color:rgb(96,192,96);
+  font:italic large monospace;
+}
+pre.err {
+  background-color:rgb(220,96,96);
+  font:italic large monospace;
+}
+pre.inp {
+  font:normal normal monospace;
+}
+td.sec_hdr {
+  font:bold large arial;
+}

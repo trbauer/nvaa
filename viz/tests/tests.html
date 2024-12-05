@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head><title>Tests</title></head>
+<style>
+span.nt { /* non-terminal (variable) */
+  color:rgb(128,92,255);
+  font:italic large monospace;
+}
+span.nts { /* small size */
+  color:rgb(128,92,255);
+  font:italic small monospace;
+}
+span.te { /* terminal */
+  color:rgb(128,32,92);
+  font:large monospace;
+}
+span.me { /* meta */
+  color:rgb(128,192,255);
+  font:italic large monospace;
+}
+</style>
+<link rel="stylesheet" href="tests.css">
+
+<body onload="add_test_panels()">
+
+
+<hr />
+
+<div id="main-panel">
+<!-- JS adds panels here -->
+</div>
+
+<script src="../shared/parser.js"> </script>
+<script src="../shared/svg.js"> </script>
+<script src="../shared/svg-memop.js"> </script>
+
+<script src="../load/load.js"> </script>
+<script src="../load-local/load-local.js"> </script>
+
+<script src="tests.js"> </script>
+</body>
+</html>
